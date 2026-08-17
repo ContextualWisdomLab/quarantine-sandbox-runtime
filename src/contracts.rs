@@ -269,7 +269,7 @@ pub struct EvidenceRecord {
     /// Deterministic evidence identifier.
     pub evidence_id: String,
     /// One-based sequence within the bundle.
-    pub sequence_number: u32,
+    pub sequence_number: usize,
     /// Evidence category.
     pub evidence_kind: EvidenceKind,
     /// Runtime, analyzer, or worker identifier.
@@ -281,7 +281,7 @@ pub struct EvidenceRecord {
 }
 
 impl EvidenceRecord {
-    fn validate(&self, expected_sequence: u32) -> Result<(), ContractError> {
+    fn validate(&self, expected_sequence: usize) -> Result<(), ContractError> {
         validate_text(
             "evidence_id",
             &self.evidence_id,
@@ -431,18 +431,12 @@ impl EvidenceBundle {
         }
 
         for (index, record) in self.evidence.iter().enumerate() {
-            let expected_sequence =
-                u32::try_from(index + 1).map_err(|_| ContractError::TooManyEvidenceRecords)?;
-            record.validate(expected_sequence)?;
+            record.validate(index + 1)?;
         }
 
         let mut unique_limitations = BTreeSet::new();
         for limitation in &self.limitations {
-            validate_nonempty_text(
-                "limitation",
-                limitation,
-                MAX_LIMITATION_BYTES,
-            )?;
+            validate_text("limitation", limitation, MAX_LIMITATION_BYTES)?;
             if !unique_limitations.insert(limitation) {
                 return Err(ContractError::DuplicateLimitation {
                     limitation: limitation.clone(),
@@ -513,9 +507,9 @@ pub enum ContractError {
     )]
     InvalidEvidenceSequence {
         /// Expected one-based sequence.
-        expected_sequence: u32,
+        expected_sequence: usize,
         /// Actual sequence.
-        actual_sequence: u32,
+        actual_sequence: usize,
     },
     /// The foundation boundary claims artifact execution, network, or credentials.
     #[error("foundation runtime boundary violated: {boundary_name}")]
@@ -526,9 +520,6 @@ pub enum ContractError {
     /// The bundle attempted to suppress the consumer verdict requirement.
     #[error("consumer verdict must remain required")]
     ConsumerVerdictMustBeRequired,
-    /// The evidence vector cannot be represented by the sequence field.
-    #[error("too many evidence records")]
-    TooManyEvidenceRecords,
     /// A limitation code is repeated.
     #[error("duplicate limitation: {limitation}")]
     DuplicateLimitation {
@@ -578,5 +569,5 @@ fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
