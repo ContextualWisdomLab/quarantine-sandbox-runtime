@@ -21,30 +21,11 @@ jobs:
         with:
           toolchain: 1.97.1
           components: clippy, rustfmt
-      - name: Generate dependency lock
-        run: cargo generate-lockfile
-      - name: Upload generated dependency lock
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cargo-lock
-          path: Cargo.lock
-          if-no-files-found: error
-      - name: Generate canonical formatter output
-        run: |
-          cargo fmt
-          tar -czf rustfmt-output.tar.gz src tests
-          git checkout -- src tests
-      - name: Upload canonical formatter output
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rustfmt-output
-          path: rustfmt-output.tar.gz
-          if-no-files-found: error
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
-      - name: Check formatting during repair
-        continue-on-error: true
+      - name: Check formatting
         run: cargo fmt --check
       - name: Test
         run: cargo test --locked --workspace --all-targets
@@ -63,8 +44,8 @@ jobs:
         with:
           toolchain: 1.97.1
           components: llvm-tools-preview
-      - name: Generate dependency lock
-        run: cargo generate-lockfile
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
       - name: Install pinned coverage tool
         run: cargo install cargo-llvm-cov --locked --version 0.8.6
       - name: Enforce complete production coverage
