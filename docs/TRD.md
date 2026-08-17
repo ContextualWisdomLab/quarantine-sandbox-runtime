@@ -29,7 +29,13 @@ AnalysisRequest + artifact name + bytes
 
 ## Determinism
 
-The runtime does not include wall-clock timestamps in the foundation output. A job identifier is derived from request ID, profile, and artifact SHA-256. Evidence identifiers derive from the job identifier and one-based sequence number. Ordered maps are used for user and analyzer attributes.
+The runtime does not include wall-clock timestamps in the foundation output. A job identifier is derived from request ID, requested profile, artifact SHA-256, policy ID, runtime source revision, and the ordered analyzer identifiers. Evidence identifiers derive from the job identifier and one-based sequence number. Ordered maps are used for user and analyzer attributes.
+
+This prevents two analyses performed under different policies, revisions, or analyzer portfolios from claiming the same evidence identity. A production host must construct the engine with an exact build revision rather than relying on the development default.
+
+## Analyzer authority
+
+Analyzer identifiers must be unique, bounded, and free of control characters. Static analyzers may emit only `file_format` or `static_capability` findings. The runtime owns `artifact_identity` and `policy_boundary`; future isolated workers own runtime and network observations. A static analyzer that claims another evidence category is converted to attributable `tool_failure` evidence and makes the result `inconclusive`.
 
 ## Validation bounds
 
@@ -42,6 +48,7 @@ The runtime does not include wall-clock timestamps in the foundation output. A j
 | attribute key | 128 UTF-8 bytes |
 | attribute value | 1,024 UTF-8 bytes |
 | artifact name | 255 UTF-8 bytes |
+| policy, revision, and analyzer identifiers | 128 UTF-8 bytes |
 | default artifact bytes | 67,108,864 |
 
 NUL and other disallowed control characters are rejected in identity-bearing metadata.
@@ -64,7 +71,9 @@ Classification is evidence, not a safety declaration.
 
 - Invalid request: return a contract error; no analysis occurs.
 - Invalid artifact: return an ingestion error; no analyzer receives bytes.
+- Invalid or duplicate analyzer identifiers: reject engine construction.
 - Analyzer failure: emit `tool_failure`, retain prior evidence, return `inconclusive`.
+- Disallowed analyzer evidence category: replace it with `tool_failure`, return `inconclusive`.
 - Dynamic request without dynamic adapter: emit foundation evidence, return `inconclusive`.
 - Serialization failure: return the serialization error; do not mutate the bundle.
 
