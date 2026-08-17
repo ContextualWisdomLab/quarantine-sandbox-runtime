@@ -68,5 +68,11 @@ jobs:
           --tests
           --json
           --output-path coverage.json
+      - name: Upload production coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-json-${{ github.event.pull_request.head.sha || github.sha }}
+          path: coverage.json
+          if-no-files-found: error
       - name: Explain and enforce complete production coverage
         run: python3 scripts/check_coverage.py coverage.json
