@@ -76,3 +76,39 @@ jobs:
           if-no-files-found: error
       - name: Explain and enforce complete production coverage
         run: python3 scripts/check_coverage.py coverage.json
+
+  branch-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: nightly-2026-08-16
+          components: llvm-tools-preview
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Install pinned coverage tool
+        run: cargo install cargo-llvm-cov --locked --version 0.8.6
+      - name: Generate branch coverage evidence
+        run: >-
+          cargo llvm-cov
+          --branch
+          --workspace
+          --lib
+          --tests
+          --json
+          --output-path branch-coverage.json
+      - name: Upload branch coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: branch-coverage-json-${{ github.event.pull_request.head.sha || github.sha }}
+          path: branch-coverage.json
+          if-no-files-found: error
+      - name: Enforce complete production branch coverage
+        run: python3 scripts/check_coverage.py --require-branches branch-coverage.json
