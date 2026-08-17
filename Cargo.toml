@@ -1,0 +1,36 @@
+[package]
+name = "quarantine-sandbox-runtime"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Source-agnostic, credential-free artifact analysis runtime"
+license = "MIT"
+repository = "https://github.com/ContextualWisdomLab/quarantine-sandbox-runtime"
+readme = "README.md"
+keywords = ["malware-analysis", "sandbox", "security", "forensics"]
+categories = ["development-tools", "filesystem"]
+
+[lib]
+name = "quarantine_sandbox_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "2.0"
+
+[dev-dependencies]
+proptest = "1.6"
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
