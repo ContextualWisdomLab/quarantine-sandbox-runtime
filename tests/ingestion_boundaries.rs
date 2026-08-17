@@ -3,8 +3,8 @@
 use quarantine_sandbox_runtime::{ArtifactKind, IngestionPolicy, ingest_bytes};
 
 #[test]
-fn ingestion_classifies_all_supported_magic_variants_and_text_paths() {
-    let fixtures: [(&str, &[u8], ArtifactKind); 11] = [
+fn ingestion_classifies_supported_thin_magic_variants_and_text_paths() {
+    let fixtures: [(&str, &[u8], ArtifactKind); 9] = [
         (
             "mach32be.bin",
             b"\xfe\xed\xfa\xcepayload",
@@ -18,16 +18,6 @@ fn ingestion_classifies_all_supported_magic_variants_and_text_paths() {
         (
             "mach64be.bin",
             b"\xfe\xed\xfa\xcfpayload",
-            ArtifactKind::MachOExecutable,
-        ),
-        (
-            "fatbe.bin",
-            b"\xca\xfe\xba\xbepayload",
-            ArtifactKind::MachOExecutable,
-        ),
-        (
-            "fatle.bin",
-            b"\xbe\xba\xfe\xcapayload",
             ArtifactKind::MachOExecutable,
         ),
         ("empty.zip", b"PK\x05\x06payload", ArtifactKind::ZipArchive),
@@ -46,6 +36,50 @@ fn ingestion_classifies_all_supported_magic_variants_and_text_paths() {
         let artifact = ingest_bytes(name, bytes, &IngestionPolicy::default())
             .expect("bounded fixture must be ingested");
         assert_eq!(artifact.descriptor().artifact_kind, expected_kind);
+    }
+}
+
+#[test]
+fn ingestion_validates_mach_o_fat_headers_and_rejects_java_ambiguity() {
+    let mut big_endian_32 = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 1];
+    big_endian_32.resize(28, 0);
+    let mut little_endian_32 = vec![0xbe, 0xba, 0xfe, 0xca, 1, 0, 0, 0];
+    little_endian_32.resize(28, 0);
+    let mut big_endian_64 = vec![0xca, 0xfe, 0xba, 0xbf, 0, 0, 0, 1];
+    big_endian_64.resize(40, 0);
+    let mut little_endian_64 = vec![0xbf, 0xba, 0xfe, 0xca, 1, 0, 0, 0];
+    little_endian_64.resize(40, 0);
+
+    for bytes in [
+        big_endian_32,
+        little_endian_32,
+        big_endian_64,
+        little_endian_64,
+    ] {
+        let artifact = ingest_bytes("universal.bin", &bytes, &IngestionPolicy::default())
+            .expect("valid universal Mach-O header must be accepted");
+        assert_eq!(
+            artifact.descriptor().artifact_kind,
+            ArtifactKind::MachOExecutable
+        );
+    }
+
+    let ambiguous_or_invalid = [
+        vec![0xca, 0xfe, 0xba, 0xbe],
+        vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 0],
+        vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 33],
+        vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 1],
+        {
+            let mut java_class = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61];
+            java_class.resize(2_000, 0);
+            java_class
+        },
+    ];
+
+    for bytes in ambiguous_or_invalid {
+        let artifact = ingest_bytes("ambiguous.bin", &bytes, &IngestionPolicy::default())
+            .expect("bounded ambiguous fixture must still be ingested");
+        assert_eq!(artifact.descriptor().artifact_kind, ArtifactKind::Unknown);
     }
 }
 
