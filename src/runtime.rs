@@ -36,10 +36,10 @@ pub struct AnalyzerFailure {
 impl AnalyzerFailure {
     /// Create a failure with a stable analyzer identifier and machine code.
     #[must_use]
-    pub fn new(analyzer_id: impl Into<String>, failure_code: impl Into<String>) -> Self {
+    pub fn new(analyzer_id: &str, failure_code: &str) -> Self {
         Self {
-            analyzer_id: analyzer_id.into(),
-            failure_code: failure_code.into(),
+            analyzer_id: analyzer_id.to_owned(),
+            failure_code: failure_code.to_owned(),
         }
     }
 
@@ -63,8 +63,10 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
     /// preserves the failure as evidence and marks the bundle inconclusive.
-    fn analyze(&self, artifact: &IngestedArtifact)
-    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(
+        &self,
+        artifact: &IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
@@ -143,20 +145,18 @@ impl AnalysisEngine {
     /// configuration.
     pub fn new(
         ingestion_policy: IngestionPolicy,
-        policy_id: impl Into<String>,
-        source_revision: impl Into<String>,
+        policy_id: &str,
+        source_revision: &str,
         analyzers: Vec<Box<dyn StaticAnalyzer>>,
     ) -> Result<Self, AnalysisError> {
         ingestion_policy.validate()?;
-        let policy_id = policy_id.into();
-        let source_revision = source_revision.into();
 
-        if !is_valid_engine_identifier(&policy_id) {
+        if !is_valid_engine_identifier(policy_id) {
             return Err(AnalysisError::InvalidEngineConfiguration {
                 field_name: "policy_id",
             });
         }
-        if !is_valid_engine_identifier(&source_revision) {
+        if !is_valid_engine_identifier(source_revision) {
             return Err(AnalysisError::InvalidEngineConfiguration {
                 field_name: "source_revision",
             });
@@ -182,8 +182,8 @@ impl AnalysisEngine {
 
         Ok(Self {
             ingestion_policy,
-            policy_id,
-            source_revision,
+            policy_id: policy_id.to_owned(),
+            source_revision: source_revision.to_owned(),
             analyzers,
         })
     }
@@ -272,16 +272,23 @@ impl AnalysisEngine {
                 }
                 Err(failure) => {
                     analyzer_failed = true;
+                    let mut attributes = BTreeMap::from([(
+                        "failure_code".to_owned(),
+                        failure.failure_code().to_owned(),
+                    )]);
+                    if failure.analyzer_id() != analyzer.analyzer_id() {
+                        attributes.insert(
+                            "reported_analyzer_id".to_owned(),
+                            failure.analyzer_id().to_owned(),
+                        );
+                    }
                     push_record(
                         &mut records,
                         &analysis_job_id,
                         EvidenceKind::ToolFailure,
-                        failure.analyzer_id(),
+                        analyzer.analyzer_id(),
                         "Static analyzer did not complete.",
-                        BTreeMap::from([(
-                            "failure_code".to_owned(),
-                            failure.failure_code().to_owned(),
-                        )]),
+                        attributes,
                     );
                 }
             }
