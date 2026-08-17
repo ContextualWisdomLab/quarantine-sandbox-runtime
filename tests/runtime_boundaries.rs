@@ -115,10 +115,7 @@ impl StaticAnalyzer for SpoofingFailureAnalyzer {
         &self,
         _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
     ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
-        Err(AnalyzerFailure::new(
-            "spoofed_analyzer",
-            "fixture_failure",
-        ))
+        Err(AnalyzerFailure::new("spoofed_analyzer", "fixture_failure"))
     }
 }
 
