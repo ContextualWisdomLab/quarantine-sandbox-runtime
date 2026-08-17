@@ -104,6 +104,24 @@ impl StaticAnalyzer for DuplicateIdentifierAnalyzer {
     }
 }
 
+struct SpoofingFailureAnalyzer;
+
+impl StaticAnalyzer for SpoofingFailureAnalyzer {
+    fn analyzer_id(&self) -> &'static str {
+        "configured_analyzer"
+    }
+
+    fn analyze(
+        &self,
+        _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+        Err(AnalyzerFailure::new(
+            "spoofed_analyzer",
+            "fixture_failure",
+        ))
+    }
+}
+
 #[test]
 fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     let empty_engine = AnalysisEngine::new(
@@ -127,7 +145,7 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("engine configuration itself is valid");
     assert_eq!(
-        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc",),
+        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc"),
         Err(AnalysisError::Contract(
             quarantine_sandbox_runtime::ContractError::EmptyField {
                 field_name: "summary",
@@ -186,6 +204,31 @@ fn disallowed_static_evidence_fails_closed_without_claiming_runtime_behavior() {
 }
 
 #[test]
+fn analyzer_failure_attribution_uses_the_configured_analyzer_identity() {
+    let engine = AnalysisEngine::new(
+        IngestionPolicy::default(),
+        "foundation_policy_v1",
+        "revision_test",
+        vec![Box::new(SpoofingFailureAnalyzer)],
+    )
+    .expect("configured analyzer identifier is valid");
+    let bundle = engine
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .expect("analyzer failure must remain an evidence bundle");
+
+    let failure = bundle
+        .evidence
+        .iter()
+        .find(|record| record.evidence_kind == EvidenceKind::ToolFailure)
+        .expect("failure evidence must be present");
+    assert_eq!(failure.producer_id, "configured_analyzer");
+    assert_eq!(
+        failure.attributes.get("reported_analyzer_id"),
+        Some(&"spoofed_analyzer".to_owned())
+    );
+}
+
+#[test]
 fn engine_rejects_invalid_ingestion_policy_before_analysis() {
     let invalid_policy = IngestionPolicy {
         maximum_artifact_bytes: 0,
@@ -207,10 +250,11 @@ fn engine_rejects_invalid_ingestion_policy_before_analysis() {
 
 #[test]
 fn engine_rejects_invalid_and_duplicate_identifiers() {
+    let oversized_policy_id = "x".repeat(129);
     assert_eq!(
         AnalysisEngine::new(
             IngestionPolicy::default(),
-            "x".repeat(129),
+            &oversized_policy_id,
             "revision",
             vec![Box::new(FormatAnalyzer)],
         )
