@@ -291,9 +291,7 @@ impl Default for AnalysisEngine {
         Self {
             ingestion_policy: IngestionPolicy::default(),
             policy_id: "foundation_policy_v1".to_owned(),
-            source_revision: option_env!("GITHUB_SHA")
-                .unwrap_or("development")
-                .to_owned(),
+            source_revision: "development".to_owned(),
             analyzers: vec![Box::new(FormatAnalyzer)],
         }
     }
