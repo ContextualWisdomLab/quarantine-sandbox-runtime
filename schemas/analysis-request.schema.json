@@ -17,7 +17,9 @@
     "request_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 128
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+      "x-cwl-maxUtf8Bytes": 128
     },
     "profile": {
       "enum": [
@@ -38,24 +40,32 @@
         "source_system": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 128
         },
         "source_reference": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 1024
+          "maxLength": 1024,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 1024
         },
         "attributes": {
           "type": "object",
           "maxProperties": 32,
           "propertyNames": {
             "minLength": 1,
-            "maxLength": 128
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "x-cwl-maxUtf8Bytes": 128
           },
           "additionalProperties": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 1024
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "x-cwl-maxUtf8Bytes": 1024
           }
         }
       }
