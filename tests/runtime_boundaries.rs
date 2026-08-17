@@ -55,6 +55,55 @@ impl StaticAnalyzer for InvalidFindingAnalyzer {
     }
 }
 
+struct DisallowedEvidenceAnalyzer;
+
+impl StaticAnalyzer for DisallowedEvidenceAnalyzer {
+    fn analyzer_id(&self) -> &'static str {
+        "disallowed_evidence_analyzer"
+    }
+
+    fn analyze(
+        &self,
+        _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+        Ok(vec![AnalyzerFinding {
+            evidence_kind: EvidenceKind::RuntimeBehavior,
+            summary: "A static analyzer must not claim runtime behavior.".to_owned(),
+            attributes: BTreeMap::new(),
+        }])
+    }
+}
+
+struct InvalidIdentifierAnalyzer;
+
+impl StaticAnalyzer for InvalidIdentifierAnalyzer {
+    fn analyzer_id(&self) -> &'static str {
+        ""
+    }
+
+    fn analyze(
+        &self,
+        _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+        Ok(Vec::new())
+    }
+}
+
+struct DuplicateIdentifierAnalyzer;
+
+impl StaticAnalyzer for DuplicateIdentifierAnalyzer {
+    fn analyzer_id(&self) -> &'static str {
+        "duplicate_analyzer"
+    }
+
+    fn analyze(
+        &self,
+        _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+        Ok(Vec::new())
+    }
+}
+
 #[test]
 fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     let empty_engine = AnalysisEngine::new(
@@ -65,7 +114,11 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("empty findings are a valid analyzer result");
     let empty_bundle = empty_engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.bin",
+            b"abc",
+        )
         .expect("identity and boundary evidence must remain sufficient");
     assert_eq!(empty_bundle.disposition, RuntimeDisposition::Completed);
     assert_eq!(empty_bundle.evidence.len(), 2);
@@ -78,12 +131,65 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("engine configuration itself is valid");
     assert_eq!(
-        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc",),
+        invalid_engine.analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.bin",
+            b"abc",
+        ),
         Err(AnalysisError::Contract(
             quarantine_sandbox_runtime::ContractError::EmptyField {
                 field_name: "summary",
             }
         ))
+    );
+}
+
+#[test]
+fn disallowed_static_evidence_fails_closed_without_claiming_runtime_behavior() {
+    let engine = AnalysisEngine::new(
+        IngestionPolicy::default(),
+        "foundation_policy_v1",
+        "revision_test",
+        vec![Box::new(DisallowedEvidenceAnalyzer)],
+    )
+    .expect("analyzer identifier is valid");
+    let bundle = engine
+        .analyze_bytes(
+            &request(AnalysisProfile::LinuxDynamic),
+            "sample.bin",
+            b"abc",
+        )
+        .expect("the runtime must preserve attributable failure evidence");
+
+    assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
+    assert!(
+        bundle
+            .limitations
+            .contains(&"static_analyzer_failure".to_owned())
+    );
+    assert!(
+        bundle
+            .limitations
+            .contains(&"dynamic_analysis_not_configured".to_owned())
+    );
+    let failure = bundle
+        .evidence
+        .iter()
+        .find(|record| record.evidence_kind == EvidenceKind::ToolFailure)
+        .expect("disallowed evidence must become a tool failure");
+    assert_eq!(
+        failure.attributes.get("failure_code"),
+        Some(&"disallowed_evidence_kind".to_owned())
+    );
+    assert_eq!(
+        failure.attributes.get("reported_evidence_kind"),
+        Some(&"runtime_behavior".to_owned())
+    );
+    assert!(
+        bundle
+            .evidence
+            .iter()
+            .all(|record| record.evidence_kind != EvidenceKind::RuntimeBehavior)
     );
 }
 
@@ -108,10 +214,69 @@ fn engine_rejects_invalid_ingestion_policy_before_analysis() {
 }
 
 #[test]
-fn deterministic_identifiers_change_when_identity_inputs_change() {
+fn engine_rejects_invalid_and_duplicate_identifiers() {
+    assert_eq!(
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "x".repeat(129),
+            "revision",
+            vec![Box::new(FormatAnalyzer)],
+        )
+        .err(),
+        Some(AnalysisError::InvalidEngineConfiguration {
+            field_name: "policy_id",
+        })
+    );
+    assert_eq!(
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "policy",
+            "bad\nrevision",
+            vec![Box::new(FormatAnalyzer)],
+        )
+        .err(),
+        Some(AnalysisError::InvalidEngineConfiguration {
+            field_name: "source_revision",
+        })
+    );
+    assert_eq!(
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "policy",
+            "revision",
+            vec![Box::new(InvalidIdentifierAnalyzer)],
+        )
+        .err(),
+        Some(AnalysisError::InvalidAnalyzerIdentifier {
+            analyzer_id: String::new(),
+        })
+    );
+    assert_eq!(
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "policy",
+            "revision",
+            vec![
+                Box::new(DuplicateIdentifierAnalyzer),
+                Box::new(DuplicateIdentifierAnalyzer),
+            ],
+        )
+        .err(),
+        Some(AnalysisError::DuplicateAnalyzerIdentifier {
+            analyzer_id: "duplicate_analyzer".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn deterministic_identifiers_change_when_identity_or_engine_inputs_change() {
     let engine = AnalysisEngine::default();
     let baseline = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.bin",
+            b"abc",
+        )
         .expect("baseline analysis must succeed");
 
     let mut changed_request = request(AnalysisProfile::StaticOnly);
@@ -131,7 +296,44 @@ fn deterministic_identifiers_change_when_identity_inputs_change() {
     assert_ne!(baseline.analysis_job_id, changed_profile.analysis_job_id);
 
     let changed_artifact = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abd")
+        .analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.bin",
+            b"abd",
+        )
         .expect("changed artifact analysis must succeed");
     assert_ne!(baseline.analysis_job_id, changed_artifact.analysis_job_id);
+
+    for changed_engine in [
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "changed_policy",
+            "development",
+            vec![Box::new(FormatAnalyzer)],
+        )
+        .expect("changed policy engine must be valid"),
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "foundation_policy_v1",
+            "changed_revision",
+            vec![Box::new(FormatAnalyzer)],
+        )
+        .expect("changed revision engine must be valid"),
+        AnalysisEngine::new(
+            IngestionPolicy::default(),
+            "foundation_policy_v1",
+            "development",
+            vec![Box::new(EmptyAnalyzer)],
+        )
+        .expect("changed analyzer engine must be valid"),
+    ] {
+        let changed = changed_engine
+            .analyze_bytes(
+                &request(AnalysisProfile::StaticOnly),
+                "sample.bin",
+                b"abc",
+            )
+            .expect("changed engine analysis must succeed");
+        assert_ne!(baseline.analysis_job_id, changed.analysis_job_id);
+    }
 }
