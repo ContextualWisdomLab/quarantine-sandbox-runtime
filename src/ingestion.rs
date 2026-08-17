@@ -7,6 +7,7 @@ use crate::{ArtifactDescriptor, ArtifactKind};
 
 const DEFAULT_MAXIMUM_ARTIFACT_BYTES: usize = 64 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_ARTIFACT_NAME_BYTES: usize = 255;
+const MAXIMUM_MACH_O_FAT_ARCHITECTURES: usize = 32;
 
 /// Hard limits applied before artifact bytes are cloned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,15 +178,51 @@ fn detect_artifact_kind(artifact_name: &str, bytes: &[u8]) -> ArtifactKind {
 }
 
 fn is_mach_o(bytes: &[u8]) -> bool {
-    const MAGICS: [[u8; 4]; 6] = [
+    const THIN_MAGICS: [[u8; 4]; 4] = [
         [0xfe, 0xed, 0xfa, 0xce],
         [0xce, 0xfa, 0xed, 0xfe],
         [0xfe, 0xed, 0xfa, 0xcf],
         [0xcf, 0xfa, 0xed, 0xfe],
-        [0xca, 0xfe, 0xba, 0xbe],
-        [0xbe, 0xba, 0xfe, 0xca],
     ];
-    MAGICS.iter().any(|magic| bytes.starts_with(magic))
+    if THIN_MAGICS.iter().any(|magic| bytes.starts_with(magic)) {
+        return true;
+    }
+
+    if bytes.starts_with(b"\xca\xfe\xba\xbe") {
+        return has_valid_mach_o_fat_header(bytes, false, 20);
+    }
+    if bytes.starts_with(b"\xbe\xba\xfe\xca") {
+        return has_valid_mach_o_fat_header(bytes, true, 20);
+    }
+    if bytes.starts_with(b"\xca\xfe\xba\xbf") {
+        return has_valid_mach_o_fat_header(bytes, false, 32);
+    }
+    if bytes.starts_with(b"\xbf\xba\xfe\xca") {
+        return has_valid_mach_o_fat_header(bytes, true, 32);
+    }
+
+    false
+}
+
+fn has_valid_mach_o_fat_header(bytes: &[u8], little_endian: bool, record_size: usize) -> bool {
+    if bytes.len() < 8 {
+        return false;
+    }
+    let count_bytes = [bytes[4], bytes[5], bytes[6], bytes[7]];
+    let architecture_count = if little_endian {
+        u32::from_le_bytes(count_bytes) as usize
+    } else {
+        u32::from_be_bytes(count_bytes) as usize
+    };
+    if architecture_count == 0 {
+        return false;
+    }
+    if architecture_count > MAXIMUM_MACH_O_FAT_ARCHITECTURES {
+        return false;
+    }
+
+    let required_bytes = 8 + architecture_count * record_size;
+    bytes.len() >= required_bytes
 }
 
 fn is_zip(bytes: &[u8]) -> bool {
@@ -199,7 +236,18 @@ fn has_script_extension(artifact_name: &str) -> bool {
     };
     matches!(
         extension.to_ascii_lowercase().as_str(),
-        "bat" | "bash" | "cmd" | "cjs" | "js" | "mjs" | "ps1" | "py" | "sh" | "vbs" | "wsf" | "zsh"
+        "bat"
+            | "bash"
+            | "cmd"
+            | "cjs"
+            | "js"
+            | "mjs"
+            | "ps1"
+            | "py"
+            | "sh"
+            | "vbs"
+            | "wsf"
+            | "zsh"
     )
 }
 
