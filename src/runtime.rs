@@ -1,6 +1,6 @@
 //! Static-analyzer orchestration and deterministic evidence assembly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Error as SerializationError;
 use sha2::{Digest, Sha256};
@@ -11,6 +11,8 @@ use crate::{
     IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
     ingest_bytes,
 };
+
+const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
 
 /// Analyzer-neutral finding before deterministic evidence identifiers are assigned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,8 +63,10 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
     /// preserves the failure as evidence and marks the bundle inconclusive.
-    fn analyze(&self, artifact: &IngestedArtifact)
-    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(
+        &self,
+        artifact: &IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
@@ -101,11 +105,23 @@ pub enum AnalysisError {
     /// Artifact ingestion failed before analyzer invocation.
     #[error(transparent)]
     Ingestion(#[from] IngestionError),
-    /// An engine identity field is empty.
+    /// An engine identity field is empty, oversized, or contains control text.
     #[error("invalid engine configuration: {field_name}")]
     InvalidEngineConfiguration {
         /// Invalid field.
         field_name: &'static str,
+    },
+    /// An analyzer identifier violates the engine identifier contract.
+    #[error("invalid analyzer identifier: {analyzer_id}")]
+    InvalidAnalyzerIdentifier {
+        /// Invalid analyzer identifier.
+        analyzer_id: String,
+    },
+    /// Two analyzers claim the same producer identifier.
+    #[error("duplicate analyzer identifier: {analyzer_id}")]
+    DuplicateAnalyzerIdentifier {
+        /// Repeated analyzer identifier.
+        analyzer_id: String,
     },
     /// At least one analyzer is required.
     #[error("no analyzers configured")]
@@ -125,7 +141,8 @@ impl AnalysisEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`AnalysisError`] for invalid policy or empty configuration.
+    /// Returns [`AnalysisError`] for invalid policy, identifiers, or analyzer
+    /// configuration.
     pub fn new(
         ingestion_policy: IngestionPolicy,
         policy_id: impl Into<String>,
@@ -136,18 +153,33 @@ impl AnalysisEngine {
         let policy_id = policy_id.into();
         let source_revision = source_revision.into();
 
-        if policy_id.is_empty() {
+        if !is_valid_engine_identifier(&policy_id) {
             return Err(AnalysisError::InvalidEngineConfiguration {
                 field_name: "policy_id",
             });
         }
-        if source_revision.is_empty() {
+        if !is_valid_engine_identifier(&source_revision) {
             return Err(AnalysisError::InvalidEngineConfiguration {
                 field_name: "source_revision",
             });
         }
         if analyzers.is_empty() {
             return Err(AnalysisError::NoAnalyzersConfigured);
+        }
+
+        let mut analyzer_ids = BTreeSet::new();
+        for analyzer in &analyzers {
+            let analyzer_id = analyzer.analyzer_id();
+            if !is_valid_engine_identifier(analyzer_id) {
+                return Err(AnalysisError::InvalidAnalyzerIdentifier {
+                    analyzer_id: analyzer_id.to_owned(),
+                });
+            }
+            if !analyzer_ids.insert(analyzer_id) {
+                return Err(AnalysisError::DuplicateAnalyzerIdentifier {
+                    analyzer_id: analyzer_id.to_owned(),
+                });
+            }
         }
 
         Ok(Self {
@@ -172,7 +204,7 @@ impl AnalysisEngine {
     ) -> Result<EvidenceBundle, AnalysisError> {
         request.validate()?;
         let artifact = ingest_bytes(artifact_name, bytes, &self.ingestion_policy)?;
-        let analysis_job_id = deterministic_job_id(request, artifact.descriptor());
+        let analysis_job_id = self.deterministic_job_id(request, artifact.descriptor());
         let mut records = Vec::new();
 
         push_record(
@@ -206,6 +238,30 @@ impl AnalysisEngine {
             match analyzer.analyze(&artifact) {
                 Ok(findings) => {
                     for finding in findings {
+                        if finding.evidence_kind != EvidenceKind::FileFormat
+                            && finding.evidence_kind != EvidenceKind::StaticCapability
+                        {
+                            analyzer_failed = true;
+                            push_record(
+                                &mut records,
+                                &analysis_job_id,
+                                EvidenceKind::ToolFailure,
+                                analyzer.analyzer_id(),
+                                "Static analyzer returned a disallowed evidence kind.",
+                                BTreeMap::from([
+                                    (
+                                        "failure_code".to_owned(),
+                                        "disallowed_evidence_kind".to_owned(),
+                                    ),
+                                    (
+                                        "reported_evidence_kind".to_owned(),
+                                        finding.evidence_kind.as_str().to_owned(),
+                                    ),
+                                ]),
+                            );
+                            continue;
+                        }
+
                         push_record(
                             &mut records,
                             &analysis_job_id,
@@ -284,6 +340,30 @@ impl AnalysisEngine {
         bundle.validate()?;
         Ok(bundle)
     }
+
+    fn deterministic_job_id(
+        &self,
+        request: &AnalysisRequest,
+        descriptor: &crate::ArtifactDescriptor,
+    ) -> String {
+        let mut hasher = Sha256::new();
+        for component in [
+            request.request_id.as_str(),
+            request.profile.as_str(),
+            descriptor.artifact_sha256.as_str(),
+            self.policy_id.as_str(),
+            self.source_revision.as_str(),
+        ] {
+            hasher.update(component.as_bytes());
+            hasher.update([0]);
+        }
+        for analyzer in &self.analyzers {
+            hasher.update(analyzer.analyzer_id().as_bytes());
+            hasher.update([0]);
+        }
+        let digest = format!("{:x}", hasher.finalize());
+        format!("analysis_job_{}", &digest[..32])
+    }
 }
 
 impl Default for AnalysisEngine {
@@ -306,18 +386,14 @@ pub fn to_pretty_json(bundle: &EvidenceBundle) -> Result<String, SerializationEr
     serde_json::to_string_pretty(bundle)
 }
 
-fn deterministic_job_id(
-    request: &AnalysisRequest,
-    descriptor: &crate::ArtifactDescriptor,
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(request.request_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(request.profile.as_str().as_bytes());
-    hasher.update([0]);
-    hasher.update(descriptor.artifact_sha256.as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
-    format!("analysis_job_{}", &digest[..32])
+fn is_valid_engine_identifier(value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    if value.len() > MAX_ENGINE_IDENTIFIER_BYTES {
+        return false;
+    }
+    !value.chars().any(char::is_control)
 }
 
 fn push_record(
