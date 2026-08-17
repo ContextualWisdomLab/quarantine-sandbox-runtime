@@ -236,18 +236,7 @@ fn has_script_extension(artifact_name: &str) -> bool {
     };
     matches!(
         extension.to_ascii_lowercase().as_str(),
-        "bat"
-            | "bash"
-            | "cmd"
-            | "cjs"
-            | "js"
-            | "mjs"
-            | "ps1"
-            | "py"
-            | "sh"
-            | "vbs"
-            | "wsf"
-            | "zsh"
+        "bat" | "bash" | "cmd" | "cjs" | "js" | "mjs" | "ps1" | "py" | "sh" | "vbs" | "wsf" | "zsh"
     )
 }
 
