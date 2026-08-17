@@ -60,13 +60,13 @@ jobs:
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
       - name: Install pinned coverage tool
         run: cargo install cargo-llvm-cov --locked --version 0.8.6
-      - name: Enforce complete production coverage
+      - name: Generate production coverage evidence
         run: >-
           cargo llvm-cov
           --workspace
           --lib
           --tests
-          --show-missing-lines
-          --fail-under-lines 100
-          --fail-under-functions 100
-          --fail-under-regions 100
+          --json
+          --output-path coverage.json
+      - name: Explain and enforce complete production coverage
+        run: python3 scripts/check_coverage.py coverage.json
