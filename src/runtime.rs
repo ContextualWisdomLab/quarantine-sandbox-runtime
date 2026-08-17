@@ -7,8 +7,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    AnalysisProfile, AnalysisRequest, ContractError, EvidenceBundle, EvidenceKind,
-    EvidenceRecord, IngestedArtifact, IngestionError, IngestionPolicy,
+    AnalysisProfile, AnalysisRequest, ArtifactKind, ContractError, EvidenceBundle,
+    EvidenceKind, EvidenceRecord, IngestedArtifact, IngestionError, IngestionPolicy,
     RuntimeDisposition, RuntimeManifest, ingest_bytes,
 };
 
@@ -339,7 +339,7 @@ fn push_record(
     summary: &str,
     attributes: BTreeMap<String, String>,
 ) {
-    let sequence_number = records.len() as u32 + 1;
+    let sequence_number = records.len() + 1;
     records.push(EvidenceRecord {
         evidence_id: format!("{analysis_job_id}:evidence:{sequence_number:04}"),
         sequence_number,
