@@ -162,20 +162,18 @@ fn artifact_validation_rejects_name_and_hash_edge_cases() {
 
 #[test]
 fn evidence_bundle_validation_rejects_runtime_and_metadata_errors() {
-    let boundary_mutations: [(&str, fn(&mut RuntimeManifest)); 3] = [
-        ("dynamic_execution_performed", |runtime| {
-            runtime.dynamic_execution_performed = true
-        }),
-        ("network_access_performed", |runtime| {
-            runtime.network_access_performed = true
-        }),
-        ("credentials_available", |runtime| {
-            runtime.credentials_available = true
-        }),
-    ];
-    for (boundary_name, mutate) in boundary_mutations {
+    for boundary_name in [
+        "dynamic_execution_performed",
+        "network_access_performed",
+        "credentials_available",
+    ] {
         let mut bundle = valid_bundle();
-        mutate(&mut bundle.runtime);
+        match boundary_name {
+            "dynamic_execution_performed" => bundle.runtime.dynamic_execution_performed = true,
+            "network_access_performed" => bundle.runtime.network_access_performed = true,
+            "credentials_available" => bundle.runtime.credentials_available = true,
+            _ => unreachable!("the fixture contains only known boundary names"),
+        }
         assert_eq!(
             bundle.validate(),
             Err(ContractError::RuntimeBoundaryViolated { boundary_name })
