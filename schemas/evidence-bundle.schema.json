@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/evidence-bundle-1.0.0.schema.json",
+  "title": "Quarantine Evidence Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analysis_job_id",
+    "request_id",
+    "artifact",
+    "runtime",
+    "disposition",
+    "consumer_verdict_required",
+    "evidence",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "analysis_job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_name",
+        "artifact_size_bytes",
+        "artifact_sha256",
+        "artifact_kind"
+      ],
+      "properties": {
+        "artifact_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "artifact_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact_kind": {
+          "enum": [
+            "portable_executable",
+            "elf_executable",
+            "mach_o_executable",
+            "zip_archive",
+            "pdf_document",
+            "ole_compound_document",
+            "script",
+            "text",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_name",
+        "runtime_version",
+        "source_revision",
+        "requested_profile",
+        "dynamic_execution_performed",
+        "network_access_performed",
+        "credentials_available"
+      ],
+      "properties": {
+        "runtime_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requested_profile": {
+          "enum": [
+            "static_only",
+            "linux_dynamic",
+            "windows_dynamic"
+          ]
+        },
+        "dynamic_execution_performed": {
+          "const": false
+        },
+        "network_access_performed": {
+          "const": false
+        },
+        "credentials_available": {
+          "const": false
+        }
+      }
+    },
+    "disposition": {
+      "enum": [
+        "completed",
+        "inconclusive",
+        "failed"
+      ]
+    },
+    "consumer_verdict_required": {
+      "const": true
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "sequence_number",
+          "evidence_kind",
+          "producer_id",
+          "summary",
+          "attributes"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sequence_number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidence_kind": {
+            "enum": [
+              "artifact_identity",
+              "file_format",
+              "policy_boundary",
+              "static_capability",
+              "runtime_behavior",
+              "network_attempt",
+              "tool_failure"
+            ]
+          },
+          "producer_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  }
+}
