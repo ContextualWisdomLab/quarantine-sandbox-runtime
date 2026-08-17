@@ -7,9 +7,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    AnalysisProfile, AnalysisRequest, ArtifactKind, ContractError, EvidenceBundle,
-    EvidenceKind, EvidenceRecord, IngestedArtifact, IngestionError, IngestionPolicy,
-    RuntimeDisposition, RuntimeManifest, ingest_bytes,
+    AnalysisProfile, AnalysisRequest, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
+    IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
+    ingest_bytes,
 };
 
 /// Analyzer-neutral finding before deterministic evidence identifiers are assigned.
@@ -61,10 +61,8 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
     /// preserves the failure as evidence and marks the bundle inconclusive.
-    fn analyze(
-        &self,
-        artifact: &IngestedArtifact,
-    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(&self, artifact: &IngestedArtifact)
+    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
@@ -243,14 +241,8 @@ impl AnalysisEngine {
             "Foundation runtime performed no execution, network access, or credential use.",
             BTreeMap::from([
                 ("credentials_available".to_owned(), "false".to_owned()),
-                (
-                    "dynamic_execution_performed".to_owned(),
-                    "false".to_owned(),
-                ),
-                (
-                    "network_access_performed".to_owned(),
-                    "false".to_owned(),
-                ),
+                ("dynamic_execution_performed".to_owned(), "false".to_owned()),
+                ("network_access_performed".to_owned(), "false".to_owned()),
                 ("policy_id".to_owned(), self.policy_id.clone()),
             ]),
         );
@@ -262,8 +254,7 @@ impl AnalysisEngine {
             RuntimeDisposition::Completed
         };
 
-        let mut limitations =
-            vec!["runtime_does_not_determine_maliciousness".to_owned()];
+        let mut limitations = vec!["runtime_does_not_determine_maliciousness".to_owned()];
         if dynamic_unavailable {
             limitations.push("dynamic_analysis_not_configured".to_owned());
         }

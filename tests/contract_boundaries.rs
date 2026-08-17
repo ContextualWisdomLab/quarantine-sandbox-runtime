@@ -1,3 +1,5 @@
+//! Boundary tests for hostile contract metadata and attestations.
+
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
@@ -23,8 +25,8 @@ fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
         artifact_name: "sample.bin".to_owned(),
         artifact_size_bytes: 3,
-        artifact_sha256:
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned(),
+        artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            .to_owned(),
         artifact_kind: ArtifactKind::Unknown,
     }
 }
@@ -161,18 +163,15 @@ fn artifact_validation_rejects_name_and_hash_edge_cases() {
 #[test]
 fn evidence_bundle_validation_rejects_runtime_and_metadata_errors() {
     let boundary_mutations: [(&str, fn(&mut RuntimeManifest)); 3] = [
-        (
-            "dynamic_execution_performed",
-            |runtime| runtime.dynamic_execution_performed = true,
-        ),
-        (
-            "network_access_performed",
-            |runtime| runtime.network_access_performed = true,
-        ),
-        (
-            "credentials_available",
-            |runtime| runtime.credentials_available = true,
-        ),
+        ("dynamic_execution_performed", |runtime| {
+            runtime.dynamic_execution_performed = true
+        }),
+        ("network_access_performed", |runtime| {
+            runtime.network_access_performed = true
+        }),
+        ("credentials_available", |runtime| {
+            runtime.credentials_available = true
+        }),
     ];
     for (boundary_name, mutate) in boundary_mutations {
         let mut bundle = valid_bundle();
@@ -198,10 +197,7 @@ fn evidence_bundle_validation_rejects_runtime_and_metadata_errors() {
     empty_key.evidence[0]
         .attributes
         .insert(String::new(), "value".to_owned());
-    assert_eq!(
-        empty_key.validate(),
-        Err(ContractError::EmptyAttributeKey)
-    );
+    assert_eq!(empty_key.validate(), Err(ContractError::EmptyAttributeKey));
 
     let mut empty_value = valid_bundle();
     empty_value.evidence[0]

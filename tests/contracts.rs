@@ -1,3 +1,5 @@
+//! Integration tests for versioned request and evidence contracts.
+
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
@@ -14,7 +16,10 @@ fn valid_request() -> AnalysisRequest {
         context: AnalysisContext {
             source_system: "unit_test".to_owned(),
             source_reference: "fixture_001".to_owned(),
-            attributes: BTreeMap::from([("tenant_reference".to_owned(), "tenant_alpha".to_owned())]),
+            attributes: BTreeMap::from([(
+                "tenant_reference".to_owned(),
+                "tenant_alpha".to_owned(),
+            )]),
         },
     }
 }
@@ -23,8 +28,8 @@ fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
         artifact_name: "sample.bin".to_owned(),
         artifact_size_bytes: 3,
-        artifact_sha256:
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned(),
+        artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            .to_owned(),
         artifact_kind: ArtifactKind::Unknown,
     }
 }
@@ -64,12 +69,18 @@ fn enum_codes_are_stable_and_snake_case() {
     assert_eq!(AnalysisProfile::LinuxDynamic.as_str(), "linux_dynamic");
     assert_eq!(AnalysisProfile::WindowsDynamic.as_str(), "windows_dynamic");
 
-    assert_eq!(ArtifactKind::PortableExecutable.as_str(), "portable_executable");
+    assert_eq!(
+        ArtifactKind::PortableExecutable.as_str(),
+        "portable_executable"
+    );
     assert_eq!(ArtifactKind::ElfExecutable.as_str(), "elf_executable");
     assert_eq!(ArtifactKind::MachOExecutable.as_str(), "mach_o_executable");
     assert_eq!(ArtifactKind::ZipArchive.as_str(), "zip_archive");
     assert_eq!(ArtifactKind::PdfDocument.as_str(), "pdf_document");
-    assert_eq!(ArtifactKind::OleCompoundDocument.as_str(), "ole_compound_document");
+    assert_eq!(
+        ArtifactKind::OleCompoundDocument.as_str(),
+        "ole_compound_document"
+    );
     assert_eq!(ArtifactKind::Script.as_str(), "script");
     assert_eq!(ArtifactKind::Text.as_str(), "text");
     assert_eq!(ArtifactKind::Unknown.as_str(), "unknown");
@@ -144,10 +155,7 @@ fn request_validation_rejects_each_untrusted_metadata_boundary() {
         .context
         .attributes
         .insert(String::new(), "value".to_owned());
-    assert_eq!(
-        empty_key.validate(),
-        Err(ContractError::EmptyAttributeKey)
-    );
+    assert_eq!(empty_key.validate(), Err(ContractError::EmptyAttributeKey));
 
     let mut empty_value = valid_request();
     empty_value
@@ -177,17 +185,11 @@ fn artifact_validation_rejects_invalid_identity_fields() {
 
     let mut invalid_hash = valid_artifact();
     invalid_hash.artifact_sha256 = "not-a-sha256".to_owned();
-    assert_eq!(
-        invalid_hash.validate(),
-        Err(ContractError::InvalidSha256)
-    );
+    assert_eq!(invalid_hash.validate(), Err(ContractError::InvalidSha256));
 
     let mut zero_size = valid_artifact();
     zero_size.artifact_size_bytes = 0;
-    assert_eq!(
-        zero_size.validate(),
-        Err(ContractError::ZeroArtifactSize)
-    );
+    assert_eq!(zero_size.validate(), Err(ContractError::ZeroArtifactSize));
 }
 
 #[test]
@@ -196,10 +198,7 @@ fn evidence_bundle_validation_rejects_sequence_and_policy_violations() {
 
     let mut empty_evidence = valid_bundle();
     empty_evidence.evidence.clear();
-    assert_eq!(
-        empty_evidence.validate(),
-        Err(ContractError::EmptyEvidence)
-    );
+    assert_eq!(empty_evidence.validate(), Err(ContractError::EmptyEvidence));
 
     let mut sequence_gap = valid_bundle();
     sequence_gap.evidence[0].sequence_number = 2;

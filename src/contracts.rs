@@ -159,11 +159,7 @@ pub struct AnalysisContext {
 
 impl AnalysisContext {
     fn validate(&self) -> Result<(), ContractError> {
-        validate_text(
-            "source_system",
-            &self.source_system,
-            MAX_IDENTIFIER_BYTES,
-        )?;
+        validate_text("source_system", &self.source_system, MAX_IDENTIFIER_BYTES)?;
         validate_text(
             "source_reference",
             &self.source_reference,
@@ -185,16 +181,8 @@ impl AnalysisContext {
                     attribute_key: key.clone(),
                 });
             }
-            validate_nonempty_text(
-                "attribute_key",
-                key,
-                MAX_ATTRIBUTE_KEY_BYTES,
-            )?;
-            validate_nonempty_text(
-                "attribute_value",
-                value,
-                MAX_ATTRIBUTE_VALUE_BYTES,
-            )?;
+            validate_nonempty_text("attribute_key", key, MAX_ATTRIBUTE_KEY_BYTES)?;
+            validate_nonempty_text("attribute_value", value, MAX_ATTRIBUTE_VALUE_BYTES)?;
         }
 
         Ok(())
@@ -282,22 +270,14 @@ pub struct EvidenceRecord {
 
 impl EvidenceRecord {
     fn validate(&self, expected_sequence: usize) -> Result<(), ContractError> {
-        validate_text(
-            "evidence_id",
-            &self.evidence_id,
-            MAX_EVIDENCE_ID_BYTES,
-        )?;
+        validate_text("evidence_id", &self.evidence_id, MAX_EVIDENCE_ID_BYTES)?;
         if self.sequence_number != expected_sequence {
             return Err(ContractError::InvalidEvidenceSequence {
                 expected_sequence,
                 actual_sequence: self.sequence_number,
             });
         }
-        validate_text(
-            "producer_id",
-            &self.producer_id,
-            MAX_IDENTIFIER_BYTES,
-        )?;
+        validate_text("producer_id", &self.producer_id, MAX_IDENTIFIER_BYTES)?;
         validate_text("summary", &self.summary, MAX_SUMMARY_BYTES)?;
 
         if self.attributes.len() > MAX_ATTRIBUTE_COUNT {
@@ -315,16 +295,8 @@ impl EvidenceRecord {
                     attribute_key: key.clone(),
                 });
             }
-            validate_nonempty_text(
-                "attribute_key",
-                key,
-                MAX_ATTRIBUTE_KEY_BYTES,
-            )?;
-            validate_nonempty_text(
-                "attribute_value",
-                value,
-                MAX_ATTRIBUTE_VALUE_BYTES,
-            )?;
+            validate_nonempty_text("attribute_key", key, MAX_ATTRIBUTE_KEY_BYTES)?;
+            validate_nonempty_text("attribute_value", value, MAX_ATTRIBUTE_VALUE_BYTES)?;
         }
         Ok(())
     }
@@ -372,9 +344,7 @@ impl RuntimeManifest {
             ("credentials_available", self.credentials_available),
         ] {
             if violated {
-                return Err(ContractError::RuntimeBoundaryViolated {
-                    boundary_name,
-                });
+                return Err(ContractError::RuntimeBoundaryViolated { boundary_name });
             }
         }
 
@@ -502,9 +472,7 @@ pub enum ContractError {
     #[error("evidence bundle must contain at least one record")]
     EmptyEvidence,
     /// Evidence sequence numbers are not contiguous and one-based.
-    #[error(
-        "invalid evidence sequence: expected {expected_sequence}, got {actual_sequence}"
-    )]
+    #[error("invalid evidence sequence: expected {expected_sequence}, got {actual_sequence}")]
     InvalidEvidenceSequence {
         /// Expected one-based sequence.
         expected_sequence: usize,

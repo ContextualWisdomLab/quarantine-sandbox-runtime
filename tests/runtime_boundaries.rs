@@ -1,3 +1,5 @@
+//! Boundary tests for analyzer completion and deterministic identities.
+
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
@@ -63,11 +65,7 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("empty findings are a valid analyzer result");
     let empty_bundle = empty_engine
-        .analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.bin",
-            b"abc",
-        )
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
         .expect("identity and boundary evidence must remain sufficient");
     assert_eq!(empty_bundle.disposition, RuntimeDisposition::Completed);
     assert_eq!(empty_bundle.evidence.len(), 2);
@@ -80,11 +78,7 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("engine configuration itself is valid");
     assert_eq!(
-        invalid_engine.analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.bin",
-            b"abc",
-        ),
+        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc",),
         Err(AnalysisError::Contract(
             quarantine_sandbox_runtime::ContractError::EmptyField {
                 field_name: "summary",
@@ -117,11 +111,7 @@ fn engine_rejects_invalid_ingestion_policy_before_analysis() {
 fn deterministic_identifiers_change_when_identity_inputs_change() {
     let engine = AnalysisEngine::default();
     let baseline = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.bin",
-            b"abc",
-        )
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
         .expect("baseline analysis must succeed");
 
     let mut changed_request = request(AnalysisProfile::StaticOnly);
@@ -141,11 +131,7 @@ fn deterministic_identifiers_change_when_identity_inputs_change() {
     assert_ne!(baseline.analysis_job_id, changed_profile.analysis_job_id);
 
     let changed_artifact = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.bin",
-            b"abd",
-        )
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abd")
         .expect("changed artifact analysis must succeed");
     assert_ne!(baseline.analysis_job_id, changed_artifact.analysis_job_id);
 }

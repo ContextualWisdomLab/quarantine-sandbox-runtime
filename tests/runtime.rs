@@ -1,9 +1,11 @@
+//! Integration tests for deterministic runtime evidence orchestration.
+
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
     AnalysisContext, AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest,
-    AnalyzerFailure, AnalyzerFinding, ArtifactKind, EvidenceKind, FormatAnalyzer,
-    IngestionPolicy, RuntimeDisposition, StaticAnalyzer, to_pretty_json,
+    AnalyzerFailure, AnalyzerFinding, ArtifactKind, EvidenceKind, FormatAnalyzer, IngestionPolicy,
+    RuntimeDisposition, StaticAnalyzer, to_pretty_json,
 };
 
 fn request(profile: AnalysisProfile) -> AnalysisRequest {
@@ -30,12 +32,19 @@ fn static_analysis_returns_attributable_evidence_without_a_verdict() {
     .expect("valid engine configuration must succeed");
 
     let bundle = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.exe", b"MZ\x90\x00")
+        .analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.exe",
+            b"MZ\x90\x00",
+        )
         .expect("static analysis must complete");
 
     assert_eq!(bundle.disposition, RuntimeDisposition::Completed);
     assert!(bundle.consumer_verdict_required);
-    assert_eq!(bundle.artifact.artifact_kind, ArtifactKind::PortableExecutable);
+    assert_eq!(
+        bundle.artifact.artifact_kind,
+        ArtifactKind::PortableExecutable
+    );
     assert!(!bundle.runtime.dynamic_execution_performed);
     assert!(!bundle.runtime.network_access_performed);
     assert!(!bundle.runtime.credentials_available);
@@ -47,9 +56,15 @@ fn static_analysis_returns_attributable_evidence_without_a_verdict() {
             .collect::<Vec<_>>(),
         vec![1, 2, 3]
     );
-    assert_eq!(bundle.evidence[0].evidence_kind, EvidenceKind::ArtifactIdentity);
+    assert_eq!(
+        bundle.evidence[0].evidence_kind,
+        EvidenceKind::ArtifactIdentity
+    );
     assert_eq!(bundle.evidence[1].evidence_kind, EvidenceKind::FileFormat);
-    assert_eq!(bundle.evidence[2].evidence_kind, EvidenceKind::PolicyBoundary);
+    assert_eq!(
+        bundle.evidence[2].evidence_kind,
+        EvidenceKind::PolicyBoundary
+    );
     assert_eq!(
         bundle.limitations,
         vec!["runtime_does_not_determine_maliciousness"]
@@ -59,16 +74,21 @@ fn static_analysis_returns_attributable_evidence_without_a_verdict() {
 
 #[test]
 fn unavailable_dynamic_profiles_fail_closed_as_inconclusive() {
-    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
         let engine = AnalysisEngine::default();
         let bundle = engine
             .analyze_bytes(&request(profile), "sample.bin", b"abc")
             .expect("bounded static foundation evidence must still be returned");
 
         assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
-        assert!(bundle
-            .limitations
-            .contains(&"dynamic_analysis_not_configured".to_owned()));
+        assert!(
+            bundle
+                .limitations
+                .contains(&"dynamic_analysis_not_configured".to_owned())
+        );
         assert!(!bundle.runtime.dynamic_execution_performed);
     }
 }
@@ -103,10 +123,7 @@ impl StaticAnalyzer for FailingAnalyzer {
         &self,
         _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
     ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
-        Err(AnalyzerFailure::new(
-            self.analyzer_id(),
-            "fixture_failure",
-        ))
+        Err(AnalyzerFailure::new(self.analyzer_id(), "fixture_failure"))
     }
 }
 
@@ -116,22 +133,25 @@ fn analyzer_findings_are_ordered_and_failures_are_preserved_as_evidence() {
         IngestionPolicy::default(),
         "foundation_policy_v1",
         "revision_test",
-        vec![
-            Box::new(SuccessfulAnalyzer),
-            Box::new(FailingAnalyzer),
-        ],
+        vec![Box::new(SuccessfulAnalyzer), Box::new(FailingAnalyzer)],
     )
     .expect("valid engine configuration must succeed");
 
     let bundle = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.txt", b"safe text")
+        .analyze_bytes(
+            &request(AnalysisProfile::StaticOnly),
+            "sample.txt",
+            b"safe text",
+        )
         .expect("analyzer failures must not erase available evidence");
 
     assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
-    assert!(bundle
-        .evidence
-        .iter()
-        .any(|record| record.evidence_kind == EvidenceKind::StaticCapability));
+    assert!(
+        bundle
+            .evidence
+            .iter()
+            .any(|record| record.evidence_kind == EvidenceKind::StaticCapability)
+    );
     let failure = bundle
         .evidence
         .iter()
@@ -142,9 +162,11 @@ fn analyzer_findings_are_ordered_and_failures_are_preserved_as_evidence() {
         failure.attributes.get("failure_code"),
         Some(&"fixture_failure".to_owned())
     );
-    assert!(bundle
-        .limitations
-        .contains(&"static_analyzer_failure".to_owned()));
+    assert!(
+        bundle
+            .limitations
+            .contains(&"static_analyzer_failure".to_owned())
+    );
 }
 
 #[test]
@@ -194,12 +216,7 @@ fn runtime_rejects_invalid_requests_artifacts_and_engine_configuration() {
     ));
 
     assert!(matches!(
-        AnalysisEngine::new(
-            IngestionPolicy::default(),
-            "policy",
-            "revision",
-            Vec::new()
-        ),
+        AnalysisEngine::new(IngestionPolicy::default(), "policy", "revision", Vec::new()),
         Err(AnalysisError::NoAnalyzersConfigured)
     ));
 }

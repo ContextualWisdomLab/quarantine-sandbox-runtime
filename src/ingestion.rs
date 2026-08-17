@@ -189,11 +189,7 @@ fn is_mach_o(bytes: &[u8]) -> bool {
 }
 
 fn is_zip(bytes: &[u8]) -> bool {
-    const MAGICS: [[u8; 4]; 3] = [
-        *b"PK\x03\x04",
-        *b"PK\x05\x06",
-        *b"PK\x07\x08",
-    ];
+    const MAGICS: [[u8; 4]; 3] = [*b"PK\x03\x04", *b"PK\x05\x06", *b"PK\x07\x08"];
     MAGICS.iter().any(|magic| bytes.starts_with(magic))
 }
 
@@ -203,14 +199,13 @@ fn has_script_extension(artifact_name: &str) -> bool {
     };
     matches!(
         extension.to_ascii_lowercase().as_str(),
-        "bat" | "bash" | "cmd" | "cjs" | "js" | "mjs" | "ps1" | "py" | "sh"
-            | "vbs" | "wsf" | "zsh"
+        "bat" | "bash" | "cmd" | "cjs" | "js" | "mjs" | "ps1" | "py" | "sh" | "vbs" | "wsf" | "zsh"
     )
 }
 
 fn is_utf8_text(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok()
-        && bytes.iter().all(|byte| {
-            *byte >= b' ' || matches!(*byte, b'\t' | b'\n' | b'\r')
-        })
+        && bytes
+            .iter()
+            .all(|byte| *byte >= b' ' || matches!(*byte, b'\t' | b'\n' | b'\r'))
 }

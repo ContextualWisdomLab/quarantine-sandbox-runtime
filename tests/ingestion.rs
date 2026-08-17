@@ -1,15 +1,11 @@
-use quarantine_sandbox_runtime::{
-    ingest_bytes, ArtifactKind, IngestionError, IngestionPolicy,
-};
+//! Integration tests for bounded immutable artifact ingestion.
+
+use quarantine_sandbox_runtime::{ArtifactKind, IngestionError, IngestionPolicy, ingest_bytes};
 
 #[test]
 fn ingestion_computes_immutable_sha256_and_preserves_original_bytes() {
-    let artifact = ingest_bytes(
-        "sample.bin",
-        b"abc",
-        &IngestionPolicy::default(),
-    )
-    .expect("valid bytes must be ingested");
+    let artifact = ingest_bytes("sample.bin", b"abc", &IngestionPolicy::default())
+        .expect("valid bytes must be ingested");
 
     assert_eq!(
         artifact.descriptor().artifact_sha256,
@@ -22,8 +18,16 @@ fn ingestion_computes_immutable_sha256_and_preserves_original_bytes() {
 #[test]
 fn ingestion_detects_supported_artifact_families_without_executing_them() {
     let fixtures: [(&str, &[u8], ArtifactKind); 10] = [
-        ("sample.exe", b"MZ\x90\x00", ArtifactKind::PortableExecutable),
-        ("sample.elf", b"\x7fELF\x02\x01", ArtifactKind::ElfExecutable),
+        (
+            "sample.exe",
+            b"MZ\x90\x00",
+            ArtifactKind::PortableExecutable,
+        ),
+        (
+            "sample.elf",
+            b"\x7fELF\x02\x01",
+            ArtifactKind::ElfExecutable,
+        ),
         (
             "sample.macho",
             b"\xcf\xfa\xed\xfe\x07\x00",
