@@ -30,6 +30,17 @@ jobs:
           name: cargo-lock
           path: Cargo.lock
           if-no-files-found: error
+      - name: Generate canonical formatter output
+        run: |
+          cargo fmt
+          tar -czf rustfmt-output.tar.gz src tests
+          git checkout -- src tests
+      - name: Upload canonical formatter output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rustfmt-output
+          path: rustfmt-output.tar.gz
+          if-no-files-found: error
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
       - name: Check formatting
