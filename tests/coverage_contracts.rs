@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle,
-    EvidenceKind, EvidenceRecord, RuntimeDisposition, RuntimeManifest,
+    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle, EvidenceKind,
+    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 
 fn valid_artifact() -> ArtifactDescriptor {
