@@ -22,12 +22,16 @@
     "analysis_job_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 128
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+      "x-cwl-maxUtf8Bytes": 128
     },
     "request_id": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 128
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+      "x-cwl-maxUtf8Bytes": 128
     },
     "artifact": {
       "type": "object",
@@ -42,7 +46,9 @@
         "artifact_name": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 255
+          "maxLength": 255,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 255
         },
         "artifact_size_bytes": {
           "type": "integer",
@@ -82,15 +88,24 @@
       "properties": {
         "runtime_name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 128
         },
         "runtime_version": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 128
         },
         "source_revision": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+          "x-cwl-maxUtf8Bytes": 128
         },
         "requested_profile": {
           "enum": [
@@ -137,7 +152,10 @@
         "properties": {
           "evidence_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "x-cwl-maxUtf8Bytes": 256
           },
           "sequence_number": {
             "type": "integer",
@@ -156,16 +174,33 @@
           },
           "producer_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "x-cwl-maxUtf8Bytes": 128
           },
           "summary": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "x-cwl-maxUtf8Bytes": 4096
           },
           "attributes": {
             "type": "object",
+            "maxProperties": 32,
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+              "x-cwl-maxUtf8Bytes": 128
+            },
             "additionalProperties": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+              "x-cwl-maxUtf8Bytes": 1024
             }
           }
         }
@@ -175,7 +210,10 @@
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+        "x-cwl-maxUtf8Bytes": 256
       },
       "uniqueItems": true
     }
