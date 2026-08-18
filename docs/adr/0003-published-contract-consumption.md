@@ -30,10 +30,11 @@ evidence without taking that program over.
 
 1. **This repository is the contract publisher.** Hosts consume
    [`docs/contracts/consumer-contract.md`](../contracts/consumer-contract.md)
-   and the ADRs in this tree. They pin a git revision, a release tag, or
-   a later package published from this same product. They do not read
-   unpublished files from naruon, wardnet, gyeot, or EgressWeave to learn
-   this product’s contract.
+   and the ADRs in this tree. They pin a full Git commit SHA, or a released
+   package or container artifact by cryptographic content digest with
+   verified provenance. A branch, release tag, or package version label
+   alone is not an immutable pin. They do not read unpublished files from
+   naruon, wardnet, gyeot, or EgressWeave to learn this product’s contract.
 2. **No sibling checkout is required.** Building, documenting, or calling
    this leaf must not require `../naruon`, `../wardnet`, `../gyeot`, or
    `../EgressWeave` on disk.
@@ -41,11 +42,14 @@ evidence without taking that program over.
    leaf as a published dependency. Wardnet may do the same as a SOC
    consumer. None of those hubs becomes the home of this product. This
    leaf is not merged into naruon, wardnet, or a hub monorepo.
-4. **The call shape is submit-bytes-plus-bounded-context, receive
+4. **The call shape is submit-bytes-plus-optional-bounded-context, receive
    evidence.** The host already holds the artifact (International
    Organization for Standardization, 2012, identification through
-   preservation remain host activities). The leaf does not receive
-   source credentials.
+   preservation remain host activities). Optional `bounded_source_context`
+   MUST conform exactly to the closed allowlist, byte limits,
+   prohibited-data rules, logging exclusions, and request-lifetime deletion
+   rule in the published consumer contract. The leaf rejects unknown source
+   metadata and does not receive source credentials.
 5. **Machine-readable schemas, when they exist, are published from this
    repository.** They are not invented on the default branch while the
    product is documentation-only (see ADR 0004). A later implementation
@@ -53,17 +57,19 @@ evidence without taking that program over.
 
 ## Consequences
 
-A host can integrate from one pin of this repository. Hub wiring lives in
-the hub’s own pull request. This leaf can be sold, reviewed, and operated
-without granting it hub source trees.
+A host can integrate from one immutable pin of this repository. Hub wiring
+lives in the hub’s own pull request. This leaf can be sold, reviewed, and
+operated without granting it hub source trees.
 
 Hubs that currently use git submodules for other leaves may later add
-this leaf the same way. That is optional consumption of this product, not
+this leaf the same way, but the submodule reference must resolve to an
+immutable commit SHA. That is optional consumption of this product, not
 a requirement that this product check those hubs out.
 
-If a change makes standalone use depend on a sibling hub checkout, or
-moves this product’s source of truth into naruon, wardnet, or another
-hub, the MSA contract has been broken.
+If a change makes standalone use depend on a sibling hub checkout, accepts
+a movable tag as sufficient review evidence, accepts arbitrary source
+metadata, or moves this product’s source of truth into naruon, wardnet, or
+another hub, the MSA contract has been broken.
 
 ## References
 
