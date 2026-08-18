@@ -24,7 +24,7 @@ not the transport that carried them.
 
 | Property | Meaning |
 | --- | --- |
-| Source-agnostic | Analysis does not change because the host is naruon, wardnet, gyeot, or an independent operator. The host supplies bounded source context; the runtime does not fetch the source. |
+| Source-agnostic | Analysis does not change because the host is naruon, wardnet, gyeot, or an independent operator. The host may supply only the closed, size-bounded `bounded_source_context` defined in the published consumer contract; the runtime does not fetch the source. |
 | Credential-free | The runtime does not receive or use source-system credentials. The host that already holds the bytes submits them. |
 | Analysis, not verdict | This leaf returns analysis evidence. It does not decide malicious or benign, admit mail, block HTTP, or retain incidents. |
 | Independent and callable | The leaf runs without a hub checkout. Composition hubs call it; they do not absorb it. |
@@ -63,8 +63,9 @@ Independent use means this repository alone is enough to understand, pin,
 and later operate the product. You do not clone sibling CWL repositories
 next to it.
 
-1. Pin a revision or release of
-   `ContextualWisdomLab/quarantine-sandbox-runtime`.
+1. Pin a full Git commit SHA, or a released package or container artifact by
+   cryptographic content digest with verified provenance. A branch, tag, or
+   version label alone is not an immutable pin.
 2. Read the published consumer contract and the ADRs in this repository.
 3. Keep host policy (email admission, WAF/IDS verdicts, outbound HTTP,
    retention, notification) in the host.
@@ -87,11 +88,14 @@ The published consumer contract is
 
 A host:
 
-1. Pins this repository (git revision, release tag, or a later published
-   package from this same product).
+1. Pins a full Git commit SHA, or a released artifact by cryptographic digest
+   with verified provenance. A release tag or package version alone is not
+   sufficient.
 2. Reads the consumer contract and the authority ADRs.
-3. Submits artifact bytes the host already holds, plus bounded source
-   context the host is willing to disclose.
+3. Submits artifact bytes the host already holds and, only when necessary,
+   optional `bounded_source_context` that conforms to the contract’s closed
+   allowlist, size limits, prohibited-data rules, and request-lifetime deletion
+   requirement.
 4. Treats the response as analysis evidence. Verdict, admission, block,
    notify, and retain stay in the host.
 
