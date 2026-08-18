@@ -37,10 +37,14 @@ outbound HTTP.
 ## Decision
 
 Quarantine Sandbox Runtime owns **source-agnostic, credential-free
-artifact-analysis evidence**. It accepts hostile artifact bytes plus
-bounded source context supplied by the caller. It does not fetch the
-source system, hold source credentials, decide malicious or benign
-status, admit email, enforce WAF/IDS policy, or open outbound HTTP.
+artifact-analysis evidence**. It accepts hostile artifact bytes and, only when
+needed, optional `bounded_source_context` that conforms exactly to the closed
+allowlist, byte limits, prohibited-data rules, logging exclusions, and
+request-lifetime deletion rule in
+[`docs/contracts/consumer-contract.md`](../contracts/consumer-contract.md).
+No other source metadata is part of the public contract. It does not fetch the
+source system, hold source credentials, decide malicious or benign status,
+admit email, enforce WAF/IDS policy, or open outbound HTTP.
 
 Neighbor authority stays in the neighbor product:
 
@@ -64,7 +68,8 @@ repository.
 Buyers can operate or embed this leaf without taking a WAF, an email
 workspace, or an outbound HTTP library. Hosts keep least privilege: they
 submit bytes they already hold and keep verdict, admission, and egress
-policy local.
+policy local. Optional source context is minimized without altering or masking
+the artifact bytes that the host has authorized for analysis.
 
 End-to-end properties such as “the attachment never entered the mailbox”
 or “the HTTP request was blocked” cannot be proven by this repository
@@ -72,8 +77,9 @@ alone. Those claims require host verification in naruon, wardnet, or the
 caller that owns the corresponding authority.
 
 If a change in this repository begins to score HTTP transactions, admit
-mail, store source credentials, or open unconstrained outbound HTTP, the
-authority contract has been broken and the expansion must be reverted.
+mail, store source credentials, accept arbitrary source metadata, or open
+unconstrained outbound HTTP, the authority contract has been broken and the
+expansion must be reverted.
 
 ## References
 
