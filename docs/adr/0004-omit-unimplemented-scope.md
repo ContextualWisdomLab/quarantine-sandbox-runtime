@@ -13,10 +13,13 @@ or a test harness.
 
 NIST SP 800-86 warns that its forensic guidance is not an all-inclusive
 step-by-step investigation manual and is not legal advice (Kent et al.,
-2006, Abstract). NIST SP 800-61 Revision 3 and CSF 2.0 describe
-organization-level incident-response outcomes, not a single vendor
-sandbox (Nelson et al., 2025; National Institute of Standards and
-Technology, 2024). ISO/IEC 27037 covers identification through
+2006, Abstract). NIST CSF 2.0 describes broad organization-wide
+cybersecurity outcomes across Govern, Identify, Protect, Detect, Respond,
+and Recover (National Institute of Standards and Technology, 2024).
+NIST SP 800-61 Revision 3 is a CSF 2.0 community profile that applies those
+outcomes to organization-level incident-response recommendations and
+considerations (Nelson et al., 2025). Neither publication defines or ships a
+single vendor sandbox. ISO/IEC 27037 covers identification through
 preservation of potential digital evidence, not a named analysis engine
 (International Organization for Standardization, 2012).
 
