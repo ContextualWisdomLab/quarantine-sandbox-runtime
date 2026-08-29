@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisContext, AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest,
-    AnalyzerFailure, AnalyzerFinding, EvidenceKind, FormatAnalyzer, IngestionError,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, BoundedSourceContext, EvidenceKind, FormatAnalyzer, IngestionError,
     IngestionPolicy, RuntimeDisposition, StaticAnalyzer,
 };
 
@@ -13,11 +13,13 @@ fn request(profile: AnalysisProfile) -> AnalysisRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "request_boundary_runtime".to_owned(),
         profile,
-        context: AnalysisContext {
-            source_system: "runtime_boundary_test".to_owned(),
-            source_reference: "fixture_runtime_boundary".to_owned(),
-            attributes: BTreeMap::new(),
-        },
+        bounded_source_context: Some(BoundedSourceContext {
+            source_channel_code: Some("runtime_boundary_test".to_owned()),
+            original_file_name: Some("sample.bin".to_owned()),
+            declared_media_type: None,
+            host_artifact_reference: Some("fixture_runtime_boundary".to_owned()),
+            submitted_at: None,
+        }),
     }
 }
 
@@ -129,7 +131,7 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("empty findings are a valid analyzer result");
     let empty_bundle = empty_engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
         .expect("identity and boundary evidence must remain sufficient");
     assert_eq!(empty_bundle.disposition, RuntimeDisposition::Completed);
     assert_eq!(empty_bundle.evidence.len(), 2);
@@ -142,7 +144,7 @@ fn empty_output_is_valid_but_malformed_findings_fail_contract_validation() {
     )
     .expect("engine configuration itself is valid");
     assert_eq!(
-        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc"),
+        invalid_engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc"),
         Err(AnalysisError::Contract(
             quarantine_sandbox_runtime::ContractError::EmptyField {
                 field_name: "summary",
@@ -161,11 +163,7 @@ fn disallowed_static_evidence_fails_closed_without_claiming_runtime_behavior() {
     )
     .expect("analyzer identifier is valid");
     let bundle = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::LinuxDynamic),
-            "sample.bin",
-            b"abc",
-        )
+        .analyze_bytes(&request(AnalysisProfile::LinuxDynamic), b"abc")
         .expect("the runtime must preserve attributable failure evidence");
 
     assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
@@ -210,7 +208,7 @@ fn analyzer_failure_attribution_uses_the_configured_analyzer_identity() {
     )
     .expect("configured analyzer identifier is valid");
     let bundle = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
         .expect("analyzer failure must remain an evidence bundle");
 
     let failure = bundle
@@ -305,27 +303,23 @@ fn engine_rejects_invalid_and_duplicate_identifiers() {
 fn deterministic_identifiers_change_when_identity_or_engine_inputs_change() {
     let engine = AnalysisEngine::default();
     let baseline = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
         .expect("baseline analysis must succeed");
 
     let mut changed_request = request(AnalysisProfile::StaticOnly);
     changed_request.request_id = "request_boundary_runtime_002".to_owned();
     let changed_id = engine
-        .analyze_bytes(&changed_request, "sample.bin", b"abc")
+        .analyze_bytes(&changed_request, b"abc")
         .expect("changed request analysis must succeed");
     assert_ne!(baseline.analysis_job_id, changed_id.analysis_job_id);
 
     let changed_profile = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::LinuxDynamic),
-            "sample.bin",
-            b"abc",
-        )
+        .analyze_bytes(&request(AnalysisProfile::LinuxDynamic), b"abc")
         .expect("changed profile analysis must return evidence");
     assert_ne!(baseline.analysis_job_id, changed_profile.analysis_job_id);
 
     let changed_artifact = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abd")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abd")
         .expect("changed artifact analysis must succeed");
     assert_ne!(baseline.analysis_job_id, changed_artifact.analysis_job_id);
 
@@ -353,7 +347,7 @@ fn deterministic_identifiers_change_when_identity_or_engine_inputs_change() {
         .expect("changed analyzer engine must be valid"),
     ] {
         let changed = changed_engine
-            .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
             .expect("changed engine analysis must succeed");
         assert_ne!(baseline.analysis_job_id, changed.analysis_job_id);
     }

@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::{
     AnalysisProfile, AnalysisRequest, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
     IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
-    ingest_bytes,
+    ingestion::ingest_bytes_with_optional_name,
 };
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
@@ -63,8 +63,10 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
     /// preserves the failure as evidence and marks the bundle inconclusive.
-    fn analyze(&self, artifact: &IngestedArtifact)
-    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(
+        &self,
+        artifact: &IngestedArtifact,
+    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
@@ -188,6 +190,9 @@ impl AnalysisEngine {
 
     /// Analyze bounded bytes and assemble an attributable evidence bundle.
     ///
+    /// The runtime never requires a file name. If bounded source context
+    /// includes one, it is used only as untrusted classification metadata.
+    ///
     /// # Errors
     ///
     /// Returns [`AnalysisError`] when request validation, ingestion, or
@@ -195,13 +200,42 @@ impl AnalysisEngine {
     pub fn analyze_bytes(
         &self,
         request: &AnalysisRequest,
-        artifact_name: &str,
         bytes: &[u8],
     ) -> Result<EvidenceBundle, AnalysisError> {
         request.validate()?;
-        let artifact = ingest_bytes(artifact_name, bytes, &self.ingestion_policy)?;
+        let original_file_name = request
+            .bounded_source_context
+            .as_ref()
+            .and_then(|context| context.original_file_name.as_deref());
+        let artifact =
+            ingest_bytes_with_optional_name(original_file_name, bytes, &self.ingestion_policy)?;
         let analysis_job_id = self.deterministic_job_id(request, artifact.descriptor());
         let mut records = Vec::new();
+
+        let mut identity_attributes = BTreeMap::from([
+            (
+                "artifact_kind".to_owned(),
+                artifact.descriptor().artifact_kind.as_str().to_owned(),
+            ),
+            (
+                "artifact_name".to_owned(),
+                artifact.descriptor().artifact_name.clone(),
+            ),
+            (
+                "artifact_sha256".to_owned(),
+                artifact.descriptor().artifact_sha256.clone(),
+            ),
+            (
+                "artifact_size_bytes".to_owned(),
+                artifact.descriptor().artifact_size_bytes.to_string(),
+            ),
+        ]);
+        if let Some(original_file_name) = &artifact.descriptor().original_file_name {
+            identity_attributes.insert(
+                "original_file_name".to_owned(),
+                original_file_name.clone(),
+            );
+        }
 
         push_record(
             &mut records,
@@ -209,24 +243,7 @@ impl AnalysisEngine {
             EvidenceKind::ArtifactIdentity,
             "runtime_core",
             "Artifact identity established.",
-            BTreeMap::from([
-                (
-                    "artifact_kind".to_owned(),
-                    artifact.descriptor().artifact_kind.as_str().to_owned(),
-                ),
-                (
-                    "artifact_name".to_owned(),
-                    artifact.descriptor().artifact_name.clone(),
-                ),
-                (
-                    "artifact_sha256".to_owned(),
-                    artifact.descriptor().artifact_sha256.clone(),
-                ),
-                (
-                    "artifact_size_bytes".to_owned(),
-                    artifact.descriptor().artifact_size_bytes.to_string(),
-                ),
-            ]),
+            identity_attributes,
         );
 
         let mut analyzer_failed = false;

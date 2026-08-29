@@ -9,8 +9,12 @@ use thiserror::Error;
 pub const CONTRACT_SCHEMA_VERSION: &str = "1.0.0";
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
-const MAX_SOURCE_REFERENCE_BYTES: usize = 1_024;
 const MAX_ARTIFACT_NAME_BYTES: usize = 255;
+const MAX_SOURCE_CHANNEL_CODE_BYTES: usize = 64;
+const MAX_DECLARED_MEDIA_TYPE_BYTES: usize = 255;
+const MAX_HOST_ARTIFACT_REFERENCE_BYTES: usize = 128;
+const MAX_SUBMITTED_AT_BYTES: usize = 30;
+const MAX_BOUNDED_SOURCE_CONTEXT_BYTES: usize = 1_024;
 const MAX_ATTRIBUTE_COUNT: usize = 32;
 const MAX_ATTRIBUTE_KEY_BYTES: usize = 128;
 const MAX_ATTRIBUTE_VALUE_BYTES: usize = 1_024;
@@ -146,51 +150,85 @@ impl RuntimeDisposition {
     }
 }
 
-/// Bounded context supplied by a trigger adapter.
+/// Optional, bounded, non-secret source metadata supplied by a trigger adapter.
+///
+/// This context is correlation metadata only. It must never carry message bodies,
+/// credentials, raw URLs, or other unbounded source payloads.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisContext {
-    /// Source product or adapter identifier.
-    pub source_system: String,
-    /// Opaque source-local reference such as an upload or message identifier.
-    pub source_reference: String,
-    /// Bounded non-secret dimensions used by the consumer for correlation.
-    pub attributes: BTreeMap<String, String>,
+#[serde(deny_unknown_fields)]
+pub struct BoundedSourceContext {
+    /// Stable lower-case source-channel code, for example `direct_api`.
+    pub source_channel_code: Option<String>,
+    /// Original leaf file name when the trigger supplied one.
+    pub original_file_name: Option<String>,
+    /// Untrusted declared media type; detection still comes from artifact bytes.
+    pub declared_media_type: Option<String>,
+    /// Opaque host-side artifact identifier, never a credential or URL.
+    pub host_artifact_reference: Option<String>,
+    /// UTC RFC 3339 submission timestamp using an upper-case `T` and `Z`.
+    pub submitted_at: Option<String>,
 }
 
-impl AnalysisContext {
+impl BoundedSourceContext {
     fn validate(&self) -> Result<(), ContractError> {
-        validate_text("source_system", &self.source_system, MAX_IDENTIFIER_BYTES)?;
-        validate_text(
-            "source_reference",
-            &self.source_reference,
-            MAX_SOURCE_REFERENCE_BYTES,
-        )?;
+        if self.source_channel_code.is_none()
+            && self.original_file_name.is_none()
+            && self.declared_media_type.is_none()
+            && self.host_artifact_reference.is_none()
+            && self.submitted_at.is_none()
+        {
+            return Err(ContractError::EmptyBoundedSourceContext);
+        }
 
-        if self.attributes.len() > MAX_ATTRIBUTE_COUNT {
-            return Err(ContractError::TooManyAttributes {
-                maximum_attributes: MAX_ATTRIBUTE_COUNT,
+        if self
+            .source_channel_code
+            .as_deref()
+            .is_some_and(|value| !is_valid_source_channel_code(value))
+        {
+            return Err(ContractError::InvalidSourceChannelCode);
+        }
+        if self
+            .original_file_name
+            .as_deref()
+            .is_some_and(|value| !is_valid_original_file_name(value))
+        {
+            return Err(ContractError::InvalidOriginalFileName);
+        }
+        if self
+            .declared_media_type
+            .as_deref()
+            .is_some_and(|value| !is_valid_declared_media_type(value))
+        {
+            return Err(ContractError::InvalidDeclaredMediaType);
+        }
+        if self
+            .host_artifact_reference
+            .as_deref()
+            .is_some_and(|value| !is_valid_host_artifact_reference(value))
+        {
+            return Err(ContractError::InvalidHostArtifactReference);
+        }
+        if self
+            .submitted_at
+            .as_deref()
+            .is_some_and(|value| !is_valid_submitted_at(value))
+        {
+            return Err(ContractError::InvalidSubmittedAt);
+        }
+
+        let serialized_bytes = serde_json::to_vec(self).map_or(usize::MAX, |value| value.len());
+        if serialized_bytes > MAX_BOUNDED_SOURCE_CONTEXT_BYTES {
+            return Err(ContractError::BoundedSourceContextTooLarge {
+                maximum_bytes: MAX_BOUNDED_SOURCE_CONTEXT_BYTES,
             });
         }
-
-        for (key, value) in &self.attributes {
-            if key.is_empty() {
-                return Err(ContractError::EmptyAttributeKey);
-            }
-            if value.is_empty() {
-                return Err(ContractError::EmptyAttributeValue {
-                    attribute_key: key.clone(),
-                });
-            }
-            validate_nonempty_text("attribute_key", key, MAX_ATTRIBUTE_KEY_BYTES)?;
-            validate_nonempty_text("attribute_value", value, MAX_ATTRIBUTE_VALUE_BYTES)?;
-        }
-
         Ok(())
     }
 }
 
 /// Source-agnostic analysis request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisRequest {
     /// Contract version, currently `1.0.0`.
     pub schema_version: String,
@@ -198,8 +236,9 @@ pub struct AnalysisRequest {
     pub request_id: String,
     /// Requested static or dynamic analysis profile.
     pub profile: AnalysisProfile,
-    /// Bounded, non-secret trigger context.
-    pub context: AnalysisContext,
+    /// Optional bounded, non-secret trigger context.
+    #[serde(default)]
+    pub bounded_source_context: Option<BoundedSourceContext>,
 }
 
 impl AnalysisRequest {
@@ -212,15 +251,20 @@ impl AnalysisRequest {
     pub fn validate(&self) -> Result<(), ContractError> {
         validate_schema_version(&self.schema_version)?;
         validate_text("request_id", &self.request_id, MAX_IDENTIFIER_BYTES)?;
-        self.context.validate()
+        if let Some(context) = &self.bounded_source_context {
+            context.validate()?;
+        }
+        Ok(())
     }
 }
 
 /// Immutable identity and foundation classification of an artifact.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactDescriptor {
-    /// Untrusted display name after bounded validation.
+    /// Stable display name used by the foundation ingestion API.
     pub artifact_name: String,
+    /// Original leaf file name when one was supplied by source context.
+    pub original_file_name: Option<String>,
     /// Original artifact byte length.
     pub artifact_size_bytes: u64,
     /// Lower-case SHA-256 hex digest of the original bytes.
@@ -241,6 +285,13 @@ impl ArtifactDescriptor {
             &self.artifact_name,
             MAX_ARTIFACT_NAME_BYTES,
         )?;
+        if self
+            .original_file_name
+            .as_deref()
+            .is_some_and(|value| !is_valid_original_file_name(value))
+        {
+            return Err(ContractError::InvalidOriginalFileName);
+        }
         if self.artifact_size_bytes == 0 {
             return Err(ContractError::ZeroArtifactSize);
         }
@@ -447,6 +498,30 @@ pub enum ContractError {
         /// Supplied schema version.
         actual_version: String,
     },
+    /// An explicitly present bounded source context contains no fields.
+    #[error("bounded source context must contain at least one field")]
+    EmptyBoundedSourceContext,
+    /// Source-channel code is not a bounded lower-case code.
+    #[error("invalid source channel code")]
+    InvalidSourceChannelCode,
+    /// Original file name is not a safe leaf name.
+    #[error("invalid original file name")]
+    InvalidOriginalFileName,
+    /// Declared media type is not bounded media-type syntax.
+    #[error("invalid declared media type")]
+    InvalidDeclaredMediaType,
+    /// Host artifact reference is not an opaque non-secret identifier.
+    #[error("invalid host artifact reference")]
+    InvalidHostArtifactReference,
+    /// Submission timestamp is not the accepted UTC RFC 3339 subset.
+    #[error("invalid submitted_at timestamp")]
+    InvalidSubmittedAt,
+    /// Serialized bounded source context exceeds the aggregate byte budget.
+    #[error("bounded source context exceeds {maximum_bytes} serialized bytes")]
+    BoundedSourceContextTooLarge {
+        /// Maximum serialized JSON byte length.
+        maximum_bytes: usize,
+    },
     /// Context or evidence contains too many attributes.
     #[error("attribute count exceeds {maximum_attributes}")]
     TooManyAttributes {
@@ -538,4 +613,141 @@ fn is_lowercase_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn is_valid_source_channel_code(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_SOURCE_CHANNEL_CODE_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn is_valid_original_file_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_ARTIFACT_NAME_BYTES
+        && value != "."
+        && value != ".."
+        && !value.chars().any(char::is_control)
+        && !value.bytes().any(|byte| matches!(byte, b'/' | b'\\'))
+}
+
+fn is_valid_declared_media_type(value: &str) -> bool {
+    if value.is_empty() || value.len() > MAX_DECLARED_MEDIA_TYPE_BYTES || !value.is_ascii() {
+        return false;
+    }
+    let Some((top_level, remainder)) = value.split_once('/') else {
+        return false;
+    };
+    let (subtype, parameters) = remainder.split_once(';').map_or((remainder, None), |parts| {
+        (parts.0, Some(parts.1))
+    });
+    if !is_media_type_token(top_level) || !is_media_type_token(subtype) {
+        return false;
+    }
+    parameters.is_none_or(|tail| {
+        !tail.is_empty()
+            && tail
+                .bytes()
+                .all(|byte| byte == b'\t' || (b' '..=b'~').contains(&byte))
+    })
+}
+
+fn is_media_type_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 127
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'&' | b'-' | b'^' | b'_' | b'.' | b'+'
+                )
+        })
+}
+
+fn is_valid_host_artifact_reference(value: &str) -> bool {
+    if value.is_empty() || value.len() > MAX_HOST_ARTIFACT_REFERENCE_BYTES || !value.is_ascii() {
+        return false;
+    }
+    let lowercase = value.to_ascii_lowercase();
+    if lowercase.starts_with("github_pat_") || lowercase.starts_with("bearer_") {
+        return false;
+    }
+    value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
+    })
+}
+
+fn is_valid_submitted_at(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20 || bytes.len() > MAX_SUBMITTED_AT_BYTES || bytes.last() != Some(&b'Z') {
+        return false;
+    }
+    if bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return false;
+    }
+
+    let Some(year) = parse_ascii_u32(&bytes[0..4]) else {
+        return false;
+    };
+    let Some(month) = parse_ascii_u32(&bytes[5..7]) else {
+        return false;
+    };
+    let Some(day) = parse_ascii_u32(&bytes[8..10]) else {
+        return false;
+    };
+    let Some(hour) = parse_ascii_u32(&bytes[11..13]) else {
+        return false;
+    };
+    let Some(minute) = parse_ascii_u32(&bytes[14..16]) else {
+        return false;
+    };
+    let Some(second) = parse_ascii_u32(&bytes[17..19]) else {
+        return false;
+    };
+
+    if !(1..=12).contains(&month)
+        || hour > 23
+        || minute > 59
+        || second > 60
+        || day == 0
+        || day > days_in_month(year, month)
+    {
+        return false;
+    }
+
+    if bytes.len() == 20 {
+        return true;
+    }
+    bytes.get(19) == Some(&b'.')
+        && bytes.len() > 21
+        && bytes[20..bytes.len() - 1]
+            .iter()
+            .all(u8::is_ascii_digit)
+}
+
+fn parse_ascii_u32(bytes: &[u8]) -> Option<u32> {
+    if bytes.iter().all(u8::is_ascii_digit) {
+        std::str::from_utf8(bytes).ok()?.parse().ok()
+    } else {
+        None
+    }
+}
+
+const fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+const fn is_leap_year(year: u32) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }

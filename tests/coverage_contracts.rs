@@ -10,6 +10,7 @@ use quarantine_sandbox_runtime::{
 fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
         artifact_name: "sample.bin".to_owned(),
+        original_file_name: Some("sample.bin".to_owned()),
         artifact_size_bytes: 3,
         artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             .to_owned(),

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisContext, AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind,
+    AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, RuntimeDisposition,
     RuntimeManifest,
 };
@@ -13,17 +13,20 @@ fn valid_request() -> AnalysisRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "request_boundary".to_owned(),
         profile: AnalysisProfile::StaticOnly,
-        context: AnalysisContext {
-            source_system: "boundary_test".to_owned(),
-            source_reference: "fixture_boundary".to_owned(),
-            attributes: BTreeMap::new(),
-        },
+        bounded_source_context: Some(BoundedSourceContext {
+            source_channel_code: Some("boundary_test".to_owned()),
+            original_file_name: Some("sample.bin".to_owned()),
+            declared_media_type: None,
+            host_artifact_reference: None,
+            submitted_at: None,
+        }),
     }
 }
 
 fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
         artifact_name: "sample.bin".to_owned(),
+        original_file_name: Some("sample.bin".to_owned()),
         artifact_size_bytes: 3,
         artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             .to_owned(),
@@ -61,7 +64,7 @@ fn valid_bundle() -> EvidenceBundle {
 }
 
 #[test]
-fn request_validation_rejects_schema_and_attribute_shape_errors() {
+fn request_validation_rejects_schema_and_request_id_shape_errors() {
     let mut unsupported_schema = valid_request();
     unsupported_schema.schema_version = "2.0.0".to_owned();
     assert_eq!(
@@ -81,53 +84,12 @@ fn request_validation_rejects_schema_and_attribute_shape_errors() {
         })
     );
 
-    let mut long_key = valid_request();
-    long_key
-        .context
-        .attributes
-        .insert("k".repeat(129), "value".to_owned());
+    let mut controlled_request_id = valid_request();
+    controlled_request_id.request_id = "bad\nid".to_owned();
     assert_eq!(
-        long_key.validate(),
-        Err(ContractError::FieldTooLong {
-            field_name: "attribute_key",
-            maximum_bytes: 128,
-        })
-    );
-
-    let mut long_value = valid_request();
-    long_value
-        .context
-        .attributes
-        .insert("classification".to_owned(), "v".repeat(1_025));
-    assert_eq!(
-        long_value.validate(),
-        Err(ContractError::FieldTooLong {
-            field_name: "attribute_value",
-            maximum_bytes: 1_024,
-        })
-    );
-
-    let mut controlled_key = valid_request();
-    controlled_key
-        .context
-        .attributes
-        .insert("bad\u{0007}key".to_owned(), "value".to_owned());
-    assert_eq!(
-        controlled_key.validate(),
+        controlled_request_id.validate(),
         Err(ContractError::ControlCharacter {
-            field_name: "attribute_key",
-        })
-    );
-
-    let mut controlled_value = valid_request();
-    controlled_value
-        .context
-        .attributes
-        .insert("classification".to_owned(), "bad\nvalue".to_owned());
-    assert_eq!(
-        controlled_value.validate(),
-        Err(ContractError::ControlCharacter {
-            field_name: "attribute_value",
+            field_name: "request_id",
         })
     );
 }

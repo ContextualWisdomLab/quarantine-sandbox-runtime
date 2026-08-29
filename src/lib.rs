@@ -13,7 +13,7 @@ mod ingestion;
 mod runtime;
 
 pub use contracts::{
-    AnalysisContext, AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind,
+    AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CONTRACT_SCHEMA_VERSION, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
     RuntimeDisposition, RuntimeManifest,
 };

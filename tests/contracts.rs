@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisContext, AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind,
+    AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, RuntimeDisposition,
     RuntimeManifest,
 };
@@ -13,20 +13,20 @@ fn valid_request() -> AnalysisRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "request_alpha".to_owned(),
         profile: AnalysisProfile::StaticOnly,
-        context: AnalysisContext {
-            source_system: "unit_test".to_owned(),
-            source_reference: "fixture_001".to_owned(),
-            attributes: BTreeMap::from([(
-                "tenant_reference".to_owned(),
-                "tenant_alpha".to_owned(),
-            )]),
-        },
+        bounded_source_context: Some(BoundedSourceContext {
+            source_channel_code: Some("unit_test".to_owned()),
+            original_file_name: Some("sample.bin".to_owned()),
+            declared_media_type: Some("application/octet-stream".to_owned()),
+            host_artifact_reference: Some("fixture_001".to_owned()),
+            submitted_at: Some("2026-08-18T12:00:00Z".to_owned()),
+        }),
     }
 }
 
 fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
         artifact_name: "sample.bin".to_owned(),
+        original_file_name: Some("sample.bin".to_owned()),
         artifact_size_bytes: 3,
         artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             .to_owned(),
@@ -110,7 +110,7 @@ fn request_validation_accepts_a_bounded_source_context() {
 }
 
 #[test]
-fn request_validation_rejects_each_untrusted_metadata_boundary() {
+fn request_validation_rejects_top_level_metadata_boundaries() {
     let mut empty_id = valid_request();
     empty_id.request_id.clear();
     assert_eq!(
@@ -120,52 +120,12 @@ fn request_validation_rejects_each_untrusted_metadata_boundary() {
         })
     );
 
-    let mut control_character = valid_request();
-    control_character.context.source_system = "mail\u{0000}box".to_owned();
+    let mut unsupported_schema = valid_request();
+    unsupported_schema.schema_version = "2.0.0".to_owned();
     assert_eq!(
-        control_character.validate(),
-        Err(ContractError::ControlCharacter {
-            field_name: "source_system"
-        })
-    );
-
-    let mut long_reference = valid_request();
-    long_reference.context.source_reference = "x".repeat(1_025);
-    assert_eq!(
-        long_reference.validate(),
-        Err(ContractError::FieldTooLong {
-            field_name: "source_reference",
-            maximum_bytes: 1_024,
-        })
-    );
-
-    let mut too_many_attributes = valid_request();
-    too_many_attributes.context.attributes = (0..33)
-        .map(|index| (format!("key_{index}"), "value".to_owned()))
-        .collect();
-    assert_eq!(
-        too_many_attributes.validate(),
-        Err(ContractError::TooManyAttributes {
-            maximum_attributes: 32
-        })
-    );
-
-    let mut empty_key = valid_request();
-    empty_key
-        .context
-        .attributes
-        .insert(String::new(), "value".to_owned());
-    assert_eq!(empty_key.validate(), Err(ContractError::EmptyAttributeKey));
-
-    let mut empty_value = valid_request();
-    empty_value
-        .context
-        .attributes
-        .insert("classification".to_owned(), String::new());
-    assert_eq!(
-        empty_value.validate(),
-        Err(ContractError::EmptyAttributeValue {
-            attribute_key: "classification".to_owned()
+        unsupported_schema.validate(),
+        Err(ContractError::UnsupportedSchemaVersion {
+            actual_version: "2.0.0".to_owned()
         })
     );
 }
@@ -181,6 +141,13 @@ fn artifact_validation_rejects_invalid_identity_fields() {
         Err(ContractError::EmptyField {
             field_name: "artifact_name"
         })
+    );
+
+    let mut invalid_original_name = valid_artifact();
+    invalid_original_name.original_file_name = Some("../sample.bin".to_owned());
+    assert_eq!(
+        invalid_original_name.validate(),
+        Err(ContractError::InvalidOriginalFileName)
     );
 
     let mut invalid_hash = valid_artifact();

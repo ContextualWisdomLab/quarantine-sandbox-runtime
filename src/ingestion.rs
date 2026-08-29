@@ -100,7 +100,10 @@ pub enum IngestionError {
     },
 }
 
-/// Validate, identify, and preserve an artifact without executing it.
+/// Validate, identify, and preserve a named artifact without executing it.
+///
+/// This low-level ingestion API preserves the caller-supplied leaf name. The
+/// higher-level runtime accepts an optional source-context file name.
 ///
 /// # Errors
 ///
@@ -111,19 +114,18 @@ pub fn ingest_bytes(
     bytes: &[u8],
     policy: &IngestionPolicy,
 ) -> Result<IngestedArtifact, IngestionError> {
+    ingest_bytes_with_optional_name(Some(artifact_name), bytes, policy)
+}
+
+pub(crate) fn ingest_bytes_with_optional_name(
+    original_file_name: Option<&str>,
+    bytes: &[u8],
+    policy: &IngestionPolicy,
+) -> Result<IngestedArtifact, IngestionError> {
     policy.validate()?;
 
-    if artifact_name.is_empty() {
-        return Err(IngestionError::EmptyArtifactName);
-    }
-    if artifact_name.chars().any(char::is_control) {
-        return Err(IngestionError::ArtifactNameControlCharacter);
-    }
-    if artifact_name.len() > policy.maximum_artifact_name_bytes {
-        return Err(IngestionError::ArtifactNameTooLong {
-            actual_bytes: artifact_name.len(),
-            maximum_bytes: policy.maximum_artifact_name_bytes,
-        });
+    if let Some(artifact_name) = original_file_name {
+        validate_artifact_name(artifact_name, policy)?;
     }
     if bytes.is_empty() {
         return Err(IngestionError::EmptyArtifact);
@@ -136,17 +138,38 @@ pub fn ingest_bytes(
     }
 
     let artifact_sha256 = format!("{:x}", Sha256::digest(bytes));
+    let artifact_name = original_file_name.unwrap_or("artifact");
     let descriptor = ArtifactDescriptor {
         artifact_name: artifact_name.to_owned(),
+        original_file_name: original_file_name.map(str::to_owned),
         artifact_size_bytes: bytes.len() as u64,
         artifact_sha256,
-        artifact_kind: detect_artifact_kind(artifact_name, bytes),
+        artifact_kind: detect_artifact_kind(original_file_name.unwrap_or(""), bytes),
     };
 
     Ok(IngestedArtifact {
         descriptor,
         bytes: bytes.to_vec(),
     })
+}
+
+fn validate_artifact_name(
+    artifact_name: &str,
+    policy: &IngestionPolicy,
+) -> Result<(), IngestionError> {
+    if artifact_name.is_empty() {
+        return Err(IngestionError::EmptyArtifactName);
+    }
+    if artifact_name.chars().any(char::is_control) {
+        return Err(IngestionError::ArtifactNameControlCharacter);
+    }
+    if artifact_name.len() > policy.maximum_artifact_name_bytes {
+        return Err(IngestionError::ArtifactNameTooLong {
+            actual_bytes: artifact_name.len(),
+            maximum_bytes: policy.maximum_artifact_name_bytes,
+        });
+    }
+    Ok(())
 }
 
 fn detect_artifact_kind(artifact_name: &str, bytes: &[u8]) -> ArtifactKind {

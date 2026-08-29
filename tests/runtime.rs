@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisContext, AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest,
-    AnalyzerFailure, AnalyzerFinding, ArtifactKind, EvidenceKind, FormatAnalyzer, IngestionPolicy,
-    RuntimeDisposition, StaticAnalyzer, to_pretty_json,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, ArtifactKind, BoundedSourceContext, EvidenceKind, FormatAnalyzer,
+    IngestionPolicy, RuntimeDisposition, StaticAnalyzer, to_pretty_json,
 };
 
 fn request(profile: AnalysisProfile) -> AnalysisRequest {
@@ -13,11 +13,13 @@ fn request(profile: AnalysisProfile) -> AnalysisRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "request_runtime_001".to_owned(),
         profile,
-        context: AnalysisContext {
-            source_system: "integration_test".to_owned(),
-            source_reference: "fixture_runtime_001".to_owned(),
-            attributes: BTreeMap::new(),
-        },
+        bounded_source_context: Some(BoundedSourceContext {
+            source_channel_code: Some("integration_test".to_owned()),
+            original_file_name: Some("sample.bin".to_owned()),
+            declared_media_type: None,
+            host_artifact_reference: Some("fixture_runtime_001".to_owned()),
+            submitted_at: None,
+        }),
     }
 }
 
@@ -32,11 +34,7 @@ fn static_analysis_returns_attributable_evidence_without_a_verdict() {
     .expect("valid engine configuration must succeed");
 
     let bundle = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.exe",
-            b"MZ\x90\x00",
-        )
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"MZ\x90\x00")
         .expect("static analysis must complete");
 
     assert_eq!(bundle.disposition, RuntimeDisposition::Completed);
@@ -80,7 +78,7 @@ fn unavailable_dynamic_profiles_fail_closed_as_inconclusive() {
     ] {
         let engine = AnalysisEngine::default();
         let bundle = engine
-            .analyze_bytes(&request(profile), "sample.bin", b"abc")
+            .analyze_bytes(&request(profile), b"abc")
             .expect("bounded static foundation evidence must still be returned");
 
         assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
@@ -138,11 +136,7 @@ fn analyzer_findings_are_ordered_and_failures_are_preserved_as_evidence() {
     .expect("valid engine configuration must succeed");
 
     let bundle = engine
-        .analyze_bytes(
-            &request(AnalysisProfile::StaticOnly),
-            "sample.txt",
-            b"safe text",
-        )
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"safe text")
         .expect("analyzer failures must not erase available evidence");
 
     assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
@@ -176,7 +170,7 @@ fn runtime_rejects_invalid_requests_artifacts_and_engine_configuration() {
     let mut invalid_request = request(AnalysisProfile::StaticOnly);
     invalid_request.request_id.clear();
     assert_eq!(
-        engine.analyze_bytes(&invalid_request, "sample.bin", b"abc"),
+        engine.analyze_bytes(&invalid_request, b"abc"),
         Err(AnalysisError::Contract(
             quarantine_sandbox_runtime::ContractError::EmptyField {
                 field_name: "request_id"
@@ -185,7 +179,7 @@ fn runtime_rejects_invalid_requests_artifacts_and_engine_configuration() {
     );
 
     assert_eq!(
-        engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b""),
+        engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), b""),
         Err(AnalysisError::Ingestion(
             quarantine_sandbox_runtime::IngestionError::EmptyArtifact
         ))
@@ -225,10 +219,10 @@ fn runtime_rejects_invalid_requests_artifacts_and_engine_configuration() {
 fn job_and_evidence_identifiers_are_deterministic_and_json_is_pretty() {
     let engine = AnalysisEngine::default();
     let first = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
         .expect("analysis must succeed");
     let second = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), "sample.bin", b"abc")
+        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
         .expect("analysis must succeed");
 
     assert_eq!(first.analysis_job_id, second.analysis_job_id);
