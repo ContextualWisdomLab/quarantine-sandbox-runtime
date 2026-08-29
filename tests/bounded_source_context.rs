@@ -151,6 +151,7 @@ fn bounded_source_context_rejects_empty_malformed_and_sensitive_shapes() {
         "2026-08-18T24:00:00Z",
         "2026-08-18T12:60:00Z",
         "2026-08-18T12:00:61Z",
+        "2024-02-29T23:59:60Z",
         "2026-08-18T12:00:00.Z",
         "2026-08-18T12:00:00.AZ",
         "xxxx-08-18T12:00:00Z",
@@ -165,7 +166,7 @@ fn bounded_source_context_rejects_empty_malformed_and_sensitive_shapes() {
     }
 
     for valid_timestamp in [
-        "2024-02-29T23:59:60Z",
+        "2024-02-29T23:59:59Z",
         "2026-04-30T00:00:00Z",
         "2026-08-18T12:00:00.1Z",
         "2026-08-18T12:00:00.123456789Z",
