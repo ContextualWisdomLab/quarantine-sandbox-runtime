@@ -63,10 +63,8 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
     /// preserves the failure as evidence and marks the bundle inconclusive.
-    fn analyze(
-        &self,
-        artifact: &IngestedArtifact,
-    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(&self, artifact: &IngestedArtifact)
+    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
