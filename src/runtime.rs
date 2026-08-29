@@ -231,10 +231,7 @@ impl AnalysisEngine {
             ),
         ]);
         if let Some(original_file_name) = &artifact.descriptor().original_file_name {
-            identity_attributes.insert(
-                "original_file_name".to_owned(),
-                original_file_name.clone(),
-            );
+            identity_attributes.insert("original_file_name".to_owned(), original_file_name.clone());
         }
 
         push_record(
