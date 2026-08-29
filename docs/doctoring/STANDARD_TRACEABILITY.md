@@ -3,7 +3,7 @@
 | External source | Product decision | Evidence in this repository |
 |---|---|---|
 | JSON Schema Draft 2020-12 | strict versioned request and evidence contracts; non-standard byte-budget annotations make runtime-only UTF-8 limits explicit | `schemas/` and repository validator |
-| RFC 3339 | `submitted_at` accepts a deliberately narrower UTC-`Z` Internet timestamp profile and validates Gregorian calendar boundaries before analysis | `BoundedSourceContext`, contract tests, request schema, TRD |
+| RFC 3339 | `submitted_at` uses a deliberately narrower UTC-`Z` Internet timestamp profile, validates Gregorian calendar boundaries before analysis, and rejects leap-second notation because accepting second `60` correctly requires externally announced leap-second knowledge that this deterministic offline validation boundary does not carry | `BoundedSourceContext`, timestamp-profile tests, request schema, TRD |
 | RFC 6838 / BCP 13 | `declared_media_type` is bounded to media type/subtype syntax and remains an untrusted hint rather than detected content type | `BoundedSourceContext`, contract tests, request schema, TRD |
 | RFC 9694 / BCP 13 | RFC 6838 is updated for guidance on new top-level media types; this runtime does not invent or register top-level types and only validates submitted syntax | references and TRD |
 | W3C PROV-O | evidence must retain producer and derivation-ready identifiers | `EvidenceRecord`, ADR 0004 |
