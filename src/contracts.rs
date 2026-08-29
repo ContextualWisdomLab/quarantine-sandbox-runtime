@@ -714,7 +714,7 @@ fn is_valid_submitted_at(value: &str) -> bool {
     if !(1..=12).contains(&month)
         || hour > 23
         || minute > 59
-        || second > 60
+        || second > 59
         || day == 0
         || day > days_in_month(year, month)
     {
