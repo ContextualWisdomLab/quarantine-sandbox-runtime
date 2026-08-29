@@ -12,14 +12,16 @@ CWL products receive untrusted files through multiple sources, but executing or 
 
 Create `ContextualWisdomLab/quarantine-sandbox-runtime` as an independently deployable runtime whose first vertical slice is deliberately non-executing:
 
-1. source-agnostic request;
-2. bounded byte ingestion;
+1. source-agnostic request with optional typed, bounded source context;
+2. bounded byte ingestion with no required file name;
 3. immutable SHA-256 identity;
 4. deterministic file-family evidence;
 5. ordered static-analyzer port;
 6. attributable failures;
 7. explicit no-network/no-credentials/no-execution manifest;
 8. consumer-owned verdict.
+
+The bounded source context is correlation metadata, not payload. Its published fields are `source_channel_code`, `original_file_name`, `declared_media_type`, `host_artifact_reference`, and `submitted_at`. Unknown fields and empty present contexts fail closed, and the serialized context is capped at 1,024 UTF-8 bytes. The runtime accepts raw bytes without any source context.
 
 ## Alternatives rejected
 
@@ -38,7 +40,7 @@ Rejected because Linux microVM and Windows VM execution require independent host
 ## Public interfaces
 
 - `AnalysisRequest`
-- `AnalysisContext`
+- `BoundedSourceContext`
 - `AnalysisProfile`
 - `IngestionPolicy`
 - `ingest_bytes`
@@ -52,6 +54,7 @@ Rejected because Linux microVM and Windows VM execution require independent host
 
 ```text
 request validation
+→ optional bounded source-context validation
 → ingestion policy
 → SHA-256 identity
 → format classification
@@ -63,11 +66,11 @@ request validation
 
 ## Error handling
 
-Request and ingestion failures stop before analyzer invocation. Analyzer failures are converted to `tool_failure` evidence and downgrade the disposition to `inconclusive`. Dynamic requests remain inconclusive until a matching isolated worker exists.
+Request and source-context failures stop before artifact processing. Ingestion failures stop before analyzer invocation. Analyzer failures are converted to `tool_failure` evidence and downgrade the disposition to `inconclusive`. Dynamic requests remain inconclusive until a matching isolated worker exists.
 
 ## Testing
 
-Tests are committed before implementation and must first fail because the public API is absent. The next commit implements only enough behavior to make the contract tests pass. Exact-head CI then enforces lint, docs, policy, and coverage.
+The bounded source-context drift was repaired test-first: a regression test first established the missing public contract, optional-context behavior, malformed/sensitive-shape rejection, aggregate byte cap, and no-required-filename runtime behavior. Implementation and checked-in schemas then follow that executable contract. Exact-head CI enforces lint, docs, policy, and complete production coverage.
 
 ## Follow-on slices
 

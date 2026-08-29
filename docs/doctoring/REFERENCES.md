@@ -1,6 +1,12 @@
 # References
 
+Dürst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
+
 Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md
+
+Freed, N., Klensin, J., & Hansen, T. (2013). *Media type specifications and registration procedures (RFC 6838).* RFC Editor. https://doi.org/10.17487/RFC6838
+
+Klyne, G., & Newman, C. (2002). *Date and time on the Internet: Timestamps (RFC 3339).* RFC Editor. https://doi.org/10.17487/RFC3339
 
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 

@@ -10,6 +10,7 @@ Trigger adapter                     Consumer control plane
 versioned request                              evidence bundle
         |                                      |
         +----> Quarantine Sandbox Runtime -----+
+               - bounded optional source context
                - artifact identity
                - static analyzers
                - isolated worker adapters
@@ -23,11 +24,11 @@ The runtime is an execution and evidence plane. It is not a SIEM, SOAR, WAF, inc
 
 ### Contract boundary
 
-Rejects malformed request metadata before artifact processing and keeps consumer-facing structures stable through schema versions.
+Rejects malformed request metadata before artifact processing and keeps consumer-facing structures stable through schema versions. Trigger adapters may omit source context entirely. When they provide it, the runtime accepts only the typed `BoundedSourceContext` fields and rejects unknown, path-like, credential-shaped, URL-shaped, malformed, or aggregate-oversized metadata. Source metadata never grants analyzer or verdict authority.
 
 ### Ingestion boundary
 
-Owns byte limits, immutable hash identity, non-executing format classification, and original-byte preservation in process memory.
+Owns byte limits, immutable hash identity, non-executing format classification, and original-byte preservation in process memory. A source-provided original file name is optional and remains a non-authoritative classification hint.
 
 ### Static analyzer boundary
 
