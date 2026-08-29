@@ -639,9 +639,9 @@ fn is_valid_declared_media_type(value: &str) -> bool {
     let Some((top_level, remainder)) = value.split_once('/') else {
         return false;
     };
-    let (subtype, parameters) = remainder.split_once(';').map_or((remainder, None), |parts| {
-        (parts.0, Some(parts.1))
-    });
+    let (subtype, parameters) = remainder
+        .split_once(';')
+        .map_or((remainder, None), |parts| (parts.0, Some(parts.1)));
     if !is_media_type_token(top_level) || !is_media_type_token(subtype) {
         return false;
     }
@@ -673,9 +673,9 @@ fn is_valid_host_artifact_reference(value: &str) -> bool {
     if lowercase.starts_with("github_pat_") || lowercase.starts_with("bearer_") {
         return false;
     }
-    value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
-    })
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':'))
 }
 
 fn is_valid_submitted_at(value: &str) -> bool {
@@ -726,17 +726,18 @@ fn is_valid_submitted_at(value: &str) -> bool {
     }
     bytes.get(19) == Some(&b'.')
         && bytes.len() > 21
-        && bytes[20..bytes.len() - 1]
-            .iter()
-            .all(u8::is_ascii_digit)
+        && bytes[20..bytes.len() - 1].iter().all(u8::is_ascii_digit)
 }
 
 fn parse_ascii_u32(bytes: &[u8]) -> Option<u32> {
-    if bytes.iter().all(u8::is_ascii_digit) {
-        std::str::from_utf8(bytes).ok()?.parse().ok()
-    } else {
-        None
+    let mut value = 0_u32;
+    for byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value * 10 + u32::from(*byte - b'0');
     }
+    Some(value)
 }
 
 const fn days_in_month(year: u32, month: u32) -> u32 {
