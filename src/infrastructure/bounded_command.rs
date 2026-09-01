@@ -71,18 +71,32 @@ impl BoundedCommandRunner {
         let status_result = supervise_child(&mut child, deadline, overflow.as_ref());
         let stdout_result = join_stream(stdout_handle);
         let stderr_result = join_stream(stderr_handle);
-        let status = status_result?;
-        let stdout = stdout_result?;
-        let stderr = stderr_result?;
-        if overflow.load(Ordering::Acquire) {
-            return Err(BoundedCommandError::OutputLimit);
-        }
-        Ok(Output {
-            status,
-            stdout,
-            stderr,
-        })
+        finalize_output(
+            status_result,
+            stdout_result,
+            stderr_result,
+            overflow.load(Ordering::Acquire),
+        )
     }
+}
+
+fn finalize_output(
+    status_result: Result<ExitStatus, BoundedCommandError>,
+    stdout_result: Result<Vec<u8>, BoundedCommandError>,
+    stderr_result: Result<Vec<u8>, BoundedCommandError>,
+    overflowed: bool,
+) -> Result<Output, BoundedCommandError> {
+    let status = status_result?;
+    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    if overflowed {
+        return Err(BoundedCommandError::OutputLimit);
+    }
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 trait ChildProcess {
@@ -190,8 +204,8 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, drain_stream, join_stream, kill_and_reap,
-        supervise_child,
+        BoundedCommandError, ChildProcess, drain_stream, finalize_output, join_stream,
+        kill_and_reap, supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -287,6 +301,56 @@ mod tests {
         assert_eq!(
             supervise_child(&mut failed, Instant::now(), &overflow),
             Err(BoundedCommandError::Wait)
+        );
+    }
+
+    #[test]
+    fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {
+        let completed = finalize_output(
+            Ok(success_status()),
+            Ok(b"stdout".to_vec()),
+            Ok(b"stderr".to_vec()),
+            false,
+        )
+        .expect("complete bounded output should be returned");
+        assert_eq!(completed.stdout, b"stdout");
+        assert_eq!(completed.stderr, b"stderr");
+
+        assert_eq!(
+            finalize_output(
+                Ok(success_status()),
+                Ok(Vec::new()),
+                Ok(Vec::new()),
+                true,
+            ),
+            Err(BoundedCommandError::OutputLimit)
+        );
+        assert_eq!(
+            finalize_output(
+                Err(BoundedCommandError::Wait),
+                Ok(Vec::new()),
+                Ok(Vec::new()),
+                false,
+            ),
+            Err(BoundedCommandError::Wait)
+        );
+        assert_eq!(
+            finalize_output(
+                Ok(success_status()),
+                Err(BoundedCommandError::Capture),
+                Ok(Vec::new()),
+                false,
+            ),
+            Err(BoundedCommandError::Capture)
+        );
+        assert_eq!(
+            finalize_output(
+                Ok(success_status()),
+                Ok(Vec::new()),
+                Err(BoundedCommandError::Capture),
+                false,
+            ),
+            Err(BoundedCommandError::Capture)
         );
     }
 
