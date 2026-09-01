@@ -290,13 +290,14 @@ impl RootlessPodmanAdapter {
         validate_backend_security(&info)?;
 
         self.checked_output("network_create", plan.network_create_args())?;
-        let create_output = match self.checked_output("container_create", plan.container_create_args()) {
-            Ok(output) => output,
-            Err(error) => {
-                self.cleanup_network(&plan)?;
-                return Err(error);
-            }
-        };
+        let create_output =
+            match self.checked_output("container_create", plan.container_create_args()) {
+                Ok(output) => output,
+                Err(error) => {
+                    self.cleanup_network(&plan)?;
+                    return Err(error);
+                }
+            };
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
@@ -413,10 +414,20 @@ impl RootlessPodmanAdapter {
             });
         }
 
-        require_control("read_only_root_filesystem", container.host_config.readonly_rootfs)?;
+        require_control(
+            "read_only_root_filesystem",
+            container.host_config.readonly_rootfs,
+        )?;
         require_control("unprivileged_container", !container.host_config.privileged)?;
-        require_control("all_capabilities_dropped", container.effective_caps.is_empty())?;
-        let security_options = container.host_config.security_opt.unwrap_or_default();
+        require_control(
+            "all_capabilities_dropped",
+            container.effective_caps.is_empty(),
+        )?;
+        let security_options = container
+            .host_config
+            .security_opt
+            .as_deref()
+            .unwrap_or_default();
         require_control(
             "no_new_privileges",
             security_options
@@ -433,8 +444,14 @@ impl RootlessPodmanAdapter {
             "isolated_user_namespace",
             container.host_config.userns_mode == "auto",
         )?;
-        require_control("isolated_pid_namespace", container.host_config.pid_mode == "private")?;
-        require_control("isolated_ipc_namespace", container.host_config.ipc_mode == "none")?;
+        require_control(
+            "isolated_pid_namespace",
+            container.host_config.pid_mode == "private",
+        )?;
+        require_control(
+            "isolated_ipc_namespace",
+            container.host_config.ipc_mode == "none",
+        )?;
         require_control(
             "non_root_identity",
             container.config.user
@@ -456,7 +473,10 @@ impl RootlessPodmanAdapter {
         let network_output = self.checked_output("network_inspect", &network_args)?;
         let network: NetworkInspection =
             parse_single_inspection("network_inspect", &network_output.stdout)?;
-        require_control("external_egress_denied", network.internal && !network.dns_enabled)?;
+        require_control(
+            "external_egress_denied",
+            network.internal && !network.dns_enabled,
+        )?;
 
         let port_args = [
             "port".to_owned(),
