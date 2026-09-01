@@ -1,4 +1,4 @@
-name: one-shot rustfmt repair
+name: one-shot effective isolation repair
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  rustfmt-fix:
+  repair:
     if: github.actor == 'seonghobae'
     runs-on: ubuntu-24.04
     steps:
@@ -21,18 +21,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "31c4d2057f3628395485b96d625834fea0bb28e1"
+          test "$(git rev-parse HEAD^)" = "3c2b46668bc15e5afec98d4aabfe86d36a0caad1"
+      - name: Repair fake Podman effective-security evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/application_service_ownership.rs")
+          text = path.read_text()
+
+          old_caps = r'"EffectiveCaps":[],"Config"'
+          new_caps = r'"EffectiveCaps":[],"BoundingCaps":[],"Config"'
+          if text.count(old_caps) != 1:
+              raise SystemExit(f"expected one legacy capability fixture, found {text.count(old_caps)}")
+          text = text.replace(old_caps, new_caps, 1)
+
+          marker = r"  create:--name) printf 'fake-container-id\\n' ;;\\n"
+          top_case = (
+              r"  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n"
+              r"1 filter 0000000000000000 0000000000000000 0000000000000000 "
+              r"0000000000000000 0000000000000000 containers-default\\n' ;;\\n"
+          )
+          if text.count(marker) != 1:
+              raise SystemExit(f"expected one fake Podman create case, found {text.count(marker)}")
+          text = text.replace(marker, top_case + marker, 1)
+          path.write_text(text)
+          PY
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: '1.97.1'
           components: rustfmt
-      - name: Apply repository rustfmt
+      - name: Format and verify focused ownership behavior
         shell: bash
-        run: cargo fmt --all
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo test --locked --test application_service_ownership
       - name: Remove one-shot workflow
         shell: bash
         run: rm .github/workflows/tmp-rustfmt-fix.yml
-      - name: Publish formatting repair
+      - name: Publish causal repair
         shell: bash
         run: |
           set -euo pipefail
@@ -40,5 +70,5 @@ jobs:
           git config user.email "me@seonghobae.me"
           git add -A
           git diff --cached --check
-          git commit -m "style: apply rustfmt to effective isolation stack"
+          git commit -m "fix: refresh effective isolation test evidence"
           git push origin HEAD:feat/effective-isolation-attestation
