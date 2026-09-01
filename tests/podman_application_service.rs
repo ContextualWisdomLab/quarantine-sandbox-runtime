@@ -64,11 +64,11 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
-fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
+fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  rootless_false:info:*) printf 'false\\n'; exit 0 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display()
     );
     fs::write(&program, script).expect("fake Podman should be writable");
@@ -80,6 +80,16 @@ fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
     (program, log)
 }
 
+fn closed_loopback_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
+    listener.local_addr().expect("address should resolve").port()
+}
+
+fn remove_fixture(program: PathBuf, log: PathBuf) {
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+}
+
 #[test]
 fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
@@ -87,7 +97,7 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
         .local_addr()
         .expect("listener should expose its address")
         .port();
-    let (program, log) = write_fake_podman(ready_port);
+    let (program, log) = write_fake_podman("success", ready_port);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let lease = adapter
@@ -127,9 +137,10 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
         "info --format",
         "network create",
         "create --name",
+        "--http-proxy=false",
         "start ",
         "port ",
-        "stop --time",
+        "stop --time 2",
         "rm --force",
         "network rm --force",
     ] {
@@ -139,29 +150,163 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
         );
     }
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(log);
+    remove_fixture(program, log);
     drop(listener);
 }
 
 #[test]
+fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created() {
+    let missing = RootlessPodmanAdapter::new(temporary_path("missing-podman"));
+    assert_eq!(
+        missing.launch_at(&request(), &policy(50), 1_780_000_000),
+        Err(ApplicationServiceError::BackendInvocationFailed {
+            operation: "rootless_probe",
+        })
+    );
+
+    for (mode, expected) in [
+        (
+            "rootless_command_fail",
+            ApplicationServiceError::BackendCommandFailed {
+                operation: "rootless_probe",
+            },
+        ),
+        ("rootless_false", ApplicationServiceError::BackendNotRootless),
+    ] {
+        let (program, log) = write_fake_podman(mode, closed_loopback_port());
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+            Err(expected)
+        );
+        let calls = fs::read_to_string(&log).expect("probe call should be recorded");
+        assert!(!calls.contains("network create"));
+        remove_fixture(program, log);
+    }
+}
+
+#[test]
+fn creation_failures_cleanup_only_resources_that_were_created() {
+    let (program, log) = write_fake_podman("network_create_fail", closed_loopback_port());
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+        Err(ApplicationServiceError::BackendCommandFailed {
+            operation: "network_create",
+        })
+    );
+    let calls = fs::read_to_string(&log).expect("network failure calls should be recorded");
+    assert!(!calls.contains("create --name"));
+    remove_fixture(program, log);
+
+    let (program, log) = write_fake_podman("container_create_fail", closed_loopback_port());
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+        Err(ApplicationServiceError::BackendCommandFailed {
+            operation: "container_create",
+        })
+    );
+    let calls = fs::read_to_string(&log).expect("container failure calls should be recorded");
+    assert!(calls.contains("network rm --force"));
+    remove_fixture(program, log);
+
+    let (program, log) = write_fake_podman("container_create_cleanup_fail", closed_loopback_port());
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+        Err(ApplicationServiceError::CleanupFailed)
+    );
+    let calls = fs::read_to_string(&log).expect("failed cleanup call should be recorded");
+    assert!(calls.contains("network rm --force"));
+    remove_fixture(program, log);
+}
+
+#[test]
+fn start_and_port_failures_stop_or_remove_started_resources() {
+    for (mode, expected_operation) in [
+        ("start_fail", "container_start"),
+        ("port_fail", "port_query"),
+    ] {
+        let (program, log) = write_fake_podman(mode, closed_loopback_port());
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+            Err(ApplicationServiceError::BackendCommandFailed {
+                operation: expected_operation,
+            })
+        );
+        let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
+        assert!(calls.contains("rm --force"));
+        assert!(calls.contains("network rm --force"));
+        if mode == "port_fail" {
+            assert!(calls.contains("stop --time 2"));
+        }
+        remove_fixture(program, log);
+    }
+}
+
+#[test]
+fn malformed_port_mappings_fail_closed_after_cleanup() {
+    for mode in ["invalid_port_host", "invalid_port_text", "invalid_port_zero"] {
+        let (program, log) = write_fake_podman(mode, closed_loopback_port());
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+            Err(ApplicationServiceError::InvalidPortMapping)
+        );
+        let calls = fs::read_to_string(&log).expect("port cleanup should be recorded");
+        assert!(calls.contains("stop --time 2"));
+        assert!(calls.contains("rm --force"));
+        assert!(calls.contains("network rm --force"));
+        remove_fixture(program, log);
+    }
+}
+
+#[test]
 fn readiness_timeout_fails_closed_and_removes_created_isolation_resources() {
-    let unavailable_port = {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
-        listener.local_addr().expect("address should resolve").port()
-    };
-    let (program, log) = write_fake_podman(unavailable_port);
+    let unavailable_port = closed_loopback_port();
+    let (program, log) = write_fake_podman("success", unavailable_port);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
-    assert!(matches!(
+    assert_eq!(
         adapter.launch_at(&request(), &policy(30), 1_780_000_000),
         Err(ApplicationServiceError::ReadinessTimeout)
-    ));
+    );
 
     let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
+    assert!(calls.contains("stop --time 2"));
     assert!(calls.contains("rm --force"));
     assert!(calls.contains("network rm --force"));
+    remove_fixture(program, log);
+}
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(log);
+#[test]
+fn cleanup_failure_is_never_hidden_by_readiness_or_termination_results() {
+    let unavailable_port = closed_loopback_port();
+    let (program, log) = write_fake_podman("readiness_cleanup_fail", unavailable_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(30), 1_780_000_000),
+        Err(ApplicationServiceError::CleanupFailed)
+    );
+    remove_fixture(program, log);
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let (program, log) = write_fake_podman("termination_cleanup_fail", ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let lease = adapter
+        .launch_at(&request(), &policy(100), 1_780_000_000)
+        .expect("launch should succeed before termination failure");
+    assert_eq!(
+        adapter.terminate_at(&lease, 1_780_000_001),
+        Err(ApplicationServiceError::CleanupFailed)
+    );
+    let calls = fs::read_to_string(&log).expect("all cleanup attempts should be recorded");
+    assert!(calls.contains("stop --time 2"));
+    assert!(calls.contains("rm --force"));
+    assert!(calls.contains("network rm --force"));
+    remove_fixture(program, log);
+    drop(listener);
 }
