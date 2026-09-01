@@ -86,12 +86,18 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
     for required in [
         "--pull=never",
         "--read-only",
+        "--read-only-tmpfs=false",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
         "--userns=auto",
+        "--ipc=none",
+        "--pid=private",
+        "--restart=no",
+        "--log-driver=none",
     ] {
         assert!(create.iter().any(|argument| argument == required), "missing {required}");
     }
+    assert!(create.windows(2).any(|pair| pair == ["--timeout", "300"]));
     assert!(create.iter().any(|argument| argument == "--publish"));
     assert!(
         create
