@@ -24,6 +24,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Versioned `ApplicationServiceLease`, `IsolationAttestation`, and `CleanupReceipt` evidence contracts.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
 - Real rootless-Podman acceptance covering the pinned backend, immutable fixture pre-pull, effective isolation, bounded HTTP readiness, explicit cleanup, and final container/network leak rejection on the reviewed source head.
+- Caller-scoped `LeaseOwnerId`, `ApplicationServiceBackend` port, and process-local `ApplicationServiceCoordinator` for active-lease ownership, idempotent replay, bounded expiry cleanup, and backend-neutral lifecycle coordination.
+- Regression coverage for duplicate retry suppression, changed-request conflicts, effective-policy conflicts, wrong-owner termination, concurrent duplicate launch, failed-launch reservation release, and expired-lease attribution.
 - Consumer owner-path integration issue for `contextual-orchestrator` so Chat/Agent domain code consumes the published lease contract rather than directly invoking Podman/containerd.
 - Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
 
@@ -32,6 +34,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.
 - Artifact-analysis implementation moved from generic crate-root files into `src/artifact_analysis/` to match the accepted DDD bounded context while preserving the public crate facade.
 - Rootless Podman implementation moved from the Core `sandbox_execution` path into `src/infrastructure/`; the Core no longer depends on `application_service` error types.
+- Podman now implements the application-service lifecycle port from `src/infrastructure/`; the Supporting `application_service` coordinator does not depend on the concrete Podman adapter.
 - Pre-publication duplicate ADR identifiers were consolidated into the canonical ADR 0001–0006 sequence before protected-branch integration.
 - Evidence identity now includes policy, source revision, and ordered analyzer identifiers.
 - Static analyzer findings are restricted to file-format and static-capability evidence.
@@ -52,8 +55,11 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Podman backend must report rootless mode; service publication is validated as IPv4 loopback before a lease is returned.
 - Podman host proxy environment inheritance is explicitly disabled so `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` values cannot become ambient application inputs.
 - Partial-launch/readiness failures attempt cleanup and cleanup uncertainty becomes `CleanupFailed` rather than being hidden.
+- Lease ownership is scoped by authenticated command context rather than an untrusted request field; wrong-owner cleanup fails before the backend is invoked.
+- Application-service replay is bound to both immutable request content and the effective isolation policy, so a changed policy cannot silently reuse a lease created under older limits.
 
 ### Not yet release evidence
 
 - The real rootless-Podman lane passed on the reviewed source head, but final release readiness still requires the same acceptance to remain green on the unchanged release head together with verify, complete coverage, security, SAST, review, SBOM, provenance, and protected-merge evidence. Fake-process tests alone remain insufficient isolation proof.
-- Durable orphan/lease reclamation, gVisor/containerd/Kubernetes adapters, controlled egress, secret broker, and stronger dynamic-detonation profiles remain follow-on work.
+- Caller-scoped lease ownership is currently process-local; authenticated transport binding, durable restart/orphan reclamation, distributed admission/resource reservation, stable wire errors, and signed durable receipts remain follow-on work.
+- gVisor/containerd/Kubernetes adapters, controlled egress, secret broker, and stronger dynamic-detonation profiles remain follow-on work.
