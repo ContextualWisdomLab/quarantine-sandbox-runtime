@@ -68,6 +68,34 @@ def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     return sorted(uncovered - covered)
 
 
+def _uncovered_segment_starts(file_record: dict[str, Any]) -> list[tuple[int, int]]:
+    """Return zero-count counted region-entry starts from one LLVM file record.
+
+    LLVM's file-level ``segments`` surface is already scoped to the file and is
+    therefore a useful diagnostic when function-region attribution cannot name
+    an uncovered source line. Gap regions and non-counted boundary markers are
+    excluded so the output identifies executable zero-count region entries
+    rather than formatting or expansion boundaries.
+    """
+
+    locations: set[tuple[int, int]] = set()
+    segments = file_record.get("segments")
+    if not isinstance(segments, list):
+        return []
+    for segment in segments:
+        if not isinstance(segment, list) or len(segment) < 6:
+            continue
+        line_number = int(segment[0])
+        column_number = int(segment[1])
+        execution_count = int(segment[2])
+        has_count = bool(segment[3])
+        is_region_entry = bool(segment[4])
+        is_gap_region = bool(segment[5])
+        if has_count and is_region_entry and not is_gap_region and execution_count == 0:
+            locations.add((line_number, column_number))
+    return sorted(locations)
+
+
 def _parse_arguments() -> argparse.Namespace:
     """Parse the coverage evidence path and optional branch requirement."""
 
@@ -123,6 +151,13 @@ def main() -> int:
             if missing_lines:
                 joined_lines = ", ".join(str(line_number) for line_number in missing_lines)
                 print(f"uncovered lines: {filename}: {joined_lines}")
+            segment_starts = _uncovered_segment_starts(file_record)
+            if segment_starts:
+                joined_locations = ", ".join(
+                    f"{line_number}:{column_number}"
+                    for line_number, column_number in segment_starts
+                )
+                print(f"uncovered segment starts: {filename}: {joined_locations}")
 
     if failures:
         print("; ".join(failures), file=sys.stderr)
