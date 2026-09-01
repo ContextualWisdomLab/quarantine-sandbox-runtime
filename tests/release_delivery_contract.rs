@@ -9,6 +9,19 @@ fn repository_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
+    let marker = format!("\n  {job_name}:\n");
+    let start = workflow
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing release job {job_name}"));
+    let body_start = start + marker.len();
+    let remainder = &workflow[body_start..];
+    let end = remainder
+        .find("\n  ")
+        .map_or(workflow.len(), |offset| body_start + offset);
+    &workflow[start..end]
+}
+
 #[test]
 fn repository_exposes_fail_closed_release_delivery_contract() {
     let root = repository_root();
@@ -50,4 +63,33 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
             "release workflow is missing required fail-closed evidence token: {required}"
         );
     }
+}
+
+#[test]
+fn release_hosted_jobs_use_explicit_supported_runner_image() {
+    let release = fs::read_to_string(repository_root().join(".github/workflows/release.yml"))
+        .expect("release workflow must be readable");
+
+    for job_name in [
+        "preflight",
+        "statement-coverage",
+        "branch-coverage",
+        "package-evidence",
+        "attest-and-release",
+    ] {
+        let job = job_section(&release, job_name);
+        assert!(
+            job.contains("runs-on: ubuntu-24.04"),
+            "{job_name} must use the explicit supported hosted runner image"
+        );
+        assert!(
+            !job.contains("runs-on: ubuntu-latest"),
+            "{job_name} must not depend on the floating hosted runner selector"
+        );
+    }
+
+    let hostile = job_section(&release, "hostile-runtime-e2e");
+    assert!(hostile.contains("self-hosted"));
+    assert!(hostile.contains("cwl-hostile-workload"));
+    assert!(hostile.contains("selinux"));
 }
