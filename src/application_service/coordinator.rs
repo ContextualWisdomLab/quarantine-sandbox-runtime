@@ -485,3 +485,139 @@ fn fingerprint_request_and_policy(
     }
     format!("{:x}", hasher.finalize())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::{
+            Arc, Barrier,
+            atomic::{AtomicUsize, Ordering},
+        },
+        thread,
+    };
+
+    use super::{
+        ApplicationServiceBackend, ApplicationServiceCoordinator,
+        ApplicationServiceCoordinatorError, ApplicationServiceError, ApplicationServiceLease,
+        ApplicationServiceRequest, CleanupReceipt, LeaseOwnerId,
+    };
+    use crate::{IsolationPolicy, ResourceRequest, ServiceEndpoint, ServiceProtocol};
+    use crate::sandbox_execution::RuntimeLeaseMetadata;
+
+    struct BlockingBackend {
+        launch_entered: Arc<Barrier>,
+        launch_resume: Arc<Barrier>,
+        terminate_calls: Arc<AtomicUsize>,
+    }
+
+    impl ApplicationServiceBackend for BlockingBackend {
+        fn launch_at(
+            &self,
+            request: &ApplicationServiceRequest,
+            policy: &IsolationPolicy,
+            started_at_epoch_seconds: u64,
+        ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
+            self.launch_entered.wait();
+            self.launch_resume.wait();
+            Ok(ApplicationServiceLease::new(
+                request,
+                RuntimeLeaseMetadata {
+                    backend_id: "test_backend",
+                    sandbox_id: "sandbox-registration-gap".to_owned(),
+                    network_id: "network-registration-gap".to_owned(),
+                    policy_id: policy.policy_id.clone(),
+                    policy_sha256: policy.effective_policy_sha256(),
+                    started_at_epoch_seconds,
+                    expires_at_epoch_seconds: started_at_epoch_seconds
+                        + u64::from(request.resources.lease_seconds),
+                    shutdown_grace_seconds: policy.shutdown_grace_seconds,
+                },
+                ServiceEndpoint::loopback(45_321, request.protocol),
+            ))
+        }
+
+        fn terminate_at(
+            &self,
+            lease: &ApplicationServiceLease,
+            terminated_at_epoch_seconds: u64,
+        ) -> Result<CleanupReceipt, ApplicationServiceError> {
+            self.terminate_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
+        }
+    }
+
+    fn request() -> ApplicationServiceRequest {
+        ApplicationServiceRequest {
+            schema_version: "1.0.0".to_owned(),
+            request_id: "registration-poison".to_owned(),
+            image_reference: format!("localhost/cwl/tool@sha256:{}", "d".repeat(64)),
+            container_port: 8_080,
+            protocol: ServiceProtocol::Http,
+            command: vec!["serve".to_owned()],
+            resources: ResourceRequest {
+                memory_bytes: 64 * 1024 * 1024,
+                cpu_millicores: 500,
+                maximum_processes: 16,
+                lease_seconds: 30,
+                tmpfs_bytes: 8 * 1024 * 1024,
+            },
+        }
+    }
+
+    fn policy() -> IsolationPolicy {
+        IsolationPolicy {
+            policy_id: "registration_cleanup_policy".to_owned(),
+            maximum_memory_bytes: 128 * 1024 * 1024,
+            maximum_cpu_millicores: 1_000,
+            maximum_processes: 32,
+            maximum_lease_seconds: 60,
+            maximum_tmpfs_bytes: 16 * 1024 * 1024,
+            readiness_timeout_millis: 1_000,
+            readiness_poll_interval_millis: 10,
+            shutdown_grace_seconds: 1,
+            run_as_user_id: 65_532,
+            run_as_group_id: 65_532,
+        }
+    }
+
+    #[test]
+    fn successful_backend_launch_is_cleaned_if_registry_becomes_unavailable() {
+        let launch_entered = Arc::new(Barrier::new(2));
+        let launch_resume = Arc::new(Barrier::new(2));
+        let terminate_calls = Arc::new(AtomicUsize::new(0));
+        let coordinator = Arc::new(ApplicationServiceCoordinator::new(BlockingBackend {
+            launch_entered: Arc::clone(&launch_entered),
+            launch_resume: Arc::clone(&launch_resume),
+            terminate_calls: Arc::clone(&terminate_calls),
+        }));
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
+            .expect("test owner should satisfy the bounded identity contract");
+        let worker_coordinator = Arc::clone(&coordinator);
+        let worker_owner = owner.clone();
+        let worker = thread::spawn(move || {
+            worker_coordinator.launch_at(&worker_owner, &request(), &policy(), 1_780_000_000)
+        });
+
+        launch_entered.wait();
+        let poison_target = Arc::clone(&coordinator);
+        let poison = thread::spawn(move || {
+            let _guard = poison_target
+                .leases
+                .lock()
+                .expect("registry should be healthy before explicit poisoning");
+            panic!("poison registry after backend launch begins");
+        });
+        assert!(poison.join().is_err());
+        launch_resume.wait();
+
+        assert_eq!(
+            worker.join().expect("launch worker should not panic"),
+            Err(ApplicationServiceCoordinatorError::StateUnavailable)
+        );
+        assert_eq!(
+            terminate_calls.load(Ordering::SeqCst),
+            1,
+            "a successful backend launch must be cleaned up when the lease cannot be registered"
+        );
+    }
+}
