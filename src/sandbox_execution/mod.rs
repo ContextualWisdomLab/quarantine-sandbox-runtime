@@ -209,17 +209,11 @@ impl IsolationPolicy {
 }
 
 fn hash_component(hasher: &mut Sha256, name: &str, value: &[u8]) {
-    hasher.update(
-        u64::try_from(name.len())
-            .expect("Rust target pointer width must fit u64")
-            .to_be_bytes(),
-    );
+    // Rust supports pointer widths up to 64 bits, so usize lengths fit the
+    // canonical unsigned 64-bit wire framing without a fallible conversion.
+    hasher.update((name.len() as u64).to_be_bytes());
     hasher.update(name.as_bytes());
-    hasher.update(
-        u64::try_from(value.len())
-            .expect("Rust target pointer width must fit u64")
-            .to_be_bytes(),
-    );
+    hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);
 }
 
