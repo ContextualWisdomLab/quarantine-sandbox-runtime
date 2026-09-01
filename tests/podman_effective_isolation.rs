@@ -86,8 +86,13 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     } else {
         "containers-default"
     };
+    let top_label = if mode == "lsm_unconfined" {
+        "unconfined"
+    } else {
+        "containers-default"
+    };
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"{apparmor_profile}\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":{bounding_caps},\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":{readonly_rootfs},\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":{internal_network},\"dns_enabled\":false}}]' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - {top_label}\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"{apparmor_profile}\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":{bounding_caps},\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":{readonly_rootfs},\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":{internal_network},\"dns_enabled\":false}}]' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         host_security,
     );
@@ -135,6 +140,7 @@ fn lease_attests_only_effective_controls_verified_after_start() {
     let calls = fs::read_to_string(&log).expect("fake Podman calls should be recorded");
     assert!(calls.contains("info --format json"));
     assert!(calls.contains("container inspect --format json"));
+    assert!(calls.contains("top "));
     assert!(calls.contains("network inspect --format json"));
 
     remove_fixture(program, log);
