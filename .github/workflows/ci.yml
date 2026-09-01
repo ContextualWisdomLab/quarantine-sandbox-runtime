@@ -133,12 +133,17 @@ jobs:
       - name: Capture hosted negative LSM capability evidence
         run: |
           test "$(podman --version)" = "podman version 5.8.4"
-          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
-          apparmor_enabled="$(podman info --format '{{.Host.Security.ApparmorEnabled}}')"
-          selinux_enabled="$(podman info --format '{{.Host.Security.SelinuxEnabled}}')"
-          case "$apparmor_enabled" in true|false) ;; *) exit 1 ;; esac
-          case "$selinux_enabled" in true|false) ;; *) exit 1 ;; esac
-          printf 'ApparmorEnabled=%s\nSelinuxEnabled=%s\n' "$apparmor_enabled" "$selinux_enabled"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert isinstance(security["apparmorEnabled"], bool)
+          assert isinstance(security["selinuxEnabled"], bool)
+          print(f"apparmorEnabled={security['apparmorEnabled']}")
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
       - name: Pre-pull immutable fixture outside the application launch path
         run: |
           podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
@@ -178,8 +183,15 @@ jobs:
         run: |
           test -n "$RUNNER_NAME"
           test "$(podman --version)" = "podman version 5.8.4"
-          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
-          test "$(podman info --format '{{.Host.Security.SelinuxEnabled}}')" = "true"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert security["selinuxEnabled"] is True
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
       - name: Pre-pull immutable fixture outside the application launch path
         run: |
           podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
