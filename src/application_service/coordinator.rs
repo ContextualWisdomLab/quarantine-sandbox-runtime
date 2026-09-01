@@ -285,6 +285,9 @@ where
 
     /// Terminate one lease only when the caller owns the active registry entry.
     ///
+    /// Cleanup failure remains the externally visible safety result even when
+    /// the registry also becomes unavailable while recording that failure.
+    ///
     /// # Errors
     ///
     /// Returns [`ApplicationServiceCoordinatorError::UnknownLease`] for a wrong
@@ -333,14 +336,20 @@ where
         let result = self
             .backend
             .terminate_at(&registered_lease, terminated_at_epoch_seconds);
-        self.finish_termination(
+        let registry_result = self.finish_termination(
             &key,
             request_fingerprint,
             registered_lease,
             cleanup_attempts,
             &result,
-        )?;
-        result.map_err(Into::into)
+        );
+        match result {
+            Ok(receipt) => {
+                registry_result?;
+                Ok(receipt)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Clean up at most 64 active leases whose expiry is not later than `now`.
@@ -349,12 +358,14 @@ where
     /// cleanup pass can retry it. Previously unattempted expired leases are
     /// selected before repeatedly failing entries so one bad cleanup cannot
     /// starve later expired workloads. This process-local function does not
-    /// claim crash/restart orphan recovery.
+    /// claim crash/restart orphan recovery. If both cleanup and registry
+    /// recording fail, the cleanup failure remains externally visible.
     ///
     /// # Errors
     ///
     /// Returns [`ApplicationServiceCoordinatorError::StateUnavailable`] if the
-    /// in-memory registry cannot be accessed safely.
+    /// in-memory registry cannot be accessed safely while no backend cleanup
+    /// failure needs to take precedence.
     pub fn cleanup_expired_at(
         &self,
         now_epoch_seconds: u64,
@@ -399,13 +410,19 @@ where
         let mut outcomes = Vec::with_capacity(candidates.len());
         for (key, request_fingerprint, lease, cleanup_attempts) in candidates {
             let result = self.backend.terminate_at(&lease, now_epoch_seconds);
-            self.finish_termination(
+            let registry_result = self.finish_termination(
                 &key,
                 request_fingerprint,
                 lease.clone(),
                 cleanup_attempts,
                 &result,
-            )?;
+            );
+            if let Err(error) = &result
+                && registry_result.is_err()
+            {
+                return Err(error.clone().into());
+            }
+            registry_result?;
             outcomes.push(ExpiredLeaseCleanupResult {
                 lease_owner_id: key.lease_owner_id,
                 request_id: key.request_id,
