@@ -341,22 +341,22 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output = self
-            .command_runner()
-            .run(&self.program, args)
-            .map_err(|error| match error {
-                BoundedCommandError::Timeout => {
-                    ApplicationServiceError::BackendCommandTimedOut { operation }
-                }
-                BoundedCommandError::OutputLimit => {
-                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                }
-                BoundedCommandError::Spawn
-                | BoundedCommandError::Wait
-                | BoundedCommandError::Capture => {
-                    ApplicationServiceError::BackendInvocationFailed { operation }
-                }
-            })?;
+        let output =
+            self.command_runner()
+                .run(&self.program, args)
+                .map_err(|error| match error {
+                    BoundedCommandError::Timeout => {
+                        ApplicationServiceError::BackendCommandTimedOut { operation }
+                    }
+                    BoundedCommandError::OutputLimit => {
+                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                    }
+                    BoundedCommandError::Spawn
+                    | BoundedCommandError::Wait
+                    | BoundedCommandError::Capture => {
+                        ApplicationServiceError::BackendInvocationFailed { operation }
+                    }
+                })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
