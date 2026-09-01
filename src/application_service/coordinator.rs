@@ -553,6 +553,46 @@ mod tests {
         }
     }
 
+    struct TerminationFailureBackend {
+        terminate_entered: Arc<Barrier>,
+        terminate_resume: Arc<Barrier>,
+    }
+
+    impl ApplicationServiceBackend for TerminationFailureBackend {
+        fn launch_at(
+            &self,
+            request: &ApplicationServiceRequest,
+            policy: &IsolationPolicy,
+            started_at_epoch_seconds: u64,
+        ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
+            Ok(ApplicationServiceLease::new(
+                request,
+                crate::sandbox_execution::RuntimeLeaseMetadata {
+                    backend_id: "test_backend",
+                    sandbox_id: "sandbox-cleanup-failure".to_owned(),
+                    network_id: "network-cleanup-failure".to_owned(),
+                    policy_id: policy.policy_id.clone(),
+                    policy_sha256: policy.effective_policy_sha256(),
+                    started_at_epoch_seconds,
+                    expires_at_epoch_seconds: started_at_epoch_seconds
+                        + u64::from(request.resources.lease_seconds),
+                    shutdown_grace_seconds: policy.shutdown_grace_seconds,
+                },
+                ServiceEndpoint::loopback(45_322, request.protocol),
+            ))
+        }
+
+        fn terminate_at(
+            &self,
+            _lease: &ApplicationServiceLease,
+            _terminated_at_epoch_seconds: u64,
+        ) -> Result<CleanupReceipt, ApplicationServiceError> {
+            self.terminate_entered.wait();
+            self.terminate_resume.wait();
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
     fn request() -> ApplicationServiceRequest {
         ApplicationServiceRequest {
             schema_version: "1.0.0".to_owned(),
@@ -625,6 +665,47 @@ mod tests {
             terminate_calls.load(Ordering::SeqCst),
             1,
             "a successful backend launch must be cleaned up when the lease cannot be registered"
+        );
+    }
+
+    #[test]
+    fn cleanup_failure_is_not_hidden_by_later_registry_failure() {
+        let terminate_entered = Arc::new(Barrier::new(2));
+        let terminate_resume = Arc::new(Barrier::new(2));
+        let coordinator = Arc::new(ApplicationServiceCoordinator::new(TerminationFailureBackend {
+            terminate_entered: Arc::clone(&terminate_entered),
+            terminate_resume: Arc::clone(&terminate_resume),
+        }));
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
+            .expect("test owner should satisfy the bounded identity contract");
+        let lease = coordinator
+            .launch_at(&owner, &request(), &policy(), 1_780_000_000)
+            .expect("test lease should register before termination");
+        let worker_coordinator = Arc::clone(&coordinator);
+        let worker_owner = owner.clone();
+        let worker_lease = lease.clone();
+        let worker = thread::spawn(move || {
+            worker_coordinator.terminate_at(&worker_owner, &worker_lease, 1_780_000_010)
+        });
+
+        terminate_entered.wait();
+        let poison_target = Arc::clone(&coordinator);
+        let poison = thread::spawn(move || {
+            let _guard = poison_target
+                .leases
+                .lock()
+                .expect("registry should be healthy before explicit poisoning");
+            panic!("poison registry after backend cleanup begins");
+        });
+        assert!(poison.join().is_err());
+        terminate_resume.wait();
+
+        assert_eq!(
+            worker.join().expect("termination worker should not panic"),
+            Err(ApplicationServiceCoordinatorError::Backend(
+                ApplicationServiceError::CleanupFailed,
+            )),
+            "cleanup failure must remain the externally visible safety result even when state recovery also fails"
         );
     }
 }
