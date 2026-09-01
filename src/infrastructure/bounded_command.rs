@@ -61,8 +61,8 @@ impl BoundedCommandRunner {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|_| BoundedCommandError::Spawn)?;
-        let stdout = child.stdout.take().ok_or(BoundedCommandError::Spawn)?;
-        let stderr = child.stderr.take().ok_or(BoundedCommandError::Spawn)?;
+        let stdout = captured_pipe(child.stdout.take())?;
+        let stderr = captured_pipe(child.stderr.take())?;
         let overflow = Arc::new(AtomicBool::new(false));
         let stdout_handle = drain_stream(stdout, self.output_limit_bytes, Arc::clone(&overflow));
         let stderr_handle = drain_stream(stderr, self.output_limit_bytes, Arc::clone(&overflow));
@@ -78,6 +78,10 @@ impl BoundedCommandRunner {
             overflow.load(Ordering::Acquire),
         )
     }
+}
+
+fn captured_pipe<T>(pipe: Option<T>) -> Result<T, BoundedCommandError> {
+    pipe.ok_or(BoundedCommandError::Spawn)
 }
 
 fn finalize_output(
@@ -204,7 +208,7 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, drain_stream, finalize_output, join_stream,
+        BoundedCommandError, ChildProcess, captured_pipe, drain_stream, finalize_output, join_stream,
         kill_and_reap, supervise_child,
     };
 
@@ -275,6 +279,15 @@ mod tests {
 
     fn success_status() -> std::process::ExitStatus {
         std::process::ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn captured_pipe_preserves_present_pipe_and_rejects_missing_pipe() {
+        assert_eq!(captured_pipe(Some(7_u8)), Ok(7));
+        assert_eq!(
+            captured_pipe::<u8>(None),
+            Err(BoundedCommandError::Spawn)
+        );
     }
 
     #[test]
