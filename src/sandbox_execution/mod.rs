@@ -1,14 +1,26 @@
 //! Core sandbox-execution resource, lease, and isolation policy values.
 
-mod podman;
-
-pub use podman::{PodmanLaunchPlan, RootlessPodmanAdapter};
-
 use serde::{Deserialize, Serialize};
-
-use crate::ApplicationServiceError;
+use thiserror::Error;
 
 const MAX_POLICY_IDENTIFIER_BYTES: usize = 128;
+
+/// Sandbox-execution validation errors owned by the Core bounded context.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum SandboxExecutionError {
+    /// The operator isolation policy is internally invalid.
+    #[error("invalid isolation policy field: {field_name}")]
+    InvalidPolicy {
+        /// Invalid policy field.
+        field_name: &'static str,
+    },
+    /// A consumer requested zero or more resource than the policy permits.
+    #[error("sandbox resource request exceeds policy: {resource_name}")]
+    ResourceLimitExceeded {
+        /// Resource that violated the policy.
+        resource_name: &'static str,
+    },
+}
 
 /// Resource budget requested by one isolated workload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +42,7 @@ impl ResourceRequest {
     pub(crate) fn validate_against(
         &self,
         policy: &IsolationPolicy,
-    ) -> Result<(), ApplicationServiceError> {
+    ) -> Result<(), SandboxExecutionError> {
         for (resource_name, invalid) in [
             (
                 "memory_bytes",
@@ -55,7 +67,7 @@ impl ResourceRequest {
             ),
         ] {
             if invalid {
-                return Err(ApplicationServiceError::ResourceLimitExceeded { resource_name });
+                return Err(SandboxExecutionError::ResourceLimitExceeded { resource_name });
             }
         }
         Ok(())
@@ -95,14 +107,14 @@ impl IsolationPolicy {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError`] when a bound is zero, internally
+    /// Returns [`SandboxExecutionError`] when a bound is zero, internally
     /// inconsistent, or the policy identity is malformed.
-    pub fn validate(&self) -> Result<(), ApplicationServiceError> {
+    pub fn validate(&self) -> Result<(), SandboxExecutionError> {
         if self.policy_id.is_empty()
             || self.policy_id.len() > MAX_POLICY_IDENTIFIER_BYTES
             || self.policy_id.chars().any(char::is_control)
         {
-            return Err(ApplicationServiceError::InvalidPolicy {
+            return Err(SandboxExecutionError::InvalidPolicy {
                 field_name: "policy_id",
             });
         }
@@ -124,7 +136,7 @@ impl IsolationPolicy {
             ("run_as_group_id", self.run_as_group_id == 0),
         ] {
             if invalid {
-                return Err(ApplicationServiceError::InvalidPolicy { field_name });
+                return Err(SandboxExecutionError::InvalidPolicy { field_name });
             }
         }
         Ok(())

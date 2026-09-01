@@ -29,7 +29,8 @@ REQUIRED_FILES = (
     "src/artifact_analysis/runtime.rs",
     "src/application_service/mod.rs",
     "src/sandbox_execution/mod.rs",
-    "src/sandbox_execution/podman.rs",
+    "src/infrastructure/mod.rs",
+    "src/infrastructure/podman.rs",
     "docs/ARCHITECTURE.md",
     "docs/OPERABILITY.md",
     "docs/PRD.md",
@@ -54,6 +55,7 @@ FORBIDDEN_DDD_PATHS = (
     "src/contracts.rs",
     "src/ingestion.rs",
     "src/runtime.rs",
+    "src/sandbox_execution/podman.rs",
 )
 FORBIDDEN_PLACEHOLDERS = re.compile(r"\b(?:TBD|TODO|FIXME)\b")
 FORBIDDEN_DATABASE_NAME = re.compile(
@@ -61,6 +63,7 @@ FORBIDDEN_DATABASE_NAME = re.compile(
     r"(?:[a-z][a-z0-9]*\.)?([a-z][a-z0-9]*)\b",
     re.IGNORECASE,
 )
+ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
 
 
 def main() -> int:
@@ -75,9 +78,34 @@ def main() -> int:
     for relative_path in FORBIDDEN_DDD_PATHS:
         if (ROOT / relative_path).exists():
             errors.append(
-                "DDD ownership regression: artifact-analysis implementation "
-                f"must remain under src/artifact_analysis/: {relative_path}"
+                "DDD ownership regression: implementation is in the wrong bounded-context path: "
+                f"{relative_path}"
             )
+
+    sandbox_root = ROOT / "src/sandbox_execution"
+    for path in sorted(sandbox_root.rglob("*.rs")):
+        text = path.read_text(encoding="utf-8")
+        if "application_service" in text or "ApplicationService" in text:
+            errors.append(
+                "DDD dependency regression: Core sandbox_execution must not depend on "
+                f"Supporting application_service: {path.relative_to(ROOT)}"
+            )
+
+    adr_numbers: dict[str, pathlib.Path] = {}
+    adr_root = ROOT / "docs/adr"
+    for path in sorted(adr_root.glob("*.md")):
+        match = ADR_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+        number = match.group(1)
+        existing = adr_numbers.get(number)
+        if existing is not None:
+            errors.append(
+                "duplicate ADR identifier: "
+                f"{number} in {existing.relative_to(ROOT)} and {path.relative_to(ROOT)}"
+            )
+        else:
+            adr_numbers[number] = path
 
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or ".git" in path.parts or "target" in path.parts:

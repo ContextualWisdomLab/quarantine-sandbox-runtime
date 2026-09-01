@@ -24,11 +24,14 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Versioned `ApplicationServiceLease`, `IsolationAttestation`, and `CleanupReceipt` evidence contracts.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
 - Consumer owner-path integration issue for `contextual-orchestrator` so Chat/Agent domain code consumes the published lease contract rather than directly invoking Podman/containerd.
+- Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
 
 ### Changed
 
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.
 - Artifact-analysis implementation moved from generic crate-root files into `src/artifact_analysis/` to match the accepted DDD bounded context while preserving the public crate facade.
+- Rootless Podman implementation moved from the Core `sandbox_execution` path into `src/infrastructure/`; the Core no longer depends on `application_service` error types.
+- Pre-publication duplicate ADR identifiers were consolidated into the canonical ADR 0001–0006 sequence before protected-branch integration.
 - Evidence identity now includes policy, source revision, and ordered analyzer identifiers.
 - Static analyzer findings are restricted to file-format and static-capability evidence.
 - JSON Schemas expose UTF-8 byte limits and reject control text consistently with Rust validation.

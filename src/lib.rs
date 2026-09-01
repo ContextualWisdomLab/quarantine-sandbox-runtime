@@ -10,6 +10,7 @@
 
 mod application_service;
 mod artifact_analysis;
+mod infrastructure;
 mod sandbox_execution;
 
 pub use application_service::{
@@ -23,6 +24,16 @@ pub use artifact_analysis::{
     FormatAnalyzer, IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition,
     RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
-pub use sandbox_execution::{
-    IsolationPolicy, PodmanLaunchPlan, ResourceRequest, RootlessPodmanAdapter,
-};
+pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
+pub use sandbox_execution::{IsolationPolicy, ResourceRequest, SandboxExecutionError};
+
+impl From<SandboxExecutionError> for ApplicationServiceError {
+    fn from(error: SandboxExecutionError) -> Self {
+        match error {
+            SandboxExecutionError::InvalidPolicy { field_name } => Self::InvalidPolicy { field_name },
+            SandboxExecutionError::ResourceLimitExceeded { resource_name } => {
+                Self::ResourceLimitExceeded { resource_name }
+            }
+        }
+    }
+}
