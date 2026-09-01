@@ -208,8 +208,8 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipe, drain_stream, finalize_output, join_stream,
-        kill_and_reap, supervise_child,
+        BoundedCommandError, ChildProcess, captured_pipe, drain_stream, finalize_output,
+        join_stream, kill_and_reap, supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -284,10 +284,7 @@ mod tests {
     #[test]
     fn captured_pipe_preserves_present_pipe_and_rejects_missing_pipe() {
         assert_eq!(captured_pipe(Some(7_u8)), Ok(7));
-        assert_eq!(
-            captured_pipe::<u8>(None),
-            Err(BoundedCommandError::Spawn)
-        );
+        assert_eq!(captured_pipe::<u8>(None), Err(BoundedCommandError::Spawn));
     }
 
     #[test]
