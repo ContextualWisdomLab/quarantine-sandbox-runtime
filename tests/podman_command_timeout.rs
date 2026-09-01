@@ -79,8 +79,8 @@ fn request() -> ApplicationServiceRequest {
 #[test]
 fn hanging_backend_command_is_killed_reaped_and_reported_as_timeout() {
     let (program, pid_file) = write_hanging_podman();
-    let adapter = RootlessPodmanAdapter::new(program.clone())
-        .with_command_timeout(Duration::from_millis(50));
+    let adapter =
+        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_millis(50));
 
     let started = Instant::now();
     assert_eq!(
