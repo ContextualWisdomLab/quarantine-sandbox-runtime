@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,6 +31,8 @@ jobs:
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
+      - name: Test coverage evidence parser
+        run: python3 -m unittest scripts/test_check_coverage.py
       - name: Check formatting
         run: cargo fmt --check
       - name: Test
@@ -43,7 +45,7 @@ jobs:
         run: cargo doc --locked --workspace --no-deps
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,7 +80,7 @@ jobs:
         run: python3 scripts/check_coverage.py coverage.json
 
   branch-coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

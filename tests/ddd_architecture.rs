@@ -50,7 +50,10 @@ fn production_source_has_no_panic_shortcuts() {
     let mut source_files = Vec::new();
     collect_rust_sources(&source_root, &mut source_files);
 
-    assert!(!source_files.is_empty(), "production Rust sources must exist");
+    assert!(
+        !source_files.is_empty(),
+        "production Rust sources must exist"
+    );
     for path in source_files {
         let source = fs::read_to_string(&path).expect("production source should be readable");
         for forbidden in [".unwrap(", ".expect(", "panic!("] {
