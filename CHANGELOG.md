@@ -23,6 +23,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Rootless Podman P0 adapter with immutable image/no-pull policy, internal DNS-disabled network, loopback-only publication, read-only rootfs, bounded tmpfs, host-proxy inheritance disabled, capability drop, no-new-privileges, isolated namespaces, numeric non-root identity, CPU/RAM/PID/TTL bounds, readiness gating, and cleanup.
 - Versioned `ApplicationServiceLease`, `IsolationAttestation`, and `CleanupReceipt` evidence contracts.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
+- Real rootless-Podman acceptance covering the pinned backend, immutable fixture pre-pull, effective isolation, bounded HTTP readiness, explicit cleanup, and final container/network leak rejection on the reviewed source head.
 - Consumer owner-path integration issue for `contextual-orchestrator` so Chat/Agent domain code consumes the published lease contract rather than directly invoking Podman/containerd.
 - Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
 
@@ -54,5 +55,5 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Not yet release evidence
 
-- Real rootless Podman isolation E2E is still required; fake-backend tests are not treated as container-isolation proof.
+- The real rootless-Podman lane passed on the reviewed source head, but final release readiness still requires the same acceptance to remain green on the unchanged release head together with verify, complete coverage, security, SAST, review, SBOM, provenance, and protected-merge evidence. Fake-process tests alone remain insufficient isolation proof.
 - Durable orphan/lease reclamation, gVisor/containerd/Kubernetes adapters, controlled egress, secret broker, and stronger dynamic-detonation profiles remain follow-on work.

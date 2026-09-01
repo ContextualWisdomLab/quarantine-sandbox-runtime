@@ -70,7 +70,7 @@ Podman call is not an acceptable substitute.
 - Hosted job `99750285437` passed the real rootless-Podman acceptance at exact source head `984d3a6…`: pinned Podman 5.8.4/rootless verification, immutable image pre-pull, effective isolation/HTTP service checks, explicit cleanup, and the final container/network leak rejection all succeeded. The prior run exposed a connection-reset panic before cleanup; `984d3a6…` makes the live HTTP probe bounded and guarantees termination after every post-lease assertion result.
 - Verify, coverage, branch-coverage, security, SAST, OpenCode, and Noema checks remain queued or pending. Pending/queued is non-passing, and the documentation-only tip still requires its own exact-head required workflows.
 - Organization ruleset `CWL Central required workflows` is active on the default branch and requires one approving review, resolved review threads, and the central required workflows; bypass capability is not merge evidence and must not be used by this loop.
-- Real Podman isolation has not yet been proven by CI. Fake-Podman tests prove command/lifecycle integration only.
+- Real Podman isolation is proven for the pinned hosted runner and policy above; broader host profiles and a published release remain unproven.
 - The dependency-review evidence path has previously returned HTTP 403; it must be revalidated on the final exact head rather than bypassed.
 - PR #1 remains Draft until current-head implementation, coverage, real-container evidence appropriate to the claims, security review, documentation convergence, and repository policy all pass.
 - A release/version bump is premature until one integrated protected head satisfies all required gates and produces reproducible package/SBOM/provenance evidence.
