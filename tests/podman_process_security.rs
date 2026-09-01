@@ -104,7 +104,10 @@ fn configured_security_cannot_override_weaker_effective_process_state() {
         ("lsm_unconfined", "lsm"),
     ] {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-        let ready_port = listener.local_addr().expect("address should resolve").port();
+        let ready_port = listener
+            .local_addr()
+            .expect("address should resolve")
+            .port();
         let (program, log) = write_fake_podman(mode, ready_port);
         let adapter = RootlessPodmanAdapter::new(program.clone());
 
