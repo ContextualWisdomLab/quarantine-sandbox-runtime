@@ -38,7 +38,9 @@ fn ci_separates_rootless_apparmor_negative_evidence_from_positive_lsm_acceptance
     assert!(positive.contains("rootless_podman_effective_isolation_and_cleanup"));
     assert!(positive.contains("RUNNER_NAME"));
     assert!(positive.contains("github.event_name == 'push'"));
-    assert!(positive.contains("github.event.pull_request.head.repo.full_name == github.repository"));
+    assert!(
+        positive.contains("github.event.pull_request.head.repo.full_name == github.repository")
+    );
     assert!(positive.contains("if: always()"));
     assert!(positive.contains("qsr-net-"));
     assert!(!positive.contains("runs-on: ubuntu-24.04"));
