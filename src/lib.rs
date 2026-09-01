@@ -1,17 +1,22 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Source-agnostic, credential-free artifact analysis runtime.
+//! Source-agnostic hostile-workload isolation and artifact-analysis runtime.
 //!
-//! The runtime establishes immutable artifact identity, invokes ordered
-//! non-executing analyzers, and emits deterministic evidence. A consumer such
-//! as Wardnet remains responsible for maliciousness verdicts and response
-//! policy.
+//! The runtime owns reusable sandbox execution, isolation policy enforcement,
+//! bounded service leases, artifact identity, and analysis evidence. Consumers
+//! such as Wardnet and Chat/Agent control planes retain verdict, authorization,
+//! conversation, task, tool-selection, secret, and user-action authority.
 
+mod application_service;
 mod contracts;
 mod ingestion;
 mod runtime;
+mod sandbox_execution;
 
+pub use application_service::{
+    ApplicationServiceError, ApplicationServiceRequest, ServiceProtocol,
+};
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CONTRACT_SCHEMA_VERSION, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
@@ -21,4 +26,7 @@ pub use ingestion::{IngestedArtifact, IngestionError, IngestionPolicy, ingest_by
 pub use runtime::{
     AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer,
     StaticAnalyzer, to_pretty_json,
+};
+pub use sandbox_execution::{
+    IsolationPolicy, PodmanLaunchPlan, ResourceRequest, RootlessPodmanAdapter,
 };
