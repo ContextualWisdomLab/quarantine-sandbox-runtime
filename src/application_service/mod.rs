@@ -384,19 +384,23 @@ pub enum ApplicationServiceError {
         /// Stable operation code.
         operation: &'static str,
     },
+    /// The sandbox backend exceeded the bounded wall-clock budget for a required operation.
+    #[error("sandbox backend command timed out during {operation}")]
+    BackendCommandTimedOut {
+        /// Stable operation code.
+        operation: &'static str,
+    },
+    /// The sandbox backend exceeded the bounded retained-output budget for a required operation.
+    #[error("sandbox backend command exceeded output limit during {operation}")]
+    BackendOutputLimitExceeded {
+        /// Stable operation code.
+        operation: &'static str,
+    },
     /// The sandbox backend returned a nonzero exit status for a required operation.
     #[error("sandbox backend command failed during {operation}")]
     BackendCommandFailed {
         /// Stable operation code.
         operation: &'static str,
-    },
-    /// The sandbox backend returned more inspection output than the contract permits.
-    #[error("sandbox backend output exceeded {maximum_bytes} bytes during {operation}")]
-    BackendOutputTooLarge {
-        /// Stable operation code.
-        operation: &'static str,
-        /// Maximum combined stdout/stderr bytes accepted for one command.
-        maximum_bytes: usize,
     },
     /// The backend did not attest that it is running rootless.
     #[error("sandbox backend is not rootless")]
