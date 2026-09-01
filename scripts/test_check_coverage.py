@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.check_coverage import _uncovered_lines
+from scripts.check_coverage import _uncovered_lines, _uncovered_segment_starts
 
 
 class UncoveredLineAttributionTests(unittest.TestCase):
@@ -37,6 +37,20 @@ class UncoveredLineAttributionTests(unittest.TestCase):
         }
 
         self.assertEqual(_uncovered_lines(data, "/workspace/target.rs"), [])
+
+    def test_file_segments_locate_zero_count_counted_region_starts(self) -> None:
+        file_record = {
+            "segments": [
+                [10, 1, 4, True, True, False],
+                [11, 5, 0, True, True, False],
+                [11, 9, 0, False, False, False],
+                [12, 1, 0, True, True, True],
+                [13, 2, 0, True, True, False],
+                [14, 1, 2, True, True, False],
+            ]
+        }
+
+        self.assertEqual(_uncovered_segment_starts(file_record), [(11, 5), (13, 2)])
 
 
 if __name__ == "__main__":
