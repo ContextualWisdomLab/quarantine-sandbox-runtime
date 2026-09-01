@@ -143,7 +143,12 @@ fn join_stream(handle: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, Bound
 }
 
 fn kill_and_reap(child: &mut std::process::Child) -> Result<ExitStatus, BoundedCommandError> {
-    if child.kill().is_err() && child.try_wait().map_err(|_| BoundedCommandError::Wait)?.is_none() {
+    if child.kill().is_err()
+        && child
+            .try_wait()
+            .map_err(|_| BoundedCommandError::Wait)?
+            .is_none()
+    {
         return Err(BoundedCommandError::Wait);
     }
     child.wait().map_err(|_| BoundedCommandError::Wait)
