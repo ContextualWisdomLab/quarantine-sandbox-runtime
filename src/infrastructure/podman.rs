@@ -3,7 +3,7 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::PathBuf,
-    process::{Command, Output},
+    process::Output,
     thread,
     time::{Duration, Instant},
 };
@@ -11,6 +11,7 @@ use std::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
     IsolationControlStatus, IsolationPolicy, ServiceEndpoint, VerifiedIsolationState,
@@ -18,7 +19,8 @@ use crate::{
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
-const MAX_BACKEND_OUTPUT_BYTES: usize = 65_536;
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -171,17 +173,44 @@ impl PodmanLaunchPlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootlessPodmanAdapter {
     program: PathBuf,
+    command_timeout: Duration,
+    command_output_limit_bytes: usize,
 }
 
 impl RootlessPodmanAdapter {
     /// Construct an adapter for a specific Podman-compatible executable.
     ///
     /// The executable is invoked directly with argv; this adapter never uses a shell.
+    /// Individual CLI calls have a 30-second wall-clock budget and retain at most
+    /// 64 KiB from each output stream unless an operator-facing builder overrides it.
     #[must_use]
     pub fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            command_timeout: DEFAULT_COMMAND_TIMEOUT,
+            command_output_limit_bytes: DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES,
         }
+    }
+
+    /// Override the wall-clock budget for each Podman CLI operation.
+    ///
+    /// This is primarily useful for environment-specific runtime profiles and
+    /// deterministic tests. A zero duration intentionally makes every command
+    /// fail closed immediately rather than disabling the deadline.
+    #[must_use]
+    pub const fn with_command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = timeout;
+        self
+    }
+
+    /// Override the maximum retained bytes for each Podman stdout/stderr stream.
+    ///
+    /// The reader always drains the pipe; bytes beyond this budget are discarded
+    /// and the command is terminated with a typed fail-closed error.
+    #[must_use]
+    pub const fn with_command_output_limit_bytes(mut self, output_limit_bytes: usize) -> Self {
+        self.command_output_limit_bytes = output_limit_bytes;
+        self
     }
 
     /// Return the stable backend identifier emitted in runtime receipts.
@@ -366,7 +395,8 @@ impl RootlessPodmanAdapter {
 
     /// Stop a leased service and remove all runtime-owned isolation resources.
     ///
-    /// Cleanup attempts every required operation before returning failure.
+    /// Cleanup attempts every required operation before returning failure. Cleanup
+    /// commands use the same wall-clock and output bounds as launch commands.
     ///
     /// # Errors
     ///
@@ -536,22 +566,31 @@ impl RootlessPodmanAdapter {
         })
     }
 
+    fn command_runner(&self) -> BoundedCommandRunner {
+        BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes)
+    }
+
     fn checked_output(
         &self,
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output = Command::new(&self.program)
-            .args(args)
-            .output()
-            .map_err(|_| ApplicationServiceError::BackendInvocationFailed { operation })?;
-        let output_bytes = output.stdout.len().saturating_add(output.stderr.len());
-        if output_bytes > MAX_BACKEND_OUTPUT_BYTES {
-            return Err(ApplicationServiceError::BackendOutputTooLarge {
-                operation,
-                maximum_bytes: MAX_BACKEND_OUTPUT_BYTES,
-            });
-        }
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| match error {
+                BoundedCommandError::Timeout => {
+                    ApplicationServiceError::BackendCommandTimedOut { operation }
+                }
+                BoundedCommandError::OutputLimit => {
+                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                }
+                BoundedCommandError::Spawn
+                | BoundedCommandError::Wait
+                | BoundedCommandError::Capture => {
+                    ApplicationServiceError::BackendInvocationFailed { operation }
+                }
+            })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -559,10 +598,9 @@ impl RootlessPodmanAdapter {
     }
 
     fn command_succeeded(&self, args: &[String]) -> bool {
-        Command::new(&self.program)
-            .args(args)
-            .status()
-            .is_ok_and(|status| status.success())
+        self.command_runner()
+            .run(&self.program, args)
+            .is_ok_and(|output| output.status.success())
     }
 
     fn cleanup_network(&self, plan: &PodmanLaunchPlan) -> Result<(), ApplicationServiceError> {
