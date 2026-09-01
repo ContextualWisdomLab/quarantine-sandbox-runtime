@@ -67,9 +67,18 @@ fn temporary_path(name: &str) -> PathBuf {
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
+    let rootless = if mode == "rootless_false" { "false" } else { "true" };
+    let info = format!(
+        r#"{{"host":{{"security":{{"rootless":{rootless},"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}},"version":{{"Version":"5.6.2"}}}}"#
+    );
+    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  rootless_false:info:*) printf 'false\\n'; exit 0 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display()
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        log.display(),
+        info,
+        network,
+        container,
     );
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -106,13 +115,14 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     let lease = adapter
         .launch_at(&request(), &policy(500), 1_780_000_000)
         .expect("rootless isolated service should become ready");
-    assert_eq!(lease.schema_version(), "1.1.0");
+    assert_eq!(lease.schema_version(), "1.2.0");
     assert_eq!(lease.request_id(), "process_boundary_request");
     assert_eq!(lease.endpoint().host(), "127.0.0.1");
     assert_eq!(lease.endpoint().port(), ready_port);
     assert_eq!(lease.endpoint().protocol(), ServiceProtocol::Http);
     assert_eq!(lease.image_reference(), digest_image());
     assert_eq!(lease.backend_id(), "rootless_podman");
+    assert_eq!(lease.backend_version(), "5.6.2");
     assert_eq!(lease.policy_id(), "process_boundary_policy_v1");
     assert_eq!(lease.policy_sha256(), policy(500).effective_policy_sha256());
     assert_eq!(
@@ -128,6 +138,9 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     assert!(lease.isolation_attestation().isolated_user_namespace());
     assert!(lease.isolation_attestation().external_egress_denied());
     assert!(lease.isolation_attestation().loopback_only_publication());
+    assert!(lease.isolation_attestation().seccomp_enforced());
+    assert!(lease.isolation_attestation().lsm_enforced());
+    assert!(lease.isolation_attestation().resource_limits_verified());
     assert!(!lease.isolation_attestation().credentials_available());
 
     let cleanup = adapter
@@ -142,11 +155,13 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls should be recorded");
     for expected in [
-        "info --format",
+        "info --format json",
         "network create",
         "create --name",
         "--http-proxy=false",
         "start ",
+        "container inspect --format json",
+        "network inspect --format json",
         "port ",
         "stop --time 2",
         "rm --force",
@@ -168,7 +183,7 @@ fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created(
     assert_eq!(
         missing.launch_at(&request(), &policy(50), 1_780_000_000),
         Err(ApplicationServiceError::BackendInvocationFailed {
-            operation: "rootless_probe",
+            operation: "backend_security_info",
         })
     );
 
@@ -176,7 +191,7 @@ fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created(
         (
             "rootless_command_fail",
             ApplicationServiceError::BackendCommandFailed {
-                operation: "rootless_probe",
+                operation: "backend_security_info",
             },
         ),
         (
