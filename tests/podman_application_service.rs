@@ -68,7 +68,7 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  rootless_false:info:*) printf 'false\\n'; exit 0 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  rootless_false:info:*) printf 'false\\n'; exit 0 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\n  termination_remove_cleanup_fail:rm:*) exit 32 ;;\n  termination_network_cleanup_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display()
     );
     fs::write(&program, script).expect("fake Podman should be writable");
@@ -258,6 +258,41 @@ fn start_and_port_failures_stop_or_remove_started_resources() {
 }
 
 #[test]
+fn partial_launch_cleanup_failures_override_the_original_backend_error() {
+    for mode in ["start_cleanup_fail", "start_network_cleanup_fail"] {
+        let (program, log) = write_fake_podman(mode, closed_loopback_port());
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+            Err(ApplicationServiceError::CleanupFailed)
+        );
+        let calls = fs::read_to_string(&log).expect("partial cleanup calls should be recorded");
+        assert!(calls.contains("rm --force"));
+        assert!(calls.contains("network rm --force"));
+        remove_fixture(program, log);
+    }
+}
+
+#[test]
+fn started_container_cleanup_attempts_every_resource_after_port_failure() {
+    for mode in ["port_stop_cleanup_fail", "port_network_cleanup_fail"] {
+        let (program, log) = write_fake_podman(mode, closed_loopback_port());
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(50), 1_780_000_000),
+            Err(ApplicationServiceError::CleanupFailed)
+        );
+        let calls = fs::read_to_string(&log).expect("started cleanup calls should be recorded");
+        assert!(calls.contains("stop --time 2"));
+        assert!(calls.contains("rm --force"));
+        assert!(calls.contains("network rm --force"));
+        remove_fixture(program, log);
+    }
+}
+
+#[test]
 fn malformed_port_mappings_fail_closed_after_cleanup() {
     for mode in [
         "invalid_port_host",
@@ -307,24 +342,30 @@ fn cleanup_failure_is_never_hidden_by_readiness_or_termination_results() {
     );
     remove_fixture(program, log);
 
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener
-        .local_addr()
-        .expect("address should resolve")
-        .port();
-    let (program, log) = write_fake_podman("termination_cleanup_fail", ready_port);
-    let adapter = RootlessPodmanAdapter::new(program.clone());
-    let lease = adapter
-        .launch_at(&request(), &policy(100), 1_780_000_000)
-        .expect("launch should succeed before termination failure");
-    assert_eq!(
-        adapter.terminate_at(&lease, 1_780_000_001),
-        Err(ApplicationServiceError::CleanupFailed)
-    );
-    let calls = fs::read_to_string(&log).expect("all cleanup attempts should be recorded");
-    assert!(calls.contains("stop --time 2"));
-    assert!(calls.contains("rm --force"));
-    assert!(calls.contains("network rm --force"));
-    remove_fixture(program, log);
-    drop(listener);
+    for mode in [
+        "termination_cleanup_fail",
+        "termination_remove_cleanup_fail",
+        "termination_network_cleanup_fail",
+    ] {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+        let ready_port = listener
+            .local_addr()
+            .expect("address should resolve")
+            .port();
+        let (program, log) = write_fake_podman(mode, ready_port);
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+        let lease = adapter
+            .launch_at(&request(), &policy(100), 1_780_000_000)
+            .expect("launch should succeed before termination failure");
+        assert_eq!(
+            adapter.terminate_at(&lease, 1_780_000_001),
+            Err(ApplicationServiceError::CleanupFailed)
+        );
+        let calls = fs::read_to_string(&log).expect("all cleanup attempts should be recorded");
+        assert!(calls.contains("stop --time 2"));
+        assert!(calls.contains("rm --force"));
+        assert!(calls.contains("network rm --force"));
+        remove_fixture(program, log);
+        drop(listener);
+    }
 }
