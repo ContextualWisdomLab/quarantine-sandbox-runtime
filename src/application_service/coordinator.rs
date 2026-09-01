@@ -133,10 +133,12 @@ enum RegistryEntry {
     Active {
         request_fingerprint: String,
         lease: ApplicationServiceLease,
+        cleanup_attempts: u32,
     },
     Terminating {
         request_fingerprint: String,
         lease: ApplicationServiceLease,
+        cleanup_attempts: u32,
     },
 }
 
@@ -231,6 +233,7 @@ where
                 Some(RegistryEntry::Active {
                     request_fingerprint: existing,
                     lease,
+                    ..
                 }) if existing == &request_fingerprint => return Ok(lease.clone()),
                 Some(RegistryEntry::Terminating {
                     request_fingerprint: existing,
@@ -266,6 +269,7 @@ where
             RegistryEntry::Active {
                 request_fingerprint,
                 lease: lease.clone(),
+                cleanup_attempts: 0,
             },
         );
         Ok(lease)
@@ -284,26 +288,29 @@ where
         terminated_at_epoch_seconds: u64,
     ) -> Result<CleanupReceipt, ApplicationServiceCoordinatorError> {
         let key = LeaseKey::new(lease_owner_id, lease.request_id());
-        let (request_fingerprint, registered_lease) = {
+        let (request_fingerprint, registered_lease, cleanup_attempts) = {
             let mut leases = self.lock_registry()?;
             match leases.get(&key) {
                 Some(RegistryEntry::Active {
                     request_fingerprint,
                     lease: registered_lease,
+                    cleanup_attempts,
                 }) => {
                     if registered_lease != lease {
                         return Err(ApplicationServiceCoordinatorError::LeaseMismatch);
                     }
                     let request_fingerprint = request_fingerprint.clone();
                     let registered_lease = registered_lease.clone();
+                    let cleanup_attempts = *cleanup_attempts;
                     leases.insert(
                         key.clone(),
                         RegistryEntry::Terminating {
                             request_fingerprint: request_fingerprint.clone(),
                             lease: registered_lease.clone(),
+                            cleanup_attempts,
                         },
                     );
-                    (request_fingerprint, registered_lease)
+                    (request_fingerprint, registered_lease, cleanup_attempts)
                 }
                 Some(RegistryEntry::Launching { .. }) => {
                     return Err(ApplicationServiceCoordinatorError::LaunchInProgress);
@@ -318,15 +325,23 @@ where
         let result = self
             .backend
             .terminate_at(&registered_lease, terminated_at_epoch_seconds);
-        self.finish_termination(&key, request_fingerprint, registered_lease, &result)?;
+        self.finish_termination(
+            &key,
+            request_fingerprint,
+            registered_lease,
+            cleanup_attempts,
+            &result,
+        )?;
         result.map_err(Into::into)
     }
 
     /// Clean up at most 64 active leases whose expiry is not later than `now`.
     ///
     /// Failed cleanup remains registered as active so a later operator or
-    /// cleanup pass can retry it. This process-local function does not claim
-    /// crash/restart orphan recovery.
+    /// cleanup pass can retry it. Previously unattempted expired leases are
+    /// selected before repeatedly failing entries so one bad cleanup cannot
+    /// starve later expired workloads. This process-local function does not
+    /// claim crash/restart orphan recovery.
     ///
     /// # Errors
     ///
@@ -338,27 +353,35 @@ where
     ) -> Result<Vec<ExpiredLeaseCleanupResult>, ApplicationServiceCoordinatorError> {
         let candidates = {
             let mut leases = self.lock_registry()?;
-            let candidates: Vec<(LeaseKey, String, ApplicationServiceLease)> = leases
+            let mut candidates: Vec<(LeaseKey, String, ApplicationServiceLease, u32)> = leases
                 .iter()
                 .filter_map(|(key, entry)| match entry {
                     RegistryEntry::Active {
                         request_fingerprint,
                         lease,
+                        cleanup_attempts,
                     } if lease.expires_at_epoch_seconds() <= now_epoch_seconds => Some((
                         key.clone(),
                         request_fingerprint.clone(),
                         lease.clone(),
+                        *cleanup_attempts,
                     )),
                     _ => None,
                 })
-                .take(MAX_EXPIRED_CLEANUPS_PER_CALL)
                 .collect();
-            for (key, request_fingerprint, lease) in &candidates {
+            candidates.sort_by(|left, right| {
+                left.3
+                    .cmp(&right.3)
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+            candidates.truncate(MAX_EXPIRED_CLEANUPS_PER_CALL);
+            for (key, request_fingerprint, lease, cleanup_attempts) in &candidates {
                 leases.insert(
                     key.clone(),
                     RegistryEntry::Terminating {
                         request_fingerprint: request_fingerprint.clone(),
                         lease: lease.clone(),
+                        cleanup_attempts: *cleanup_attempts,
                     },
                 );
             }
@@ -366,9 +389,15 @@ where
         };
 
         let mut outcomes = Vec::with_capacity(candidates.len());
-        for (key, request_fingerprint, lease) in candidates {
+        for (key, request_fingerprint, lease, cleanup_attempts) in candidates {
             let result = self.backend.terminate_at(&lease, now_epoch_seconds);
-            self.finish_termination(&key, request_fingerprint, lease.clone(), &result)?;
+            self.finish_termination(
+                &key,
+                request_fingerprint,
+                lease.clone(),
+                cleanup_attempts,
+                &result,
+            )?;
             outcomes.push(ExpiredLeaseCleanupResult {
                 lease_owner_id: key.lease_owner_id,
                 request_id: key.request_id,
@@ -395,6 +424,7 @@ where
         key: &LeaseKey,
         request_fingerprint: String,
         lease: ApplicationServiceLease,
+        cleanup_attempts: u32,
         result: &Result<CleanupReceipt, ApplicationServiceError>,
     ) -> Result<(), ApplicationServiceCoordinatorError> {
         let mut leases = self.lock_registry()?;
@@ -406,6 +436,7 @@ where
                 RegistryEntry::Active {
                     request_fingerprint,
                     lease,
+                    cleanup_attempts: cleanup_attempts.saturating_add(1),
                 },
             );
         }
