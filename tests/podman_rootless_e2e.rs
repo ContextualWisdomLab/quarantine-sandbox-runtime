@@ -1,7 +1,7 @@
 //! Real rootless-Podman acceptance for effective application-service isolation.
 //!
 //! The ordinary unit suite intentionally does not require a host container runtime.
-//! CI invokes this ignored test explicitly after pre-pulling the digest-pinned
+//! CI invokes these ignored tests explicitly after pre-pulling the digest-pinned
 //! fixture image named by `QSR_PODMAN_E2E_IMAGE`.
 
 use std::{
@@ -14,8 +14,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
+    RootlessPodmanAdapter, ServiceProtocol,
 };
 
 fn fixture_image() -> String {
@@ -102,6 +102,31 @@ fn assert_podman_fails(args: &[&str], reason: &str) {
     );
 }
 
+fn assert_no_runtime_leaks() {
+    let leaked_containers = podman_stdout(&[
+        "ps",
+        "-a",
+        "--filter",
+        "label=org.contextualwisdomlab.sandbox.identity",
+        "--format",
+        "{{.ID}}",
+    ]);
+    assert!(
+        leaked_containers.is_empty(),
+        "attestation failure must not leak runtime-owned containers: {leaked_containers}"
+    );
+
+    let networks = podman_stdout(&["network", "ls", "--format", "{{.Name}}"]);
+    let leaked_networks = networks
+        .lines()
+        .filter(|name| name.starts_with("qsr-net-"))
+        .collect::<Vec<_>>();
+    assert!(
+        leaked_networks.is_empty(),
+        "attestation failure must not leak runtime-owned networks: {leaked_networks:?}"
+    );
+}
+
 fn assert_http_ready(port: u16, timeout: Duration, poll: Duration) {
     let deadline = Instant::now() + timeout;
     let mut last_response = String::new();
@@ -159,6 +184,45 @@ fn http_probe_times_out_when_server_stalls() {
     );
     assert!(started.elapsed() < Duration::from_secs(1));
     server.join().expect("test server must stop");
+}
+
+#[test]
+#[ignore = "requires the GitHub-hosted rootless-Podman negative acceptance environment"]
+fn rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up() {
+    assert_eq!(
+        podman_stdout(&["info", "--format", "{{.Host.Security.Rootless}}"]),
+        "true",
+        "negative E2E backend must actually be rootless"
+    );
+    assert_eq!(
+        podman_stdout(&["info", "--format", "{{.Host.Security.ApparmorEnabled}}"]),
+        "true",
+        "negative lane must characterize the hosted AppArmor-capable runner"
+    );
+    assert_eq!(
+        podman_stdout(&["info", "--format", "{{.Host.Security.SelinuxEnabled}}"]),
+        "false",
+        "negative lane must not silently become the SELinux positive lane"
+    );
+
+    let adapter = RootlessPodmanAdapter::default();
+    let policy = policy();
+    let request = request();
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time must be after the Unix epoch")
+        .as_secs();
+    let error = adapter
+        .launch_at(&request, &policy, started_at)
+        .expect_err("host-only AppArmor capability must not satisfy effective LSM attestation");
+
+    match error {
+        ApplicationServiceError::IsolationVerificationFailed { control_name } => {
+            assert_eq!(control_name, "lsm");
+        }
+        other => panic!("negative LSM lane failed at the wrong boundary: {other:?}"),
+    }
+    assert_no_runtime_leaks();
 }
 
 #[test]
