@@ -7,6 +7,7 @@ use std::{
     net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,6 +15,8 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "b".repeat(64))
@@ -58,8 +61,9 @@ fn temporary_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after the Unix epoch")
         .as_nanos();
+    let unique_id = NEXT_TEMP_PATH_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
+        "quarantine-sandbox-runtime-{name}-{}-{nanos}-{unique_id}",
         std::process::id()
     ))
 }
