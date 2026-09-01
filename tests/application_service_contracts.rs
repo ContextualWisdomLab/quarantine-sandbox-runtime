@@ -112,15 +112,21 @@ fn policy_bound_lease_schema_is_versioned() {
     .expect("lease schema must be JSON");
     assert_eq!(
         schema["$id"],
-        "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.1.0.schema.json"
+        "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.2.0.schema.json"
     );
-    assert_eq!(schema["properties"]["schema_version"]["const"], "1.1.0");
-    assert!(
-        schema["required"]
-            .as_array()
-            .expect("required must be an array")
-            .contains(&serde_json::Value::String("policy_sha256".to_owned()))
-    );
+    assert_eq!(schema["properties"]["schema_version"]["const"], "1.2.0");
+    let required = schema["required"]
+        .as_array()
+        .expect("required must be an array");
+    for field in ["policy_sha256", "backend_version", "isolation_attestation"] {
+        assert!(required.contains(&serde_json::Value::String(field.to_owned())));
+    }
+    let attestation_required = schema["properties"]["isolation_attestation"]["required"]
+        .as_array()
+        .expect("attestation required must be an array");
+    for field in ["seccomp_enforced", "lsm_enforced", "resource_limits_verified"] {
+        assert!(attestation_required.contains(&serde_json::Value::String(field.to_owned())));
+    }
 }
 
 #[test]
@@ -130,11 +136,7 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
 
     assert_eq!(
         plan.rootless_probe_args(),
-        [
-            "info".to_owned(),
-            "--format".to_owned(),
-            "{{.Host.Security.Rootless}}".to_owned(),
-        ]
+        ["info".to_owned(), "--format".to_owned(), "json".to_owned()]
     );
     assert!(
         plan.network_create_args()
