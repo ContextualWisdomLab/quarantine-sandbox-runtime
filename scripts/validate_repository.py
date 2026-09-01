@@ -9,12 +9,27 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCHEMA_FILES = (
+    "schemas/analysis-request.schema.json",
+    "schemas/evidence-bundle.schema.json",
+    "schemas/application-service-request.schema.json",
+    "schemas/application-service-lease.schema.json",
+    "schemas/application-service-cleanup.schema.json",
+    "schemas/isolation-policy.schema.json",
+)
 REQUIRED_FILES = (
     "AGENTS.md",
     "CHANGELOG.md",
     "CLAUDE.md",
     "LICENSE",
     "README.md",
+    "src/artifact_analysis/mod.rs",
+    "src/artifact_analysis/contracts.rs",
+    "src/artifact_analysis/ingestion.rs",
+    "src/artifact_analysis/runtime.rs",
+    "src/application_service/mod.rs",
+    "src/sandbox_execution/mod.rs",
+    "src/sandbox_execution/podman.rs",
     "docs/ARCHITECTURE.md",
     "docs/OPERABILITY.md",
     "docs/PRD.md",
@@ -22,10 +37,23 @@ REQUIRED_FILES = (
     "docs/TEST_STRATEGY.md",
     "docs/THREAT_MODEL.md",
     "docs/TRD.md",
+    "docs/product-technical-gap-baseline.md",
+    "docs/contracts/consumer-contract.md",
+    "docs/adr/README.md",
+    "docs/adr/0001-product-authority-boundary.md",
+    "docs/adr/0002-credential-free-default-deny.md",
+    "docs/adr/0003-published-contract-consumption.md",
+    "docs/adr/0004-truthful-capability-claims.md",
+    "docs/adr/0005-sandbox-execution-context.md",
+    "docs/adr/0006-isolated-application-service.md",
     "docs/doctoring/REFERENCES.md",
     "docs/doctoring/STANDARD_TRACEABILITY.md",
-    "schemas/analysis-request.schema.json",
-    "schemas/evidence-bundle.schema.json",
+    *SCHEMA_FILES,
+)
+FORBIDDEN_DDD_PATHS = (
+    "src/contracts.rs",
+    "src/ingestion.rs",
+    "src/runtime.rs",
 )
 FORBIDDEN_PLACEHOLDERS = re.compile(r"\b(?:TBD|TODO|FIXME)\b")
 FORBIDDEN_DATABASE_NAME = re.compile(
@@ -44,26 +72,42 @@ def main() -> int:
         if not (ROOT / relative_path).is_file():
             errors.append(f"missing required file: {relative_path}")
 
+    for relative_path in FORBIDDEN_DDD_PATHS:
+        if (ROOT / relative_path).exists():
+            errors.append(
+                "DDD ownership regression: artifact-analysis implementation "
+                f"must remain under src/artifact_analysis/: {relative_path}"
+            )
+
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or ".git" in path.parts or "target" in path.parts:
             continue
-        if path.suffix.lower() not in {".md", ".json", ".py", ".rs", ".toml", ".yml", ".yaml"}:
+        if path.suffix.lower() not in {
+            ".md",
+            ".json",
+            ".py",
+            ".rs",
+            ".toml",
+            ".yml",
+            ".yaml",
+        }:
             continue
         text = path.read_text(encoding="utf-8")
-        if path.resolve() != pathlib.Path(__file__).resolve() and FORBIDDEN_PLACEHOLDERS.search(text):
+        if (
+            path.resolve() != pathlib.Path(__file__).resolve()
+            and FORBIDDEN_PLACEHOLDERS.search(text)
+        ):
             errors.append(f"placeholder token found: {path.relative_to(ROOT)}")
         for match in FORBIDDEN_DATABASE_NAME.finditer(text):
             object_name = match.group(1)
             if "_" not in object_name:
                 errors.append(
-                    f"database object must contain two or more words: "
+                    "database object must contain two or more words: "
                     f"{path.relative_to(ROOT)}:{object_name}"
                 )
 
-    for schema_path in (
-        ROOT / "schemas/analysis-request.schema.json",
-        ROOT / "schemas/evidence-bundle.schema.json",
-    ):
+    for relative_path in SCHEMA_FILES:
+        schema_path = ROOT / relative_path
         try:
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:

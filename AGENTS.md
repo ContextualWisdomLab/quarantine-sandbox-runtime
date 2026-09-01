@@ -1,43 +1,57 @@
 # Agent Development Rules
 
-## Product boundary
+## Product authority
 
-- This repository owns isolated artifact ingestion, analysis execution, evidence normalization, and runtime attestation.
-- It does not own malicious/benign verdict policy, incident response, or consumer-specific actions.
-- Do not couple the core runtime to GitHub, email, Naruon, Wardnet, or a specific upload service.
-- Consumer adapters submit bytes and context through versioned contracts.
+This repository owns reusable sandbox execution, isolation policy enforcement, resource bounds, lease/readiness/cleanup attestation, and artifact-analysis evidence.
 
-## Security
+It does not own Wardnet verdict/incident/quarantine policy or Chat/Agent conversation/task/tool/application authorization/secrets. Keep consumer authority behind versioned Anti-Corruption Layers.
 
-- Treat every artifact, filename, analyzer output, and metadata field as hostile.
-- Never execute artifact content in the control process.
-- Never make external network requests from the foundation runtime.
-- Never provide production credentials to an analysis worker.
-- Fail closed when a requested analysis profile is unavailable.
-- Preserve original bytes and SHA-256 identity without mutation.
-- Keep `#![forbid(unsafe_code)]` unless a reviewed ADR explicitly changes the boundary.
-- Parser and analyzer dependencies must be pinned through `Cargo.lock` and reviewed for advisories.
+## DDD
 
-## Rust quality
+- `sandbox_execution` is the Core bounded context.
+- `artifact_analysis` and `application_service` are Supporting bounded contexts.
+- Podman/gVisor/containerd/Kubernetes/VM implementations are infrastructure adapters.
+- Do not put unrelated domain behavior in root `utils`, `helpers`, `services`, `common`, `core`, `models`, or similar generic buckets.
+- Do not reintroduce root `contracts.rs`, `ingestion.rs`, or `runtime.rs` for artifact-analysis behavior; implementation belongs under `src/artifact_analysis/`.
+- Domain contracts must not depend on consumer repository types or container backend SDK/CLI DTOs.
+- No direct foreign application-table SQL or sibling source vendoring.
+- If a new stable responsibility does not fit a bounded context, update Context Map/ADR before implementation.
 
-- Production arithmetic and policy logic are Rust.
-- Public modules, types, fields, traits, functions, and methods require explanatory documentation.
-- Production statement, function, region, and branch coverage target 100%.
-- Tests must exercise hostile inputs and realistic malware-delivery formats.
-- Do not silently ignore analyzer failures; emit attributable failure evidence.
-- Do not use `unwrap`, `expect`, or `panic` in production code.
+## Security invariants
 
-## Contracts
+- Standard application-service images are immutable SHA-256 digest references and launch with no implicit pull.
+- Rootless execution is required for the Podman P0 profile.
+- Read-only rootfs, bounded tmpfs, all capabilities dropped, no-new-privileges, isolated namespaces, non-root UID/GID, resource limits, internal network, loopback-only publication, readiness, and cleanup are fail-closed contracts.
+- No P0 secrets, arbitrary environment variables, host devices, runtime sockets, privileged mode, host namespaces, broad host mounts, wildcard/public service bind, or arbitrary Internet egress.
+- Artifact bytes are never executed in static paths.
+- Static evidence is never labeled observed runtime behavior.
+- Do not suppress security/deprecation/toolchain failures to obtain a green check.
 
-- Database and future persistence object names use two or more words in `snake_case`.
-- JSON contracts use explicit schema versions and JSON Schema Draft 2020-12.
-- Evidence identifiers and ordering must be deterministic for the same request and bytes.
-- A runtime disposition describes analysis completeness, not maliciousness.
-- Any LLM integration must consume evidence through `contextual-orchestrator`; it cannot be the sole verdict authority.
+## TDD and validation
 
-## Pull requests
+Behavior changes require RED → smallest causal GREEN → refactor → focused/full verification.
 
-- Work test-first.
-- Keep changes within the owning repository.
-- Update `CHANGELOG.md`, ADRs, security documentation, and test evidence with behavioral changes.
-- Never bypass required reviews, exact-head checks, or repository protection.
+Before merge:
+
+- `cargo fmt --check`
+- `cargo test --locked --workspace --all-targets`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps`
+- `python3 scripts/validate_repository.py`
+- exact 100% owned production statement/function/region/branch coverage where tooling exposes it;
+- all required SAST/security/dependency/SBOM/provenance/review gates;
+- real rootless-container E2E for any release claim about actual container isolation.
+
+Fake-Podman/process tests do not substitute for real Podman isolation evidence.
+
+## Documentation
+
+Keep README, PRD, TRD, ARCHITECTURE, ADRs, SECURITY, THREAT_MODEL, TEST_STRATEGY, OPERABILITY, `docs/product-technical-gap-baseline.md`, doctoring/traceability, schemas, and CHANGELOG code-current. Distinguish protected-branch truth from active PR/planned capabilities.
+
+## Database
+
+There is currently no durable database. If persistence is introduced, add an ADR first; use 3NF, descriptive two-or-more-word `snake_case` database object names, tenant/time/concurrency/idempotency invariants, migrations, backup/restore and retention evidence.
+
+## Consumer integration
+
+Use immutable published artifacts/contracts. Do not modify Wardnet or contextual-orchestrator source from this repository's dedicated writer when those repositories have their own writer/owner path. Route consumer work through their existing issue/PR/task path and continue local runtime work.

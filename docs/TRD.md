@@ -1,92 +1,196 @@
 # Technical Requirements Document
 
-## Runtime contract
+## Runtime stack
+
+- Rust 1.97.x baseline, Edition 2024.
+- `unsafe` forbidden in this crate by default.
+- `serde`/JSON Schema Draft 2020-12 for versioned wire contracts.
+- SHA-256 for immutable artifact identity and deterministic infrastructure-safe sandbox names.
+- Rootless Podman as the first application-service infrastructure adapter.
+- Future adapters may target OCI/containerd/gVisor and Kubernetes RuntimeClass without changing consumer domain authority.
+
+## Module architecture
 
 ```text
-AnalysisRequest + bytes
-        |
-        v
-optional bounded source context
-        |
-        v
-bounded ingestion
-        |
-        v
-SHA-256 + artifact classification
-        |
-        v
-ordered static analyzers
-        |
-        v
-evidence normalization + runtime manifest
-        |
-        v
-EvidenceBundle
+src/
+├── artifact_analysis/         Supporting bounded context
+│   ├── contracts.rs
+│   ├── ingestion.rs
+│   └── runtime.rs
+├── application_service/      Supporting bounded context
+│   └── mod.rs
+├── sandbox_execution/        Core bounded context
+│   ├── mod.rs
+│   └── podman.rs             Infrastructure adapter, temporary colocated module
+└── lib.rs                    Public facade only
 ```
 
-The runtime API does not require a file name. `AnalysisRequest.bounded_source_context` is optional. When `original_file_name` is present, it is treated as untrusted leaf-name metadata and may assist script classification; format magic and artifact bytes remain authoritative evidence inputs.
+The Podman implementation is a Core infrastructure adapter, not a domain object. If additional backends are added, extract a backend port/adapter package structure without changing the consumer request/lease semantics unnecessarily.
 
-## Rust modules
+## Application-service contracts
 
-- `contracts`: versioned request, bounded source context, descriptor, evidence, manifest, and validation types.
-- `ingestion`: bounded byte intake, immutable hash, optional source-name handling, and deterministic format detection.
-- `runtime`: analyzer port, analyzer execution, evidence ordering, limitations, and serialization.
+### `IsolationPolicy`
 
-## Determinism
+Operator-owned maxima:
 
-The runtime does not include wall-clock timestamps in the foundation output. A job identifier is derived from request ID, requested profile, artifact SHA-256, policy ID, runtime source revision, and the ordered analyzer identifiers. Evidence identifiers derive from the job identifier and one-based sequence number. Optional source metadata does not silently change artifact identity.
+- memory bytes;
+- CPU millicores;
+- process count;
+- lease seconds;
+- tmpfs bytes;
+- readiness timeout/poll interval;
+- shutdown grace;
+- numeric non-root UID/GID;
+- policy identifier.
 
-This prevents two analyses performed under different policies, revisions, or analyzer portfolios from claiming the same evidence identity. A production host must construct the engine with an exact build revision rather than relying on the development default.
+The consumer cannot request more than these values or mutate isolation capabilities.
 
-## Analyzer authority
+### `ApplicationServiceRequest`
 
-Analyzer identifiers must be unique, bounded, and free of control characters. Static analyzers may emit only `file_format` or `static_capability` findings. The runtime owns `artifact_identity` and `policy_boundary`; future isolated workers own runtime and network observations. A static analyzer that claims another evidence category is converted to attributable `tool_failure` evidence and makes the result `inconclusive`.
+- schema `1.0.0`;
+- opaque bounded request ID;
+- immutable `@sha256` OCI image reference;
+- TCP container service port;
+- protocol metadata (`tcp`/`http`);
+- bounded direct argv with no shell;
+- bounded resource request.
 
-## Validation bounds
+There are intentionally no environment, mount, device, privileged, host-namespace, runtime-socket, public-bind, or network-enable fields.
 
-| Field | Limit |
-|---|---:|
-| request ID | 128 UTF-8 bytes |
-| source channel code | 64 ASCII bytes; lower-case letters, digits, underscore |
-| original file name | 255 UTF-8 bytes; leaf name only, no path separators, `.` or `..` |
-| declared media type | 255 ASCII bytes; bounded RFC 6838/BCP 13 type/subtype shape; untrusted hint only |
-| host artifact reference | 128 ASCII bytes; opaque identifier characters only; credential/URL-shaped values rejected |
-| submitted at | 30 ASCII bytes; UTC `Z` RFC 3339 profile with Gregorian-date validation |
-| serialized bounded source context | 1,024 UTF-8 bytes |
-| evidence attributes | 32 |
-| attribute key | 128 UTF-8 bytes |
-| attribute value | 1,024 UTF-8 bytes |
-| artifact display/original name | 255 UTF-8 bytes |
-| policy, revision, and analyzer identifiers | 128 UTF-8 bytes |
-| default artifact bytes | 67,108,864 |
+### `ApplicationServiceLease`
 
-An explicitly present source-context object with no populated fields is invalid. Unknown context fields fail deserialization. NUL and other disallowed control characters are rejected in identity-bearing metadata. `submitted_at` uses an intentionally narrower UTC-only profile of RFC 3339 so downstream evidence correlation does not depend on preserving source offsets. RFC 6838, as updated by RFC 9694 for new top-level media-type guidance, informs the declared media-type syntax; the value is never trusted as detected content type.
+Records:
 
-## Format classification order
+- schema version;
+- original request ID;
+- image digest reference;
+- runtime backend ID;
+- sandbox/network IDs;
+- policy ID;
+- loopback endpoint;
+- start/expiry/shutdown values;
+- P0 isolation attestation.
 
-1. PE magic
-2. ELF magic
-3. Mach-O and universal-binary magic
-4. ZIP signatures
-5. PDF signature
-6. OLE compound-document signature
-7. shebang or approved script extension with valid text
-8. bounded UTF-8 text
-9. unknown
+### `CleanupReceipt`
 
-Classification is evidence, not a safety declaration.
+Successful receipt exists only when both container and network removal succeeded.
 
-## Error policy
+## Rootless Podman adapter
 
-- Invalid request: return a contract error; no analysis occurs.
-- Invalid or sensitive-shaped source context: return a contract error; no artifact processing occurs.
-- Invalid artifact: return an ingestion error; no analyzer receives bytes.
-- Invalid or duplicate analyzer identifiers: reject engine construction.
-- Analyzer failure: emit `tool_failure`, retain prior evidence, return `inconclusive`.
-- Disallowed analyzer evidence category: replace it with `tool_failure`, return `inconclusive`.
-- Dynamic request without dynamic adapter: emit foundation evidence, return `inconclusive`.
-- Serialization failure: return the serialization error; do not mutate the bundle.
+### Planning
 
-## Future ports
+`RootlessPodmanAdapter::plan_at` validates request/policy and produces deterministic command argv. Sandbox/network names are derived from SHA-256 over request ID, immutable image, policy ID, and start time; raw caller strings are not used as container/network names.
 
-Dynamic execution, object storage, evidence signing, queueing, and Wardnet integration must be added behind explicit traits. They must not broaden the authority of this runtime to consumer verdicts.
+### Backend verification
+
+Before creating isolation resources:
+
+```text
+podman info --format {{.Host.Security.Rootless}}
+```
+
+must produce `true` after trimming. Any other value fails closed.
+
+### Network
+
+Each service creates a unique bridge network using:
+
+```text
+podman network create --internal --disable-dns --ignore <network>
+```
+
+P0 does not add another network. This is a default-deny egress profile rather than a general network sandbox API.
+
+### Container creation
+
+Required controls include:
+
+```text
+--pull=never
+--read-only
+--read-only-tmpfs=false
+--cap-drop=all
+--security-opt=no-new-privileges
+--userns=auto
+--ipc=none
+--pid=private
+--uts=private
+--cgroupns=private
+--restart=no
+--log-driver=none
+--timeout <lease_seconds>
+--user <uid>:<gid>
+--pids-limit <n>
+--memory <bytes>
+--cpus <decimal cores>
+--tmpfs /tmp:rw,noexec,nosuid,nodev,size=<bytes>
+--network <internal network>
+--publish 127.0.0.1::<container-port>/tcp
+```
+
+The immutable image reference is appended before application argv, so application arguments cannot be interpreted as Podman options. No shell is involved.
+
+### Start, readiness, and lease
+
+1. Create network.
+2. Create container.
+3. Start container.
+4. Query the requested port mapping.
+5. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
+6. Poll bounded TCP readiness using operator timeout/poll policy.
+7. Return a lease only after readiness.
+
+P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplied health path is accepted yet. A future typed HTTP health contract may refine this without accepting arbitrary URLs.
+
+### Cleanup
+
+- Network-create failure: no resources assumed.
+- Container-create failure: remove network.
+- Start failure: remove container and network.
+- Port/readiness failure: stop/remove container and remove network.
+- Explicit termination: stop with lease shutdown grace, remove container, remove network.
+- If cleanup cannot be proven, return `CleanupFailed` rather than the original error as though cleanup succeeded.
+
+The container timeout limits application process lifetime even if the runtime process disappears, but stale container/network object reclamation still requires a durable reaper before GA.
+
+## Artifact-analysis technical contract
+
+Existing artifact-analysis code remains source-compatible through root crate re-exports after moving implementation under `artifact_analysis`.
+
+- Ingestion validates size/name before cloning bytes.
+- SHA-256 binds artifact identity.
+- Format recognition is non-executing.
+- Static analyzers implement `StaticAnalyzer` and emit normalized findings/failures.
+- Evidence identifiers and ordering are deterministic for the same request/configuration/bytes.
+- Dynamic profiles without a worker fail closed as incomplete rather than silently downgrading to static completeness.
+
+## Backend evolution
+
+### gVisor/containerd
+
+A future adapter may use OCI `runsc`/containerd. It must provide semantically comparable lease/cleanup/isolation evidence and document any stronger/weaker behavior. Consumer domain types must not change merely because the backend changes.
+
+### Kubernetes
+
+A future managed deployment uses a runtime-selected workload object (for example Pod/Job plus Service or port-forward mechanism) and an explicit RuntimeClass where applicable. It must retain task-scoped lifetime, non-root/read-only/resource/network/secret rules and not expose an externally routable service by default.
+
+## Performance and resource behavior
+
+This runtime prioritizes containment correctness over raw startup latency. Measurements must report actual backend/hardware. No performance claim is accepted from command-plan tests.
+
+Required metrics for a real backend include:
+
+- launch-to-ready latency;
+- cleanup latency;
+- peak runtime-controller RSS;
+- application memory/CPU/PID enforcement evidence;
+- orphan resource count after failure/restart;
+- network reachability result;
+- concurrent sandbox capacity under bounded policy.
+
+## Compatibility
+
+- JSON contract versions are explicit.
+- Public Rust facade should preserve existing artifact-analysis names when moving internal paths.
+- New incompatible contract behavior requires a version increment and compatibility tests.
+- No silent coercion of mutable image tags, unsupported profiles, malformed backend output, or excessive resource requests.
