@@ -3,7 +3,7 @@
 use std::{
     io::{self, Read},
     path::Path,
-    process::{Child, Command, ExitStatus, Output, Stdio},
+    process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Output, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -55,14 +55,7 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<Output, BoundedCommandError> {
-        let mut child = Command::new(program)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|_| BoundedCommandError::Spawn)?;
-        let stdout = captured_pipe(child.stdout.take())?;
-        let stderr = captured_pipe(child.stderr.take())?;
+        let (mut child, stdout, stderr) = spawn_piped_child(program, args)?;
         let overflow = Arc::new(AtomicBool::new(false));
         let stdout_handle = drain_stream(stdout, self.output_limit_bytes, Arc::clone(&overflow));
         let stderr_handle = drain_stream(stderr, self.output_limit_bytes, Arc::clone(&overflow));
@@ -80,8 +73,25 @@ impl BoundedCommandRunner {
     }
 }
 
-fn captured_pipe<T>(pipe: Option<T>) -> Result<T, BoundedCommandError> {
-    pipe.ok_or(BoundedCommandError::Spawn)
+fn spawn_piped_child(
+    program: &Path,
+    args: &[String],
+) -> Result<(Child, ChildStdout, ChildStderr), BoundedCommandError> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| BoundedCommandError::Spawn)?;
+    captured_pipes(child.stdout.take(), child.stderr.take())
+        .map(|(stdout, stderr)| (child, stdout, stderr))
+}
+
+fn captured_pipes<T, U>(stdout: Option<T>, stderr: Option<U>) -> Result<(T, U), BoundedCommandError> {
+    match (stdout, stderr) {
+        (Some(stdout), Some(stderr)) => Ok((stdout, stderr)),
+        _ => Err(BoundedCommandError::Spawn),
+    }
 }
 
 fn finalize_output(
@@ -208,7 +218,7 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipe, drain_stream, finalize_output,
+        BoundedCommandError, ChildProcess, captured_pipes, drain_stream, finalize_output,
         join_stream, kill_and_reap, supervise_child,
     };
 
@@ -282,9 +292,20 @@ mod tests {
     }
 
     #[test]
-    fn captured_pipe_preserves_present_pipe_and_rejects_missing_pipe() {
-        assert_eq!(captured_pipe(Some(7_u8)), Ok(7));
-        assert_eq!(captured_pipe::<u8>(None), Err(BoundedCommandError::Spawn));
+    fn captured_pipes_require_both_configured_streams() {
+        assert_eq!(captured_pipes(Some(7_u8), Some(8_u8)), Ok((7, 8)));
+        assert_eq!(
+            captured_pipes(None::<u8>, Some(8_u8)),
+            Err(BoundedCommandError::Spawn)
+        );
+        assert_eq!(
+            captured_pipes(Some(7_u8), None::<u8>),
+            Err(BoundedCommandError::Spawn)
+        );
+        assert_eq!(
+            captured_pipes(None::<u8>, None::<u8>),
+            Err(BoundedCommandError::Spawn)
+        );
     }
 
     #[test]
@@ -310,6 +331,40 @@ mod tests {
         let mut failed = FakeChild::new([PollOutcome::Failed]);
         assert_eq!(
             supervise_child(&mut failed, Instant::now(), &overflow),
+            Err(BoundedCommandError::Wait)
+        );
+    }
+
+    #[test]
+    fn supervision_propagates_cleanup_failures_for_every_abort_path() {
+        let overflow = AtomicBool::new(true);
+        let mut overflow_cleanup_failed = FakeChild::new([]);
+        overflow_cleanup_failed.reap_ok = false;
+        assert_eq!(
+            supervise_child(
+                &mut overflow_cleanup_failed,
+                Instant::now(),
+                &overflow,
+            ),
+            Err(BoundedCommandError::Wait)
+        );
+
+        let overflow = AtomicBool::new(false);
+        let mut timeout_cleanup_failed = FakeChild::new([PollOutcome::Running]);
+        timeout_cleanup_failed.reap_ok = false;
+        assert_eq!(
+            supervise_child(
+                &mut timeout_cleanup_failed,
+                Instant::now(),
+                &overflow,
+            ),
+            Err(BoundedCommandError::Wait)
+        );
+
+        let mut poll_cleanup_failed = FakeChild::new([PollOutcome::Failed]);
+        poll_cleanup_failed.reap_ok = false;
+        assert_eq!(
+            supervise_child(&mut poll_cleanup_failed, Instant::now(), &overflow),
             Err(BoundedCommandError::Wait)
         );
     }
