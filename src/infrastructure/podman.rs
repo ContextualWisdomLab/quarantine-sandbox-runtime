@@ -664,16 +664,26 @@ fn effective_lsm_verified(
     container: &ContainerInspection,
     process: &ProcessSecurityEvidence,
 ) -> bool {
-    let process_label = process.lsm_label.trim();
-    if process_label.is_empty() || process_label.eq_ignore_ascii_case("unconfined") {
+    let runtime_label = process.lsm_label.trim();
+    if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
         return false;
     }
-    let apparmor_profile = container.apparmor_profile.trim();
-    let apparmor_verified = info.host.security.apparmor_enabled
-        && !apparmor_profile.is_empty()
-        && !apparmor_profile.eq_ignore_ascii_case("unconfined");
-    let selinux_verified = info.host.security.selinux_enabled && !container.process_label.trim().is_empty();
-    apparmor_verified || selinux_verified
+
+    if info.host.security.selinux_enabled {
+        let inspect_label = container.process_label.trim();
+        return !inspect_label.is_empty()
+            && !inspect_label.eq_ignore_ascii_case("unconfined")
+            && inspect_label == runtime_label;
+    }
+
+    if info.host.security.apparmor_enabled {
+        let inspect_profile = container.apparmor_profile.trim();
+        return !inspect_profile.is_empty()
+            && !inspect_profile.eq_ignore_ascii_case("unconfined")
+            && inspect_profile == runtime_label;
+    }
+
+    false
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
