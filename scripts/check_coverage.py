@@ -21,6 +21,47 @@ def _metric_counts(metric: dict[str, Any]) -> tuple[int, int]:
     raise ValueError(f"coverage metric has no covered/notcovered count: {metric}")
 
 
+def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
+    """Return source lines whose function regions are never executed.
+
+    LLVM can emit several regions for one source line, especially after macro
+    expansion.  A line is therefore uncovered only when at least one function
+    maps a region to it and no mapped function region records execution.
+    """
+
+    uncovered: set[int] = set()
+    covered: set[int] = set()
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        return []
+
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        filenames = function.get("filenames")
+        if not isinstance(filenames, list) or not filenames or str(filenames[0]) != filename:
+            continue
+        line_counts: dict[int, int] = {}
+        regions = function.get("regions")
+        if not isinstance(regions, list):
+            continue
+        for region in regions:
+            if not isinstance(region, list) or len(region) < 5:
+                continue
+            line_start = int(region[0])
+            line_end = int(region[2])
+            execution_count = int(region[4])
+            for line_number in range(line_start, line_end + 1):
+                line_counts[line_number] = line_counts.get(line_number, 0) + execution_count
+        for line_number, execution_count in line_counts.items():
+            if execution_count == 0:
+                uncovered.add(line_number)
+            else:
+                covered.add(line_number)
+
+    return sorted(uncovered - covered)
+
+
 def _parse_arguments() -> argparse.Namespace:
     """Parse the coverage evidence path and optional branch requirement."""
 
@@ -72,6 +113,10 @@ def main() -> int:
                 incomplete_metrics.append(f"{metric_name}={covered}/{total}")
         if incomplete_metrics:
             print(f"incomplete file: {filename}: {', '.join(incomplete_metrics)}")
+            missing_lines = _uncovered_lines(data, filename)
+            if missing_lines:
+                joined_lines = ", ".join(str(line_number) for line_number in missing_lines)
+                print(f"uncovered lines: {filename}: {joined_lines}")
 
     if failures:
         print("; ".join(failures), file=sys.stderr)
