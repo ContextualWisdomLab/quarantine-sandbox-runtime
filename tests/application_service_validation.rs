@@ -2,7 +2,7 @@
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
-    RootlessPodmanAdapter, ServiceProtocol,
+    RootlessPodmanAdapter, SandboxExecutionError, ServiceProtocol,
 };
 
 fn digest_image() -> String {
@@ -141,7 +141,7 @@ fn isolation_policy_rejects_every_invalid_bound() {
     candidate.policy_id.clear();
     assert_eq!(
         candidate.validate(),
-        Err(ApplicationServiceError::InvalidPolicy {
+        Err(SandboxExecutionError::InvalidPolicy {
             field_name: "policy_id",
         })
     );
@@ -172,7 +172,7 @@ fn isolation_policy_rejects_every_invalid_bound() {
         mutate(&mut candidate);
         assert_eq!(
             candidate.validate(),
-            Err(ApplicationServiceError::InvalidPolicy { field_name })
+            Err(SandboxExecutionError::InvalidPolicy { field_name })
         );
     }
     assert_eq!(policy().validate(), Ok(()));
