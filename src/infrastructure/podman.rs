@@ -122,7 +122,6 @@ impl RootlessPodmanAdapter {
             "create".to_owned(),
             "--internal".to_owned(),
             "--disable-dns".to_owned(),
-            "--ignore".to_owned(),
             network_name.clone(),
         ];
         let mut container_create_args = vec![
