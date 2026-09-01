@@ -4,6 +4,7 @@
 
 use std::{
     fs,
+    net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -117,4 +118,39 @@ fn non_utf8_port_output_fails_closed_and_cleans_every_created_resource() {
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
+}
+
+#[test]
+fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener should expose its address")
+        .port();
+    let log = temporary_path("cleanup-output-limit-log");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{}\\n' ;;\n  stop) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        log.display(),
+        ready_port
+    );
+    let program = write_executable("cleanup-output-limit-podman", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_output_limit_bytes(64)
+        .with_command_timeout(Duration::from_secs(1));
+    let lease = adapter
+        .launch_at(&request(&"a".repeat(64)), &policy(), 1_780_000_000)
+        .expect("launch should succeed before bounded cleanup failure");
+
+    assert_eq!(
+        adapter.terminate_at(&lease, 1_780_000_001),
+        Err(ApplicationServiceError::CleanupFailed)
+    );
+    let calls = fs::read_to_string(&log).expect("all cleanup calls should be recorded");
+    assert!(calls.contains("stop --time 2"));
+    assert!(calls.contains("rm --force"));
+    assert!(calls.contains("network rm --force"));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    drop(listener);
 }
