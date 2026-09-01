@@ -212,6 +212,7 @@ impl IsolationAttestation {
 /// Attested lease for one ready isolated application service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplicationServiceLease {
+    schema_version: String,
     request_id: String,
     image_reference: String,
     backend_id: String,
@@ -232,6 +233,7 @@ impl ApplicationServiceLease {
         endpoint: ServiceEndpoint,
     ) -> Self {
         Self {
+            schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
             request_id: request.request_id.clone(),
             image_reference: request.image_reference.clone(),
             backend_id: metadata.backend_id.to_owned(),
@@ -244,6 +246,12 @@ impl ApplicationServiceLease {
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
             isolation_attestation: IsolationAttestation::p0(),
         }
+    }
+
+    /// Return the wire-contract version of this lease.
+    #[must_use]
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
     }
 
     /// Return the originating consumer request identifier.
@@ -314,6 +322,7 @@ impl ApplicationServiceLease {
 /// Evidence that runtime-owned isolation resources were removed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanupReceipt {
+    schema_version: String,
     sandbox_id: String,
     network_id: String,
     container_removed: bool,
@@ -324,12 +333,19 @@ pub struct CleanupReceipt {
 impl CleanupReceipt {
     pub(crate) fn complete(lease: &ApplicationServiceLease, terminated_at_epoch_seconds: u64) -> Self {
         Self {
+            schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
             sandbox_id: lease.sandbox_id.clone(),
             network_id: lease.network_id.clone(),
             container_removed: true,
             network_removed: true,
             terminated_at_epoch_seconds,
         }
+    }
+
+    /// Return the wire-contract version of this cleanup receipt.
+    #[must_use]
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
     }
 
     /// Return the sandbox identifier whose container was removed.
@@ -448,5 +464,5 @@ fn is_digest_pinned_image_reference(value: &str) -> bool {
         && digest.len() == 64
         && digest
             .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            .all(|byte| byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit()))
 }
