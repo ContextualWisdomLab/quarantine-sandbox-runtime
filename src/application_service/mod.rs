@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest};
+use crate::{
+    CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest,
+    sandbox_execution::RuntimeLeaseMetadata,
+};
 
 const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
@@ -16,7 +19,7 @@ const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
 pub enum ServiceProtocol {
     /// Plain TCP service whose application protocol is consumer-defined.
     Tcp,
-    /// HTTP service; readiness still uses a bounded TCP connect in the P0 adapter.
+    /// HTTP service; readiness uses a bounded TCP connect in the P0 adapter.
     Http,
 }
 
@@ -94,7 +97,273 @@ impl ApplicationServiceRequest {
     }
 }
 
-/// Fail-closed application-service validation or launch-plan error.
+/// Loopback-only endpoint returned to an authorized consumer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceEndpoint {
+    host: String,
+    port: u16,
+    protocol: ServiceProtocol,
+}
+
+impl ServiceEndpoint {
+    pub(crate) fn loopback(port: u16, protocol: ServiceProtocol) -> Self {
+        Self {
+            host: "127.0.0.1".to_owned(),
+            port,
+            protocol,
+        }
+    }
+
+    /// Return the loopback host name guaranteed by this profile.
+    #[must_use]
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// Return the random host port published to the consumer.
+    #[must_use]
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Return the declared service protocol.
+    #[must_use]
+    pub const fn protocol(&self) -> ServiceProtocol {
+        self.protocol
+    }
+}
+
+/// Security-boundary facts guaranteed by the P0 application-service profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IsolationAttestation {
+    rootless: bool,
+    read_only_root_filesystem: bool,
+    all_capabilities_dropped: bool,
+    no_new_privileges: bool,
+    isolated_user_namespace: bool,
+    external_egress_denied: bool,
+    loopback_only_publication: bool,
+    credentials_available: bool,
+}
+
+impl IsolationAttestation {
+    pub(crate) const fn p0() -> Self {
+        Self {
+            rootless: true,
+            read_only_root_filesystem: true,
+            all_capabilities_dropped: true,
+            no_new_privileges: true,
+            isolated_user_namespace: true,
+            external_egress_denied: true,
+            loopback_only_publication: true,
+            credentials_available: false,
+        }
+    }
+
+    /// Whether the container backend was verified to run rootless.
+    #[must_use]
+    pub const fn rootless(self) -> bool {
+        self.rootless
+    }
+
+    /// Whether the application root filesystem was mounted read-only.
+    #[must_use]
+    pub const fn read_only_root_filesystem(self) -> bool {
+        self.read_only_root_filesystem
+    }
+
+    /// Whether all Linux capabilities were dropped from the application.
+    #[must_use]
+    pub const fn all_capabilities_dropped(self) -> bool {
+        self.all_capabilities_dropped
+    }
+
+    /// Whether the no-new-privileges security option was enforced.
+    #[must_use]
+    pub const fn no_new_privileges(self) -> bool {
+        self.no_new_privileges
+    }
+
+    /// Whether the application uses an isolated user namespace.
+    #[must_use]
+    pub const fn isolated_user_namespace(self) -> bool {
+        self.isolated_user_namespace
+    }
+
+    /// Whether the standard profile denies externally routed application egress.
+    #[must_use]
+    pub const fn external_egress_denied(self) -> bool {
+        self.external_egress_denied
+    }
+
+    /// Whether the service was published exclusively on host loopback.
+    #[must_use]
+    pub const fn loopback_only_publication(self) -> bool {
+        self.loopback_only_publication
+    }
+
+    /// Whether consumer/provider credentials were made available to the application.
+    #[must_use]
+    pub const fn credentials_available(self) -> bool {
+        self.credentials_available
+    }
+}
+
+/// Attested lease for one ready isolated application service.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplicationServiceLease {
+    request_id: String,
+    image_reference: String,
+    backend_id: String,
+    sandbox_id: String,
+    network_id: String,
+    policy_id: String,
+    endpoint: ServiceEndpoint,
+    started_at_epoch_seconds: u64,
+    expires_at_epoch_seconds: u64,
+    shutdown_grace_seconds: u32,
+    isolation_attestation: IsolationAttestation,
+}
+
+impl ApplicationServiceLease {
+    pub(crate) fn new(
+        request: &ApplicationServiceRequest,
+        metadata: RuntimeLeaseMetadata,
+        endpoint: ServiceEndpoint,
+    ) -> Self {
+        Self {
+            request_id: request.request_id.clone(),
+            image_reference: request.image_reference.clone(),
+            backend_id: metadata.backend_id.to_owned(),
+            sandbox_id: metadata.sandbox_id,
+            network_id: metadata.network_id,
+            policy_id: metadata.policy_id,
+            endpoint,
+            started_at_epoch_seconds: metadata.started_at_epoch_seconds,
+            expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
+            shutdown_grace_seconds: metadata.shutdown_grace_seconds,
+            isolation_attestation: IsolationAttestation::p0(),
+        }
+    }
+
+    /// Return the originating consumer request identifier.
+    #[must_use]
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    /// Return the immutable OCI image reference used to create the service.
+    #[must_use]
+    pub fn image_reference(&self) -> &str {
+        &self.image_reference
+    }
+
+    /// Return the infrastructure backend identity.
+    #[must_use]
+    pub fn backend_id(&self) -> &str {
+        &self.backend_id
+    }
+
+    /// Return the opaque sandbox identifier.
+    #[must_use]
+    pub fn sandbox_id(&self) -> &str {
+        &self.sandbox_id
+    }
+
+    /// Return the opaque per-sandbox network identifier.
+    #[must_use]
+    pub fn network_id(&self) -> &str {
+        &self.network_id
+    }
+
+    /// Return the operator isolation-policy identifier.
+    #[must_use]
+    pub fn policy_id(&self) -> &str {
+        &self.policy_id
+    }
+
+    /// Return the loopback-scoped service endpoint.
+    #[must_use]
+    pub const fn endpoint(&self) -> &ServiceEndpoint {
+        &self.endpoint
+    }
+
+    /// Return the start timestamp recorded by the launcher.
+    #[must_use]
+    pub const fn started_at_epoch_seconds(&self) -> u64 {
+        self.started_at_epoch_seconds
+    }
+
+    /// Return the absolute lease expiry timestamp.
+    #[must_use]
+    pub const fn expires_at_epoch_seconds(&self) -> u64 {
+        self.expires_at_epoch_seconds
+    }
+
+    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
+        self.shutdown_grace_seconds
+    }
+
+    /// Return the P0 isolation attestation.
+    #[must_use]
+    pub const fn isolation_attestation(&self) -> IsolationAttestation {
+        self.isolation_attestation
+    }
+}
+
+/// Evidence that runtime-owned isolation resources were removed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupReceipt {
+    sandbox_id: String,
+    network_id: String,
+    container_removed: bool,
+    network_removed: bool,
+    terminated_at_epoch_seconds: u64,
+}
+
+impl CleanupReceipt {
+    pub(crate) fn complete(lease: &ApplicationServiceLease, terminated_at_epoch_seconds: u64) -> Self {
+        Self {
+            sandbox_id: lease.sandbox_id.clone(),
+            network_id: lease.network_id.clone(),
+            container_removed: true,
+            network_removed: true,
+            terminated_at_epoch_seconds,
+        }
+    }
+
+    /// Return the sandbox identifier whose container was removed.
+    #[must_use]
+    pub fn sandbox_id(&self) -> &str {
+        &self.sandbox_id
+    }
+
+    /// Return the network identifier removed with the sandbox.
+    #[must_use]
+    pub fn network_id(&self) -> &str {
+        &self.network_id
+    }
+
+    /// Whether the application container was removed.
+    #[must_use]
+    pub const fn container_removed(&self) -> bool {
+        self.container_removed
+    }
+
+    /// Whether the per-sandbox network was removed.
+    #[must_use]
+    pub const fn network_removed(&self) -> bool {
+        self.network_removed
+    }
+
+    /// Return the termination timestamp supplied by the supervisor.
+    #[must_use]
+    pub const fn terminated_at_epoch_seconds(&self) -> u64 {
+        self.terminated_at_epoch_seconds
+    }
+}
+
+/// Fail-closed application-service validation or runtime error.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ApplicationServiceError {
     /// The wire schema is not supported by this runtime.
@@ -139,6 +408,30 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
+    /// The configured Podman executable could not be invoked.
+    #[error("Podman invocation failed during {operation}")]
+    BackendInvocationFailed {
+        /// Stable operation code.
+        operation: &'static str,
+    },
+    /// Podman returned a nonzero exit status for a required operation.
+    #[error("Podman command failed during {operation}")]
+    BackendCommandFailed {
+        /// Stable operation code.
+        operation: &'static str,
+    },
+    /// The backend did not attest that it is running rootless.
+    #[error("Podman backend is not rootless")]
+    BackendNotRootless,
+    /// Podman returned a service publication other than one IPv4 loopback port.
+    #[error("invalid Podman loopback port mapping")]
+    InvalidPortMapping,
+    /// The service did not become reachable before the bounded readiness deadline.
+    #[error("application service readiness timed out")]
+    ReadinessTimeout,
+    /// Cleanup could not prove removal of all runtime-owned resources.
+    #[error("sandbox cleanup failed")]
+    CleanupFailed,
 }
 
 fn is_digest_pinned_image_reference(value: &str) -> bool {

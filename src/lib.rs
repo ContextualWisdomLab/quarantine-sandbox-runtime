@@ -15,7 +15,8 @@ mod runtime;
 mod sandbox_execution;
 
 pub use application_service::{
-    ApplicationServiceError, ApplicationServiceRequest, ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
+    IsolationAttestation, ServiceEndpoint, ServiceProtocol,
 };
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,

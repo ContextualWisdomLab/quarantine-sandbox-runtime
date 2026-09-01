@@ -1,4 +1,4 @@
-//! Core sandbox-execution resource and isolation policy values.
+//! Core sandbox-execution resource, lease, and isolation policy values.
 
 mod podman;
 
@@ -32,7 +32,10 @@ impl ResourceRequest {
         policy: &IsolationPolicy,
     ) -> Result<(), ApplicationServiceError> {
         for (resource_name, invalid) in [
-            ("memory_bytes", self.memory_bytes == 0 || self.memory_bytes > policy.maximum_memory_bytes),
+            (
+                "memory_bytes",
+                self.memory_bytes == 0 || self.memory_bytes > policy.maximum_memory_bytes,
+            ),
             (
                 "cpu_millicores",
                 self.cpu_millicores == 0 || self.cpu_millicores > policy.maximum_cpu_millicores,
@@ -46,7 +49,10 @@ impl ResourceRequest {
                 "lease_seconds",
                 self.lease_seconds == 0 || self.lease_seconds > policy.maximum_lease_seconds,
             ),
-            ("tmpfs_bytes", self.tmpfs_bytes == 0 || self.tmpfs_bytes > policy.maximum_tmpfs_bytes),
+            (
+                "tmpfs_bytes",
+                self.tmpfs_bytes == 0 || self.tmpfs_bytes > policy.maximum_tmpfs_bytes,
+            ),
         ] {
             if invalid {
                 return Err(ApplicationServiceError::ResourceLimitExceeded { resource_name });
@@ -123,4 +129,14 @@ impl IsolationPolicy {
         }
         Ok(())
     }
+}
+
+pub(crate) struct RuntimeLeaseMetadata {
+    pub(crate) backend_id: &'static str,
+    pub(crate) sandbox_id: String,
+    pub(crate) network_id: String,
+    pub(crate) policy_id: String,
+    pub(crate) started_at_epoch_seconds: u64,
+    pub(crate) expires_at_epoch_seconds: u64,
+    pub(crate) shutdown_grace_seconds: u32,
 }

@@ -1,8 +1,19 @@
-//! Rootless Podman infrastructure adapter for isolated application-service plans.
+//! Rootless Podman infrastructure adapter for isolated application services.
+
+use std::{
+    net::{Ipv4Addr, SocketAddrV4, TcpStream},
+    path::PathBuf,
+    process::{Command, Output},
+    thread,
+    time::{Duration, Instant},
+};
 
 use sha2::{Digest, Sha256};
 
-use crate::{ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy};
+use crate::{
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
+    IsolationPolicy, ServiceEndpoint, sandbox_execution::RuntimeLeaseMetadata,
+};
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 
@@ -60,11 +71,23 @@ impl PodmanLaunchPlan {
 }
 
 /// First OCI infrastructure adapter for the application-service profile.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RootlessPodmanAdapter;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootlessPodmanAdapter {
+    program: PathBuf,
+}
 
 impl RootlessPodmanAdapter {
-    /// Return the stable backend identifier emitted in future runtime receipts.
+    /// Construct an adapter for a specific Podman-compatible executable.
+    ///
+    /// The executable is invoked directly with argv; this adapter never uses a shell.
+    #[must_use]
+    pub fn new(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+
+    /// Return the stable backend identifier emitted in runtime receipts.
     #[must_use]
     pub const fn backend_id() -> &'static str {
         PODMAN_BACKEND_ID
@@ -145,6 +168,201 @@ impl RootlessPodmanAdapter {
             expires_at_epoch_seconds,
         })
     }
+
+    /// Launch one isolated application service and wait for bounded readiness.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationServiceError`] when Podman is unavailable, is not
+    /// rootless, rejects an isolation operation, returns a non-loopback port,
+    /// readiness times out, or required cleanup after a partial launch fails.
+    pub fn launch_at(
+        &self,
+        request: &ApplicationServiceRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
+        let plan = Self::plan_at(request, policy, started_at_epoch_seconds)?;
+        let rootless = self.checked_output("rootless_probe", plan.rootless_probe_args())?;
+        if String::from_utf8_lossy(&rootless.stdout).trim() != "true" {
+            return Err(ApplicationServiceError::BackendNotRootless);
+        }
+
+        self.checked_output("network_create", plan.network_create_args())?;
+        if let Err(error) = self.checked_output("container_create", plan.container_create_args()) {
+            self.cleanup_network(&plan)?;
+            return Err(error);
+        }
+
+        let start_args = ["start".to_owned(), plan.sandbox_name().to_owned()];
+        if let Err(error) = self.checked_output("container_start", &start_args) {
+            self.cleanup_created_container(&plan)?;
+            return Err(error);
+        }
+
+        let port_args = [
+            "port".to_owned(),
+            plan.sandbox_name().to_owned(),
+            format!("{}/tcp", request.container_port),
+        ];
+        let port_output = match self.checked_output("port_query", &port_args) {
+            Ok(output) => output,
+            Err(error) => {
+                self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+                return Err(error);
+            }
+        };
+        let host_port = match parse_loopback_port(&port_output.stdout) {
+            Some(port) => port,
+            None => {
+                self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+                return Err(ApplicationServiceError::InvalidPortMapping);
+            }
+        };
+        if wait_for_readiness(host_port, policy).is_err() {
+            self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+            return Err(ApplicationServiceError::ReadinessTimeout);
+        }
+
+        Ok(ApplicationServiceLease::new(
+            request,
+            RuntimeLeaseMetadata {
+                backend_id: PODMAN_BACKEND_ID,
+                sandbox_id: plan.sandbox_name().to_owned(),
+                network_id: plan.network_name().to_owned(),
+                policy_id: policy.policy_id.clone(),
+                started_at_epoch_seconds,
+                expires_at_epoch_seconds: plan.expires_at_epoch_seconds(),
+                shutdown_grace_seconds: policy.shutdown_grace_seconds,
+            },
+            ServiceEndpoint::loopback(host_port, request.protocol),
+        ))
+    }
+
+    /// Stop a leased service and remove all runtime-owned isolation resources.
+    ///
+    /// Cleanup attempts every required operation before returning failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApplicationServiceError::CleanupFailed`] when container or
+    /// network removal cannot be proven successful.
+    pub fn terminate_at(
+        &self,
+        lease: &ApplicationServiceLease,
+        terminated_at_epoch_seconds: u64,
+    ) -> Result<CleanupReceipt, ApplicationServiceError> {
+        let stop_args = [
+            "stop".to_owned(),
+            "--time".to_owned(),
+            lease.shutdown_grace_seconds().to_string(),
+            lease.sandbox_id().to_owned(),
+        ];
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            lease.sandbox_id().to_owned(),
+        ];
+        let network_args = [
+            "network".to_owned(),
+            "rm".to_owned(),
+            "--force".to_owned(),
+            lease.network_id().to_owned(),
+        ];
+        let stop_ok = self.command_succeeded(&stop_args);
+        let remove_ok = self.command_succeeded(&remove_args);
+        let network_ok = self.command_succeeded(&network_args);
+        if !(stop_ok && remove_ok && network_ok) {
+            return Err(ApplicationServiceError::CleanupFailed);
+        }
+        Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
+    }
+
+    fn checked_output(
+        &self,
+        operation: &'static str,
+        args: &[String],
+    ) -> Result<Output, ApplicationServiceError> {
+        let output = Command::new(&self.program)
+            .args(args)
+            .output()
+            .map_err(|_| ApplicationServiceError::BackendInvocationFailed { operation })?;
+        if !output.status.success() {
+            return Err(ApplicationServiceError::BackendCommandFailed { operation });
+        }
+        Ok(output)
+    }
+
+    fn command_succeeded(&self, args: &[String]) -> bool {
+        Command::new(&self.program)
+            .args(args)
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn cleanup_network(&self, plan: &PodmanLaunchPlan) -> Result<(), ApplicationServiceError> {
+        let args = [
+            "network".to_owned(),
+            "rm".to_owned(),
+            "--force".to_owned(),
+            plan.network_name().to_owned(),
+        ];
+        if self.command_succeeded(&args) {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    fn cleanup_created_container(
+        &self,
+        plan: &PodmanLaunchPlan,
+    ) -> Result<(), ApplicationServiceError> {
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            plan.sandbox_name().to_owned(),
+        ];
+        let container_removed = self.command_succeeded(&remove_args);
+        let network_removed = self.cleanup_network(plan).is_ok();
+        if container_removed && network_removed {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    fn cleanup_started_container(
+        &self,
+        plan: &PodmanLaunchPlan,
+        shutdown_grace_seconds: u32,
+    ) -> Result<(), ApplicationServiceError> {
+        let stop_args = [
+            "stop".to_owned(),
+            "--time".to_owned(),
+            shutdown_grace_seconds.to_string(),
+            plan.sandbox_name().to_owned(),
+        ];
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            plan.sandbox_name().to_owned(),
+        ];
+        let stopped = self.command_succeeded(&stop_args);
+        let container_removed = self.command_succeeded(&remove_args);
+        let network_removed = self.cleanup_network(plan).is_ok();
+        if stopped && container_removed && network_removed {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+}
+
+impl Default for RootlessPodmanAdapter {
+    fn default() -> Self {
+        Self::new("podman")
+    }
 }
 
 fn sandbox_identity(
@@ -168,4 +386,34 @@ fn sandbox_identity(
 
 fn cpu_limit(cpu_millicores: u32) -> String {
     format!("{}.{:03}", cpu_millicores / 1_000, cpu_millicores % 1_000)
+}
+
+fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
+    let text = std::str::from_utf8(stdout).ok()?.trim();
+    let port = text.strip_prefix("127.0.0.1:")?.parse::<u16>().ok()?;
+    (port != 0).then_some(port)
+}
+
+fn wait_for_readiness(
+    host_port: u16,
+    policy: &IsolationPolicy,
+) -> Result<(), ApplicationServiceError> {
+    let deadline = Instant::now() + Duration::from_millis(policy.readiness_timeout_millis);
+    let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, host_port);
+    let poll = Duration::from_millis(policy.readiness_poll_interval_millis);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(ApplicationServiceError::ReadinessTimeout);
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
+            return Ok(());
+        }
+        let after_probe = Instant::now();
+        if after_probe >= deadline {
+            return Err(ApplicationServiceError::ReadinessTimeout);
+        }
+        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+    }
 }
