@@ -1,6 +1,23 @@
 # Consumer Contract
 
-This document defines the consumer-neutral boundary for Quarantine Sandbox Runtime. Consumer repositories keep their own domain authority and use an Anti-Corruption Layer to call this runtime.
+This document defines the consumer-neutral boundary for Quarantine Sandbox Runtime. Consumer repositories keep their own domain authority and use an Anti-Corruption Layer to call a released runtime artifact.
+
+## Version surface
+
+The first release candidate carries independently versioned wire contracts rather than one implicit repository version:
+
+| Contract | Current schema |
+| --- | --- |
+| Artifact analysis request/evidence | `1.0.0` |
+| Application-service request | `1.0.0` |
+| Isolation policy | `1.0.0` |
+| Application-service lease | `1.2.0` |
+| Application-service cleanup receipt | `1.0.0` |
+| Release evidence manifest | `1.0.0` |
+
+All public JSON Schemas use Draft 2020-12 and reject unknown top-level fields. A consumer therefore validates an exact schema version it explicitly supports; it must not infer compatibility from the repository package version or silently coerce an unknown contract revision. A breaking field removal, meaning change, or relaxation requires a new major contract version. A minor contract revision may add security evidence that is required for that revision, as the application-service lease `1.2.0` did for backend version and effective seccomp/LSM/resource-control state. Strict consumers upgrade deliberately rather than treating that addition as wire-compatible with `1.1.0`.
+
+The runtime may preserve multiple schema readers/writers in a future transport, but version negotiation must be explicit and bounded. Unsupported versions fail closed with stable transport-level error codes when a transport exists.
 
 ## Artifact analysis
 
@@ -11,6 +28,8 @@ A security or ingestion consumer submits:
 - optional closed `bounded_source_context` only for non-secret correlation metadata.
 
 The runtime returns a versioned `EvidenceBundle`. `RuntimeDisposition` describes analysis completeness only. `consumer_verdict_required` remains true. The consumer decides maliciousness, incident state, quarantine/block/allow/review, notification, and retention.
+
+Artifact-analysis output is risk evidence. A hash, static finding, dynamic trace, or analyzer score is not authoritative truth about the binary/application and must not be projected as an authoritative Enterprise Architecture fact.
 
 ## Isolated application service
 
@@ -37,13 +56,14 @@ The operator supplies `IsolationPolicy`; the consumer cannot raise policy maxima
 
 ### Returned lease
 
-`ApplicationServiceLease` schema `1.1.0` provides:
+`ApplicationServiceLease` schema `1.2.0` provides:
 
 ```text
 schema_version
 request_id
 image_reference
 backend_id
+backend_version
 sandbox_id
 network_id
 policy_id
@@ -56,9 +76,20 @@ started_at_epoch_seconds
 expires_at_epoch_seconds
 shutdown_grace_seconds
 isolation_attestation
+  rootless
+  read_only_root_filesystem
+  all_capabilities_dropped
+  no_new_privileges
+  isolated_user_namespace
+  external_egress_denied
+  loopback_only_publication
+  seccomp_enforced
+  lsm_enforced
+  resource_limits_verified
+  credentials_available
 ```
 
-P0 attestation states rootless execution, read-only rootfs, all capabilities dropped, no-new-privileges, user-namespace isolation, denied external egress, loopback-only publication, and absence of consumer/provider credentials.
+The control fields distinguish positively verified, unavailable, and not-applicable states where the contract permits those states. The P0 application-service path returns a successful lease only after every required effective control is positively verified. In particular, capability-drop evidence covers both effective and bounding capability sets; configured command-line intent alone is insufficient.
 
 A lease means the runtime reached its isolation/readiness contract. It does **not** mean the consumer was authorized to request it; authorization is the consumer's responsibility and must happen before launch.
 
@@ -66,7 +97,7 @@ A lease means the runtime reached its isolation/readiness contract. It does **no
 
 Every consumer terminal path—success, cancellation, timeout, workflow failure, or user abort—must request lease termination. `CleanupReceipt` proves container/network removal only when both removal operations succeed. Consumers must surface cleanup failure rather than treating it as successful termination.
 
-The runtime also applies a Podman container timeout matching the requested lease. A durable orphan/network reaper remains required before GA for process-crash recovery.
+The runtime also applies a Podman container timeout matching the requested lease. A durable orphan/network reaper remains required before a distributed restart-recovery claim.
 
 ## Forbidden consumer coupling
 
@@ -77,8 +108,10 @@ Consumers must not:
 - pass mutable image tags;
 - pass prompt text, message bodies, credentials, arbitrary environment variables, broad host paths, runtime sockets, or host devices through the application-service request;
 - treat runtime evidence as verdict policy;
-- expose the returned service endpoint beyond the host loopback boundary;
-- reuse an expired lease.
+- expose the returned service endpoint beyond the reviewed loopback/co-location topology;
+- reuse an expired lease;
+- read runtime persistence through cross-service SQL;
+- treat a pull-request head, branch artifact, or queued workflow as a production dependency.
 
 ## Controlled egress and secrets
 
@@ -86,4 +119,6 @@ P0 has neither. If an application needs them, the required capability must be im
 
 ## Immutable consumption
 
-During review a consumer may pin an exact full source commit SHA. Production integration requires a published package/container artifact pinned by immutable digest with verified provenance. A branch, tag, or semantic version label alone is not immutable identity.
+Review and stacked development may refer to an exact full source commit SHA as provisional evidence. Production integration requires a published release artifact plus its immutable SHA-256 and verified provenance/SBOM attestations. A branch, pull-request head, tag, semantic version label, or transient Actions artifact alone is not sufficient immutable consumer identity.
+
+After a release, Wardnet and contextual-orchestrator owner paths record the released package version, source SHA, package SHA-256, exact contract schema versions, and attestation verification. Their ACLs must reject a response that does not match the pinned contract/runtime identity. Consumers retain their own verdict, authorization, orchestration, secret, and user-action authority throughout upgrades and rollback.
