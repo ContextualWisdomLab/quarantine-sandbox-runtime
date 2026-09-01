@@ -442,6 +442,18 @@ pub enum ApplicationServiceError {
         /// Stable operation code.
         operation: &'static str,
     },
+    /// Podman exceeded the bounded wall-clock budget for a required operation.
+    #[error("Podman command timed out during {operation}")]
+    BackendCommandTimedOut {
+        /// Stable operation code.
+        operation: &'static str,
+    },
+    /// Podman exceeded the bounded retained-output budget for a required operation.
+    #[error("Podman command exceeded output limit during {operation}")]
+    BackendOutputLimitExceeded {
+        /// Stable operation code.
+        operation: &'static str,
+    },
     /// Podman returned a nonzero exit status for a required operation.
     #[error("Podman command failed during {operation}")]
     BackendCommandFailed {
