@@ -13,8 +13,9 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceCoordinator, ApplicationServiceError, ApplicationServiceRequest,
-    IsolationPolicy, LeaseOwnerId, ResourceRequest, RootlessPodmanAdapter, ServiceProtocol,
+    ApplicationServiceCoordinator, ApplicationServiceCoordinatorError, ApplicationServiceError,
+    ApplicationServiceRequest, IsolationPolicy, LeaseOwnerId, ResourceRequest,
+    RootlessPodmanAdapter, ServiceProtocol,
 };
 
 fn digest_image() -> String {
@@ -105,15 +106,15 @@ fn wait_until_log_contains(log: &Path, needle: &str) {
 fn lease_owner_ids_are_bounded_opaque_runtime_context() {
     assert_eq!(
         LeaseOwnerId::new(""),
-        Err(ApplicationServiceError::InvalidLeaseOwnerId)
+        Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId)
     );
     assert_eq!(
         LeaseOwnerId::new("contains whitespace"),
-        Err(ApplicationServiceError::InvalidLeaseOwnerId)
+        Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId)
     );
     assert_eq!(
         LeaseOwnerId::new(&"a".repeat(129)),
-        Err(ApplicationServiceError::InvalidLeaseOwnerId)
+        Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId)
     );
     assert_eq!(
         owner("urn:cwl:agent:contextual-orchestrator").as_str(),
@@ -165,7 +166,7 @@ fn same_owner_and_request_id_with_different_content_fails_closed() {
 
     assert_eq!(
         coordinator.launch_at(&owner, &changed, &policy(), 1_780_000_001),
-        Err(ApplicationServiceError::IdempotencyConflict)
+        Err(ApplicationServiceCoordinatorError::IdempotencyConflict)
     );
     assert_eq!(count_calls(&log, "network create"), 1);
     coordinator
@@ -192,7 +193,7 @@ fn wrong_owner_cannot_terminate_another_callers_lease() {
 
     assert_eq!(
         coordinator.terminate_at(&wrong_owner, &lease, 1_780_000_010),
-        Err(ApplicationServiceError::UnknownLease)
+        Err(ApplicationServiceCoordinatorError::UnknownLease)
     );
     assert_eq!(count_calls(&log, "stop --time"), 0);
     coordinator
@@ -216,9 +217,11 @@ fn failed_launch_releases_idempotency_reservation_for_retry() {
 
     assert_eq!(
         coordinator.launch_at(&owner, &request(), &policy(), 1_780_000_000),
-        Err(ApplicationServiceError::BackendCommandFailed {
-            operation: "rootless_probe",
-        })
+        Err(ApplicationServiceCoordinatorError::Backend(
+            ApplicationServiceError::BackendCommandFailed {
+                operation: "rootless_probe",
+            }
+        ))
     );
     write_fake_podman(&program, &log, "success", ready_port);
     let lease = coordinator
@@ -252,7 +255,7 @@ fn concurrent_duplicate_launch_is_rejected_while_first_launch_is_in_flight() {
 
     assert_eq!(
         coordinator.launch_at(&owner, &request(), &policy(), 1_780_000_001),
-        Err(ApplicationServiceError::LaunchInProgress)
+        Err(ApplicationServiceCoordinatorError::LaunchInProgress)
     );
     let lease = worker
         .join()
@@ -282,16 +285,23 @@ fn expired_lease_cleanup_is_bounded_and_attributed_to_owner_and_request() {
         .launch_at(&owner, &short_request, &policy(), 1_780_000_000)
         .expect("short lease should launch");
 
-    assert!(coordinator.cleanup_expired_at(1_780_000_000).is_empty());
-    let outcomes = coordinator.cleanup_expired_at(1_780_000_001);
+    assert!(
+        coordinator
+            .cleanup_expired_at(1_780_000_000)
+            .expect("registry should be available")
+            .is_empty()
+    );
+    let outcomes = coordinator
+        .cleanup_expired_at(1_780_000_001)
+        .expect("expired cleanup should access registry");
     assert_eq!(outcomes.len(), 1);
     assert_eq!(outcomes[0].lease_owner_id().as_str(), owner.as_str());
     assert_eq!(outcomes[0].request_id(), "agent_task_lease_42");
     assert!(outcomes[0].result().is_ok());
     assert_eq!(count_calls(&log, "stop --time"), 1);
     assert_eq!(
-        coordinator.terminate_at(&owner, &outcomes[0].lease(), 1_780_000_002),
-        Err(ApplicationServiceError::UnknownLease)
+        coordinator.terminate_at(&owner, outcomes[0].lease(), 1_780_000_002),
+        Err(ApplicationServiceCoordinatorError::UnknownLease)
     );
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
