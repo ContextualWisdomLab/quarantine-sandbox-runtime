@@ -132,6 +132,7 @@ impl RootlessPodmanAdapter {
             "--pull=never".to_owned(),
             "--read-only".to_owned(),
             "--read-only-tmpfs=false".to_owned(),
+            "--http-proxy=false".to_owned(),
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
             "--userns=auto".to_owned(),
