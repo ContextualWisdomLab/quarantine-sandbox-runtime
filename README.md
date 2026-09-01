@@ -1,5 +1,7 @@
 # Quarantine Sandbox Runtime
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ContextualWisdomLab/quarantine-sandbox-runtime)
+
 **Credential-free hostile-workload isolation and evidence runtime for ContextualWisdomLab products.**
 
 Quarantine Sandbox Runtime gives security and agent products a reusable place to run untrusted work **without moving product credentials, verdict authority, or user-facing policy into the sandbox**. It owns isolation lifecycle and evidence; the calling product keeps the decisions that belong to its domain.
