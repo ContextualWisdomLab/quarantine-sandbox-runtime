@@ -73,10 +73,10 @@ fn temporary_path(name: &str) -> PathBuf {
 
 fn write_fake_podman(program: &Path, log: &Path, mode: &str, ready_port: u16) {
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.6.2"}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$MODE\" = slow_rootless ] && [ \"${{1:-}}\" = info ]; then sleep 1; fi\nif [ \"$MODE\" = fail_rootless ] && [ \"${{1:-}}\" = info ]; then exit 20; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$MODE\" = slow_rootless ] && [ \"${{1:-}}\" = info ]; then sleep 1; fi\nif [ \"$MODE\" = fail_rootless ] && [ \"${{1:-}}\" = info ]; then exit 20; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter 0000000000000000 0000000000000000 0000000000000000 0000000000000000 0000000000000000 containers-default\\n' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
@@ -131,11 +131,15 @@ fn lease_owner_ids_are_bounded_opaque_runtime_context() {
 #[test]
 fn identical_retry_returns_existing_lease_without_second_launch() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let owner = owner("urn:cwl:agent:contextual-orchestrator");
 
     let first = coordinator
@@ -158,11 +162,15 @@ fn identical_retry_returns_existing_lease_without_second_launch() {
 #[test]
 fn same_owner_and_request_id_with_different_content_fails_closed() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let owner = owner("urn:cwl:agent:contextual-orchestrator");
     let first = coordinator
         .launch_at(&owner, &request(), &policy(), 1_780_000_000)
@@ -186,11 +194,15 @@ fn same_owner_and_request_id_with_different_content_fails_closed() {
 #[test]
 fn wrong_owner_cannot_terminate_another_callers_lease() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let correct_owner = owner("urn:cwl:agent:contextual-orchestrator");
     let wrong_owner = owner("urn:cwl:consumer:wardnet");
     let lease = coordinator
@@ -214,11 +226,15 @@ fn wrong_owner_cannot_terminate_another_callers_lease() {
 #[test]
 fn failed_launch_releases_idempotency_reservation_for_retry() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "fail_rootless", ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let owner = owner("urn:cwl:agent:contextual-orchestrator");
 
     assert_eq!(
@@ -244,13 +260,16 @@ fn failed_launch_releases_idempotency_reservation_for_retry() {
 #[test]
 fn concurrent_duplicate_launch_is_rejected_while_first_launch_is_in_flight() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "slow_rootless", ready_port);
-    let coordinator = Arc::new(ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(
-        program.clone(),
-    )));
+    let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+        RootlessPodmanAdapter::new(program.clone()),
+    ));
     let owner = owner("urn:cwl:agent:contextual-orchestrator");
     let worker_coordinator = Arc::clone(&coordinator);
     let worker_owner = owner.clone();
@@ -279,11 +298,15 @@ fn concurrent_duplicate_launch_is_rejected_while_first_launch_is_in_flight() {
 #[test]
 fn expired_lease_cleanup_is_bounded_and_attributed_to_owner_and_request() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let owner = owner("urn:cwl:agent:contextual-orchestrator");
     let mut short_request = request();
     short_request.resources.lease_seconds = 1;

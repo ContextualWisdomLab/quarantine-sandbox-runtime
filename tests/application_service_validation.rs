@@ -192,6 +192,19 @@ fn isolation_policy_rejects_every_invalid_bound() {
 }
 
 #[test]
+fn request_validation_preserves_invalid_policy_identity_at_the_application_boundary() {
+    let mut invalid_policy = policy();
+    invalid_policy.policy_id.clear();
+
+    assert_eq!(
+        request().validate(&invalid_policy),
+        Err(ApplicationServiceError::InvalidPolicy {
+            field_name: "policy_id",
+        })
+    );
+}
+
+#[test]
 fn resource_request_rejects_zero_and_over_policy_for_every_dimension() {
     for value in [0, policy().maximum_memory_bytes + 1] {
         let mut candidate = request();
@@ -221,7 +234,7 @@ fn resource_request_rejects_zero_and_over_policy_for_every_dimension() {
 }
 
 #[test]
-fn launch_plan_is_deterministic_and_rejects_expiry_overflow() {
+fn launch_plan_is_deterministic_and_rejects_invalid_requests_and_expiry_overflow() {
     let first = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_000)
         .expect("valid plan should be created");
     let second = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_000)
@@ -234,6 +247,13 @@ fn launch_plan_is_deterministic_and_rejects_expiry_overflow() {
         .expect("different start time should still create a plan");
     assert_ne!(first.sandbox_name(), different_time.sandbox_name());
     assert_ne!(first.network_name(), different_time.network_name());
+
+    let mut invalid_request = request();
+    invalid_request.container_port = 0;
+    assert_eq!(
+        RootlessPodmanAdapter::plan_at(&invalid_request, &policy(), 1_000),
+        Err(ApplicationServiceError::InvalidContainerPort)
+    );
 
     assert_eq!(
         RootlessPodmanAdapter::plan_at(&request(), &policy(), u64::MAX),

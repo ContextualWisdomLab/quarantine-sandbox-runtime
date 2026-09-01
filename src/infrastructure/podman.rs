@@ -3,7 +3,7 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::PathBuf,
-    process::{Command, Output},
+    process::Output,
     thread,
     time::{Duration, Instant},
 };
@@ -11,6 +11,7 @@ use std::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
     IsolationControlStatus, IsolationPolicy, ServiceEndpoint, VerifiedIsolationState,
@@ -18,7 +19,8 @@ use crate::{
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
-const MAX_BACKEND_OUTPUT_BYTES: usize = 65_536;
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -103,6 +105,17 @@ struct NetworkInspection {
     dns_enabled: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProcessSecurityEvidence {
+    seccomp: String,
+    effective_caps: String,
+    bounding_caps: String,
+    inheritable_caps: String,
+    permitted_caps: String,
+    ambient_caps: String,
+    lsm_label: String,
+}
+
 /// Deterministic, auditable rootless Podman command plan.
 ///
 /// Creating a plan performs no process execution. It exists so the domain
@@ -160,17 +173,44 @@ impl PodmanLaunchPlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootlessPodmanAdapter {
     program: PathBuf,
+    command_timeout: Duration,
+    command_output_limit_bytes: usize,
 }
 
 impl RootlessPodmanAdapter {
     /// Construct an adapter for a specific Podman-compatible executable.
     ///
     /// The executable is invoked directly with argv; this adapter never uses a shell.
+    /// Individual CLI calls have a 30-second wall-clock budget and retain at most
+    /// 64 KiB from each output stream unless an operator-facing builder overrides it.
     #[must_use]
     pub fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            command_timeout: DEFAULT_COMMAND_TIMEOUT,
+            command_output_limit_bytes: DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES,
         }
+    }
+
+    /// Override the wall-clock budget for each Podman CLI operation.
+    ///
+    /// This is primarily useful for environment-specific runtime profiles and
+    /// deterministic tests. A zero duration intentionally makes every command
+    /// fail closed immediately rather than disabling the deadline.
+    #[must_use]
+    pub const fn with_command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = timeout;
+        self
+    }
+
+    /// Override the maximum retained bytes for each Podman stdout/stderr stream.
+    ///
+    /// The reader always drains the pipe; bytes beyond this budget are discarded
+    /// and the command is terminated with a typed fail-closed error.
+    #[must_use]
+    pub const fn with_command_output_limit_bytes(mut self, output_limit_bytes: usize) -> Self {
+        self.command_output_limit_bytes = output_limit_bytes;
+        self
     }
 
     /// Return the stable backend identifier emitted in runtime receipts.
@@ -355,7 +395,8 @@ impl RootlessPodmanAdapter {
 
     /// Stop a leased service and remove all runtime-owned isolation resources.
     ///
-    /// Cleanup attempts every required operation before returning failure.
+    /// Cleanup attempts every required operation before returning failure. Cleanup
+    /// commands use the same wall-clock and output bounds as launch commands.
     ///
     /// # Errors
     ///
@@ -416,6 +457,21 @@ impl RootlessPodmanAdapter {
             });
         }
 
+        let process_args = [
+            "top".to_owned(),
+            plan.sandbox_name().to_owned(),
+            "pid".to_owned(),
+            "seccomp".to_owned(),
+            "capeff".to_owned(),
+            "capbnd".to_owned(),
+            "capinh".to_owned(),
+            "capprm".to_owned(),
+            "capamb".to_owned(),
+            "label".to_owned(),
+        ];
+        let process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&process_output.stdout)?;
+
         require_control(
             "read_only_root_filesystem",
             container.host_config.readonly_rootfs,
@@ -423,7 +479,9 @@ impl RootlessPodmanAdapter {
         require_control("unprivileged_container", !container.host_config.privileged)?;
         require_control(
             "all_capabilities_dropped",
-            container.effective_caps.is_empty() && container.bounding_caps.is_empty(),
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
         )?;
         let security_options = container
             .host_config
@@ -440,7 +498,8 @@ impl RootlessPodmanAdapter {
             "seccomp",
             !security_options
                 .iter()
-                .any(|option| option == "seccomp=unconfined"),
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(process.seccomp.to_ascii_lowercase().as_str(), "filter" | "strict"),
         )?;
         require_control(
             "isolated_user_namespace",
@@ -463,7 +522,7 @@ impl RootlessPodmanAdapter {
             "resource_limits",
             resource_limits_match(&container.host_config, request),
         )?;
-        require_control("lsm", effective_lsm_verified(info, &container))?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
 
         let network_args = [
             "network".to_owned(),
@@ -507,22 +566,31 @@ impl RootlessPodmanAdapter {
         })
     }
 
+    fn command_runner(&self) -> BoundedCommandRunner {
+        BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes)
+    }
+
     fn checked_output(
         &self,
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output = Command::new(&self.program)
-            .args(args)
-            .output()
-            .map_err(|_| ApplicationServiceError::BackendInvocationFailed { operation })?;
-        let output_bytes = output.stdout.len().saturating_add(output.stderr.len());
-        if output_bytes > MAX_BACKEND_OUTPUT_BYTES {
-            return Err(ApplicationServiceError::BackendOutputTooLarge {
-                operation,
-                maximum_bytes: MAX_BACKEND_OUTPUT_BYTES,
-            });
-        }
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| match error {
+                BoundedCommandError::Timeout => {
+                    ApplicationServiceError::BackendCommandTimedOut { operation }
+                }
+                BoundedCommandError::OutputLimit => {
+                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                }
+                BoundedCommandError::Spawn
+                | BoundedCommandError::Wait
+                | BoundedCommandError::Capture => {
+                    ApplicationServiceError::BackendInvocationFailed { operation }
+                }
+            })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -530,10 +598,9 @@ impl RootlessPodmanAdapter {
     }
 
     fn command_succeeded(&self, args: &[String]) -> bool {
-        Command::new(&self.program)
-            .args(args)
-            .status()
-            .is_ok_and(|status| status.success())
+        self.command_runner()
+            .run(&self.program, args)
+            .is_ok_and(|output| output.status.success())
     }
 
     fn cleanup_network(&self, plan: &PodmanLaunchPlan) -> Result<(), ApplicationServiceError> {
@@ -630,9 +697,91 @@ fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationService
     Ok(())
 }
 
-fn effective_lsm_verified(info: &PodmanInfo, container: &ContainerInspection) -> bool {
-    (info.host.security.apparmor_enabled && !container.apparmor_profile.is_empty())
-        || (info.host.security.selinux_enabled && !container.process_label.is_empty())
+fn effective_lsm_verified(
+    info: &PodmanInfo,
+    container: &ContainerInspection,
+    process: &ProcessSecurityEvidence,
+) -> bool {
+    let runtime_label = process.lsm_label.trim();
+    if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
+        return false;
+    }
+
+    if info.host.security.selinux_enabled {
+        let inspect_label = container.process_label.trim();
+        return !inspect_label.is_empty()
+            && !inspect_label.eq_ignore_ascii_case("unconfined")
+            && inspect_label == runtime_label;
+    }
+
+    if info.host.security.apparmor_enabled {
+        let inspect_profile = container.apparmor_profile.trim();
+        return !inspect_profile.is_empty()
+            && !inspect_profile.eq_ignore_ascii_case("unconfined")
+            && inspect_profile == runtime_label;
+    }
+
+    false
+}
+
+fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
+    [
+        process.effective_caps.as_str(),
+        process.bounding_caps.as_str(),
+        process.inheritable_caps.as_str(),
+        process.permitted_caps.as_str(),
+        process.ambient_caps.as_str(),
+    ]
+    .into_iter()
+    .all(capability_set_is_empty)
+}
+
+fn capability_set_is_empty(value: &str) -> bool {
+    let normalized = value.trim();
+    if normalized.is_empty()
+        || normalized == "-"
+        || normalized.eq_ignore_ascii_case("none")
+        || normalized == "0"
+        || normalized.eq_ignore_ascii_case("0x0")
+    {
+        return true;
+    }
+    let hexadecimal = normalized.strip_prefix("0x").unwrap_or(normalized);
+    !hexadecimal.is_empty() && hexadecimal.chars().all(|character| character == '0')
+}
+
+fn parse_process_security_top(
+    bytes: &[u8],
+) -> Result<ProcessSecurityEvidence, ApplicationServiceError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: "process_security_top",
+        }
+    })?;
+    let mut matched = None;
+    for line in text.lines().skip(1).filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.first().copied() != Some("1") {
+            continue;
+        }
+        if fields.len() < 8 || matched.is_some() {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "process_security_top",
+            });
+        }
+        matched = Some(ProcessSecurityEvidence {
+            seccomp: fields[1].to_owned(),
+            effective_caps: fields[2].to_owned(),
+            bounding_caps: fields[3].to_owned(),
+            inheritable_caps: fields[4].to_owned(),
+            permitted_caps: fields[5].to_owned(),
+            ambient_caps: fields[6].to_owned(),
+            lsm_label: fields[7..].join(" "),
+        });
+    }
+    matched.ok_or(ApplicationServiceError::MalformedIsolationInspection {
+        operation: "process_security_top",
+    })
 }
 
 fn resource_limits_match(
