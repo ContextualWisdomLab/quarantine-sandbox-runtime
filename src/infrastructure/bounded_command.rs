@@ -317,12 +317,7 @@ mod tests {
         assert_eq!(completed.stderr, b"stderr");
 
         assert_eq!(
-            finalize_output(
-                Ok(success_status()),
-                Ok(Vec::new()),
-                Ok(Vec::new()),
-                true,
-            ),
+            finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),
             Err(BoundedCommandError::OutputLimit)
         );
         assert_eq!(
