@@ -631,8 +631,12 @@ fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationService
 }
 
 fn effective_lsm_verified(info: &PodmanInfo, container: &ContainerInspection) -> bool {
-    (info.host.security.apparmor_enabled && !container.apparmor_profile.is_empty())
-        || (info.host.security.selinux_enabled && !container.process_label.is_empty())
+    let apparmor_profile = container.apparmor_profile.trim();
+    let apparmor_verified = info.host.security.apparmor_enabled
+        && !apparmor_profile.is_empty()
+        && !apparmor_profile.eq_ignore_ascii_case("unconfined");
+    let selinux_verified = info.host.security.selinux_enabled && !container.process_label.trim().is_empty();
+    apparmor_verified || selinux_verified
 }
 
 fn resource_limits_match(
