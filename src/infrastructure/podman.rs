@@ -479,10 +479,6 @@ fn wait_for_readiness(
         if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
             return Ok(());
         }
-        let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
-        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+        thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
     }
 }
