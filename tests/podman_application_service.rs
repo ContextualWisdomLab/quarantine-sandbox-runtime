@@ -93,11 +93,16 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     let lease = adapter
         .launch_at(&request(), &policy(500), 1_780_000_000)
         .expect("rootless isolated service should become ready");
+    assert_eq!(lease.schema_version(), "1.0.0");
+    assert_eq!(lease.request_id(), "process_boundary_request");
     assert_eq!(lease.endpoint().host(), "127.0.0.1");
     assert_eq!(lease.endpoint().port(), ready_port);
     assert_eq!(lease.endpoint().protocol(), ServiceProtocol::Http);
     assert_eq!(lease.image_reference(), digest_image());
     assert_eq!(lease.backend_id(), "rootless_podman");
+    assert_eq!(lease.policy_id(), "process_boundary_policy_v1");
+    assert_eq!(lease.started_at_epoch_seconds(), 1_780_000_000);
+    assert_eq!(lease.expires_at_epoch_seconds(), 1_780_000_300);
     assert!(lease.isolation_attestation().rootless());
     assert!(lease.isolation_attestation().read_only_root_filesystem());
     assert!(lease.isolation_attestation().all_capabilities_dropped());
@@ -110,13 +115,28 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     let cleanup = adapter
         .terminate_at(&lease, 1_780_000_010)
         .expect("termination should remove container and network");
+    assert_eq!(cleanup.schema_version(), "1.0.0");
+    assert_eq!(cleanup.sandbox_id(), lease.sandbox_id());
+    assert_eq!(cleanup.network_id(), lease.network_id());
     assert!(cleanup.container_removed());
     assert!(cleanup.network_removed());
     assert_eq!(cleanup.terminated_at_epoch_seconds(), 1_780_000_010);
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls should be recorded");
-    for expected in ["info --format", "network create", "create --name", "start ", "port ", "stop --time", "rm --force", "network rm --force"] {
-        assert!(calls.contains(expected), "missing Podman call fragment: {expected}\n{calls}");
+    for expected in [
+        "info --format",
+        "network create",
+        "create --name",
+        "start ",
+        "port ",
+        "stop --time",
+        "rm --force",
+        "network rm --force",
+    ] {
+        assert!(
+            calls.contains(expected),
+            "missing Podman call fragment: {expected}\n{calls}"
+        );
     }
 
     let _ = fs::remove_file(program);
