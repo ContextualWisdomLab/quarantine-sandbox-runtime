@@ -76,8 +76,13 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     };
     let readonly_rootfs = if mode == "readwrite_root" { "false" } else { "true" };
     let internal_network = if mode == "external_network" { "false" } else { "true" };
+    let bounding_caps = if mode == "bounding_caps_present" {
+        r#"["CAP_SYS_ADMIN"]"#
+    } else {
+        "[]"
+    };
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":{readonly_rootfs},\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":{internal_network},\"dns_enabled\":false}}]' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":{bounding_caps},\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":{readonly_rootfs},\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":{internal_network},\"dns_enabled\":false}}]' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         host_security,
     );
@@ -144,6 +149,31 @@ fn missing_host_seccomp_or_lsm_fails_before_resources_are_created() {
         assert!(!calls.contains("network create"));
         remove_fixture(program, log);
     }
+}
+
+#[test]
+fn bounding_capabilities_fail_closed_and_cleanup() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener address should resolve")
+        .port();
+    let (program, log) = write_fake_podman("bounding_caps_present", ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "all_capabilities_dropped"
+        })
+    );
+    let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
+    assert!(calls.contains("stop --time 2"));
+    assert!(calls.contains("rm --force"));
+    assert!(calls.contains("network rm --force"));
+
+    remove_fixture(program, log);
+    drop(listener);
 }
 
 #[test]
