@@ -9,6 +9,8 @@
 //! conversation, task, tool-selection, secret, and user-action authority.
 
 mod application_service;
+#[path = "application_service/coordinator.rs"]
+mod application_service_coordinator;
 mod artifact_analysis;
 mod infrastructure;
 mod sandbox_execution;
@@ -16,6 +18,10 @@ mod sandbox_execution;
 pub use application_service::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
     IsolationAttestation, ServiceEndpoint, ServiceProtocol,
+};
+pub use application_service_coordinator::{
+    ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
+    ExpiredLeaseCleanupResult, LeaseOwnerId,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
