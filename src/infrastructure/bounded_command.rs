@@ -255,7 +255,7 @@ mod tests {
 
     impl Read for PanicReader {
         fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
-            panic!("reader panic")
+            std::panic::resume_unwind(Box::new("reader panic"))
         }
     }
 
