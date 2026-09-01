@@ -44,3 +44,21 @@ fn ci_separates_rootless_apparmor_negative_evidence_from_positive_lsm_acceptance
     assert!(!positive.contains("runs-on: ubuntu-24.04"));
     assert!(!positive.contains("runs-on: ubuntu-latest"));
 }
+
+#[test]
+fn ordinary_hosted_ci_uses_explicit_supported_runner_image() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+
+    for job_name in ["verify", "coverage", "branch-coverage"] {
+        let job = job_section(&workflow, job_name);
+        assert!(
+            job.contains("runs-on: ubuntu-24.04"),
+            "{job_name} must use the explicit supported hosted runner image"
+        );
+        assert!(
+            !job.contains("runs-on: ubuntu-latest"),
+            "{job_name} must not depend on the floating hosted runner selector"
+        );
+    }
+}
