@@ -6,7 +6,7 @@
 
 use std::{
     io::{ErrorKind, Read, Write},
-    net::TcpStream,
+    net::{SocketAddr, TcpListener, TcpStream},
     panic::{catch_unwind, resume_unwind},
     process::{Command, Output},
     thread,
@@ -106,7 +106,14 @@ fn assert_http_ready(port: u16, timeout: Duration, poll: Duration) {
     let deadline = Instant::now() + timeout;
     let mut last_response = String::new();
     loop {
-        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port))
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            panic!("isolated fixture did not return HTTP 200: {last_response:?}");
+        }
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        if let Ok(mut stream) = TcpStream::connect_timeout(&address, poll.min(remaining))
+            && stream.set_write_timeout(Some(remaining)).is_ok()
+            && stream.set_read_timeout(Some(remaining)).is_ok()
             && stream
                 .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
                 .is_ok()
@@ -129,6 +136,29 @@ fn assert_http_ready(port: u16, timeout: Duration, poll: Duration) {
         }
         thread::sleep(poll);
     }
+}
+
+#[test]
+fn http_probe_times_out_when_server_stalls() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("test listener must bind");
+    let port = listener
+        .local_addr()
+        .expect("listener must have an address")
+        .port();
+    let server = thread::spawn(move || {
+        let _connection = listener.accept().expect("test client must connect");
+        thread::sleep(Duration::from_secs(1));
+    });
+
+    let started = Instant::now();
+    assert!(
+        catch_unwind(|| {
+            assert_http_ready(port, Duration::from_millis(200), Duration::from_millis(20));
+        })
+        .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_secs(1));
+    server.join().expect("test server must stop");
 }
 
 #[test]
