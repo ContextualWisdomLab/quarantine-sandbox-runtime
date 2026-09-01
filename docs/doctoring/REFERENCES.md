@@ -6,11 +6,13 @@ Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/fi
 
 Freed, N., Klensin, J., & Hansen, T. (2013). *Media type specifications and registration procedures (RFC 6838).* RFC Editor. https://doi.org/10.17487/RFC6838
 
-gVisor Authors. (2026). *What is gVisor?* https://gvisor.dev/docs/
-
 gVisor Authors. (2026). *OCI quick start*. https://gvisor.dev/docs/user_guide/quick_start/oci/
 
+gVisor Authors. (2026). *What is gVisor?* https://gvisor.dev/docs/
+
 International Organization for Standardization. (2012). *Information technology—Security techniques—Guidelines for identification, collection, acquisition and preservation of digital evidence (ISO/IEC 27037:2012).* https://www.iso.org/standard/44381.html
+
+JSON Schema. (2022). *JSON Schema core: A media type for describing JSON documents, Draft 2020-12*. https://json-schema.org/draft/2020-12/json-schema-core
 
 Kent, K., Chevalier, S., Grance, T., & Dang, H. (2006). *Guide to integrating forensic techniques into incident response* (NIST Special Publication 800-86). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-86
 
@@ -30,13 +32,21 @@ Open Container Initiative. (2025). *Open Container Initiative Runtime Specificat
 
 Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
 
+Podman Authors. (2026). *podman-container-inspect — Display a container's configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
+
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
+
+Podman Authors. (2026). *podman-info — Display Podman system information*. https://docs.podman.io/en/latest/markdown/podman-info.1.html
 
 Podman Authors. (2026). *podman-network-create — Create a network*. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
 
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
 
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
+
+Podman Contributors. (2022–2026). *Default AppArmor profile is not loaded for rootless containers* (Issue #15874). GitHub. https://github.com/containers/podman/issues/15874
+
+Containers Common Contributors. (2021–2026). *Rootless containers cannot load custom AppArmor profiles* (Issue #958). GitHub. https://github.com/containers/common/issues/958
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
@@ -47,5 +57,3 @@ The Mandiant capa Team. (2026). *capa: Identify capabilities in executable files
 VirusTotal. (2025). *YARA-X 1.0 is stable*. https://virustotal.github.io/yara-x/blog/yara-x-is-stable/
 
 World Wide Web Consortium. (2013). *PROV-O: The PROV ontology*. https://www.w3.org/TR/prov-o/
-
-JSON Schema. (2022). *JSON Schema core: A media type for describing JSON documents, Draft 2020-12*. https://json-schema.org/draft/2020-12/json-schema-core
