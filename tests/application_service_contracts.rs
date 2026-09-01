@@ -80,13 +80,18 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
             "{{.Host.Security.Rootless}}".to_owned(),
         ]
     );
-    assert!(plan.network_create_args().windows(2).any(|pair| pair == ["--internal", "--disable-dns"]));
+    assert!(
+        plan.network_create_args()
+            .windows(2)
+            .any(|pair| pair == ["--internal", "--disable-dns"])
+    );
 
     let create = plan.container_create_args();
     for required in [
         "--pull=never",
         "--read-only",
         "--read-only-tmpfs=false",
+        "--http-proxy=false",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
         "--userns=auto",
@@ -95,7 +100,10 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
         "--restart=no",
         "--log-driver=none",
     ] {
-        assert!(create.iter().any(|argument| argument == required), "missing {required}");
+        assert!(
+            create.iter().any(|argument| argument == required),
+            "missing {required}"
+        );
     }
     assert!(create.windows(2).any(|pair| pair == ["--timeout", "300"]));
     assert!(create.iter().any(|argument| argument == "--publish"));
