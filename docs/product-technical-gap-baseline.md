@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed against active PR #1 head `c1a88edba21aa4afc6a2c3b8b4555bc8fbb2dffc` on 2026-09-01. This file distinguishes code already present on the active PR from work that still requires implementation and exact-head verification. Protected `develop` remains the shipped authority until merge. Any later branch movement makes the exact-head observations below stale until revalidated.
+Last reviewed against active PR #1 source head `6a0da5fa847595f4b5b3bd94d041d65ab6c9e23c` on 2026-09-01. This documentation follow-up may advance the PR commit without changing that reviewed source tree. This file distinguishes code already present on the active PR from work that still requires implementation and exact-head verification. Protected `develop` remains the shipped authority until merge. Any later source change makes the observations below stale until revalidated.
 
 ## Product responsibility
 
@@ -16,8 +16,8 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 | Gap | Current evidence | Status | Required action |
 | --- | --- | --- | --- |
 | Artifact analysis was flattened under root `contracts.rs`, `ingestion.rs`, and `runtime.rs`. | Active PR keeps the implementation under `src/artifact_analysis/` while preserving public crate exports. Repository policy forbids the obsolete root paths. | Corrected on active PR | Preserve the architectural fitness gate and exact-head tests. |
-| Podman infrastructure was located under Core `src/sandbox_execution/` and depended on Supporting `ApplicationService*` types. | Head `c1a88ed…` moves Podman to `src/infrastructure/podman.rs`, gives Core validation `SandboxExecutionError`, translates it to `ApplicationServiceError` at the crate composition boundary, and adds dependency/path fitness checks. | Source corrected; test alignment pending | Update direct `IsolationPolicy::validate()` tests to expect `SandboxExecutionError`; request-level tests keep `ApplicationServiceError`; regenerate exact-head evidence. Tracked by issue #4. |
-| Pre-publication ADR files reused identifiers `0001`–`0004`, while `docs/adr/README.md` indexed a different canonical line. | Head `c1a88ed…` removes the duplicate legacy files and adds ADR-number uniqueness enforcement; canonical ADRs are `0001`–`0006`. | Corrected on active PR | Verify no unique decision/research evidence was lost and keep the uniqueness gate green. |
+| Podman infrastructure was located under Core `src/sandbox_execution/` and depended on Supporting `ApplicationService*` types. | Source head `6a0da5f…` keeps Podman in `src/infrastructure/podman.rs`, uses `SandboxExecutionError` for Core validation, translates it to `ApplicationServiceError` at the crate composition boundary, fixes the moved artifact-ingestion import, and retains dependency/path fitness checks. | Corrected and locally verified on active PR | Keep the DDD fitness tests and both error boundaries green. Issue #4's reported mismatch is corrected; protected-branch and hosted exact-head evidence remain required. |
+| Pre-publication ADR files reused identifiers `0001`–`0004`, while `docs/adr/README.md` indexed a different canonical line. | Reviewed source head `6a0da5f…` contains only canonical ADRs `0001`–`0006` and enforces identifier uniqueness. | Corrected and locally verified on active PR | Keep the uniqueness gate green. |
 | Product-authority documentation was split across PR #3 and PR #1. | PR #3 was semantically compared against the broader current product line and closed as superseded; its applicable authority/consumer-contract content is preserved or strengthened in #1. | Converged | Keep one canonical documentation line in #1/protected `develop`. |
 | Repository name `quarantine-sandbox-runtime` is security-biased for the broader responsibility. | Runtime responsibility now includes isolated application services in addition to artifact analysis. Repository-settings rename support is outside this writer path. | Known gap | Re-evaluate a rename such as `isolation-runtime` before GA through an authorized repository-settings path; preserve redirects and consumer migration if renamed. |
 
@@ -55,11 +55,19 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 | Wardnet | verdict, incident, quarantine, block/allow/review, notification, retention | Runtime contract is consumer-neutral; Wardnet ACL still requires owner-path implementation after runtime publication. |
 | contextual-orchestrator | chat, agent/task/tool policy, authorization, immutable application selection, secrets, user-visible action | Owner-path issue #991 exists. It requires an ACL over a published immutable runtime artifact, lease cleanup on every task terminal state, and no direct Podman/containerd calls from Agent domain code. |
 
+The runtime still exposes only an embeddable Rust library. There is no supported authenticated
+process boundary or generated Python consumer yet, and `127.0.0.1` lease reachability is defined
+only for a co-located host-network consumer. Before issue #991 can integrate, this repository must
+choose and publish one versioned transport or binding, bind leases to authenticated caller identity
+and idempotency scope, define the supported network topology, and provide stable bounded wire errors
+and semantic lease/cleanup validation. A sibling checkout, ad-hoc subprocess protocol, or direct
+Podman call is not an acceptable substitute.
+
 ## Verification and release gaps
 
-- Current exact head for this review is `c1a88edba21aa4afc6a2c3b8b4555bc8fbb2dffc`; revalidate if the branch moves.
-- One direct-Core validation test still expects the former Supporting-context error type after the DDD extraction. Correct it to `SandboxExecutionError` while retaining request-level `ApplicationServiceError` semantics; issue #4 tracks this exact repair.
-- Exact-head CI run `33472977145` is pending with verify/coverage/branch-coverage jobs queued. Security Scan `33472977118` and SAST `33472977125` are queued. Pending/queued is non-passing.
+- Reviewed source head `6a0da5fa847595f4b5b3bd94d041d65ab6c9e23c` passes `cargo test --locked --workspace --all-targets` locally (the dedicated real-Podman acceptance remains ignored off its Linux lane), `cargo clippy --locked --workspace --all-targets -- -D warnings`, warning-denied rustdoc, repository policy validation, rustfmt, and diff-check with the pinned Rust 1.97.1 toolchain.
+- The DDD extraction's two build breaks are corrected: artifact runtime uses its sibling ingestion module, and application-service request validation translates Core resource errors through the public boundary. The direct-Core test expects `SandboxExecutionError`; request-level tests retain `ApplicationServiceError`.
+- Exact-head hosted verify, coverage, branch-coverage, real-Podman E2E, security, SAST, OpenCode, and Noema checks for `6a0da5f…` are queued. Pending/queued is non-passing.
 - Organization ruleset `CWL Central required workflows` is active on the default branch and requires one approving review, resolved review threads, and the central required workflows; bypass capability is not merge evidence and must not be used by this loop.
 - Real Podman isolation has not yet been proven by CI. Fake-Podman tests prove command/lifecycle integration only.
 - The dependency-review evidence path has previously returned HTTP 403; it must be revalidated on the final exact head rather than bypassed.
@@ -68,10 +76,10 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 
 ## Next bounded slices
 
-1. Align the direct Core policy-validation test with `SandboxExecutionError`, then obtain exact-head full GREEN evidence for the DDD extraction.
-2. Add a real rootless Podman E2E job that validates effective isolation rather than argv alone.
+1. Obtain terminal exact-head hosted evidence for the DDD build repair and real rootless-Podman E2E lane.
+2. Choose and implement the authenticated, versioned consumer transport or supported language binding, including caller-scoped idempotency, stable wire errors, strict response validation, and an explicit co-location/network-topology contract.
 3. Add crash/restart lease reclamation and orphan cleanup evidence.
-4. Publish an immutable runtime artifact and generated/typed consumer contract.
+4. Publish an immutable runtime artifact, generated/typed consumer contract, SBOM, and provenance bound into lease attestation.
 5. Integrate `contextual-orchestrator` through issue #991 and Wardnet through its own ACL, without moving consumer policy into this repository.
 6. Add gVisor/containerd and Kubernetes RuntimeClass adapters only after the P0 contract is stable.
 7. Resume artifact-analysis adapters and dynamic detonation on top of the shared sandbox execution Core.
