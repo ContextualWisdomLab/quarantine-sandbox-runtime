@@ -264,7 +264,15 @@ where
             }
         };
 
-        self.lock_registry()?.insert(
+        let mut leases = match self.lock_registry() {
+            Ok(leases) => leases,
+            Err(error) => {
+                self.backend
+                    .terminate_at(&lease, started_at_epoch_seconds)?;
+                return Err(error);
+            }
+        };
+        leases.insert(
             key,
             RegistryEntry::Active {
                 request_fingerprint,
@@ -502,7 +510,6 @@ mod tests {
         ApplicationServiceRequest, CleanupReceipt, LeaseOwnerId,
     };
     use crate::{IsolationPolicy, ResourceRequest, ServiceEndpoint, ServiceProtocol};
-    use crate::sandbox_execution::RuntimeLeaseMetadata;
 
     struct BlockingBackend {
         launch_entered: Arc<Barrier>,
@@ -521,7 +528,7 @@ mod tests {
             self.launch_resume.wait();
             Ok(ApplicationServiceLease::new(
                 request,
-                RuntimeLeaseMetadata {
+                crate::sandbox_execution::RuntimeLeaseMetadata {
                     backend_id: "test_backend",
                     sandbox_id: "sandbox-registration-gap".to_owned(),
                     network_id: "network-registration-gap".to_owned(),
