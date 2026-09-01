@@ -124,7 +124,11 @@ fn policy_bound_lease_schema_is_versioned() {
     let attestation_required = schema["properties"]["isolation_attestation"]["required"]
         .as_array()
         .expect("attestation required must be an array");
-    for field in ["seccomp_enforced", "lsm_enforced", "resource_limits_verified"] {
+    for field in [
+        "seccomp_enforced",
+        "lsm_enforced",
+        "resource_limits_verified",
+    ] {
         assert!(attestation_required.contains(&serde_json::Value::String(field.to_owned())));
     }
 }
