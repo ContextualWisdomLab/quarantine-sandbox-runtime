@@ -88,6 +88,8 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     };
     let top_label = if mode == "lsm_unconfined" {
         "unconfined"
+    } else if mode == "lsm_mismatch" {
+        "unexpected-profile"
     } else {
         "containers-default"
     };
@@ -170,6 +172,31 @@ fn unconfined_lsm_profile_fails_closed_and_cleanup() {
         .expect("listener address should resolve")
         .port();
     let (program, log) = write_fake_podman("lsm_unconfined", ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "lsm"
+        })
+    );
+    let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
+    assert!(calls.contains("stop --time 2"));
+    assert!(calls.contains("rm --force"));
+    assert!(calls.contains("network rm --force"));
+
+    remove_fixture(program, log);
+    drop(listener);
+}
+
+#[test]
+fn contradictory_lsm_evidence_fails_closed_and_cleanup() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener address should resolve")
+        .port();
+    let (program, log) = write_fake_podman("lsm_mismatch", ready_port);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     assert_eq!(
