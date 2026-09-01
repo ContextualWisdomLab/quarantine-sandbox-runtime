@@ -60,6 +60,8 @@ struct ContainerInspection {
     process_label: String,
     #[serde(default, rename = "EffectiveCaps")]
     effective_caps: Vec<String>,
+    #[serde(default, rename = "BoundingCaps")]
+    bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
@@ -421,7 +423,7 @@ impl RootlessPodmanAdapter {
         require_control("unprivileged_container", !container.host_config.privileged)?;
         require_control(
             "all_capabilities_dropped",
-            container.effective_caps.is_empty(),
+            container.effective_caps.is_empty() && container.bounding_caps.is_empty(),
         )?;
         let security_options = container
             .host_config
