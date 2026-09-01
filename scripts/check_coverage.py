@@ -25,8 +25,11 @@ def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     """Return source lines whose function regions are never executed.
 
     LLVM can emit several regions for one source line, especially after macro
-    expansion.  A line is therefore uncovered only when at least one function
-    maps a region to it and no mapped function region records execution.
+    expansion. Each region carries its own file id into the function's
+    ``filenames`` table, so attribution must follow that id rather than assume
+    every region belongs to the first filename. A line is uncovered only when
+    at least one region for the requested file maps to it and no such region
+    records execution.
     """
 
     uncovered: set[int] = set()
@@ -39,14 +42,17 @@ def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
         if not isinstance(function, dict):
             continue
         filenames = function.get("filenames")
-        if not isinstance(filenames, list) or not filenames or str(filenames[0]) != filename:
+        if not isinstance(filenames, list) or not filenames:
             continue
         line_counts: dict[int, int] = {}
         regions = function.get("regions")
         if not isinstance(regions, list):
             continue
         for region in regions:
-            if not isinstance(region, list) or len(region) < 5:
+            if not isinstance(region, list) or len(region) < 6:
+                continue
+            file_id = int(region[5])
+            if file_id < 0 or file_id >= len(filenames) or str(filenames[file_id]) != filename:
                 continue
             line_start = int(region[0])
             line_end = int(region[2])
