@@ -12,6 +12,7 @@ const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 64;
 const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
+const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.1.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -234,7 +235,7 @@ impl ApplicationServiceLease {
         endpoint: ServiceEndpoint,
     ) -> Self {
         Self {
-            schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
+            schema_version: APPLICATION_SERVICE_LEASE_SCHEMA_VERSION.to_owned(),
             request_id: request.request_id.clone(),
             image_reference: request.image_reference.clone(),
             backend_id: metadata.backend_id.to_owned(),

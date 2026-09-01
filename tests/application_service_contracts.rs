@@ -70,9 +70,6 @@ fn application_service_rejects_resource_requests_above_policy() {
 #[test]
 fn effective_policy_identity_changes_with_enforced_fields() {
     let first = policy();
-    let mut second = first.clone();
-    second.run_as_user_id += 1;
-
     let first_digest = first.effective_policy_sha256();
     assert_eq!(first_digest.len(), 64);
     assert_eq!(first_digest, first.clone().effective_policy_sha256());
@@ -81,7 +78,26 @@ fn effective_policy_identity_changes_with_enforced_fields() {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     );
-    assert_ne!(first_digest, second.effective_policy_sha256());
+
+    type PolicyMutation = fn(&mut IsolationPolicy);
+    let mutations: [PolicyMutation; 11] = [
+        |value| value.policy_id.push_str("_changed"),
+        |value| value.maximum_memory_bytes += 1,
+        |value| value.maximum_cpu_millicores += 1,
+        |value| value.maximum_processes += 1,
+        |value| value.maximum_lease_seconds += 1,
+        |value| value.maximum_tmpfs_bytes += 1,
+        |value| value.readiness_timeout_millis += 1,
+        |value| value.readiness_poll_interval_millis += 1,
+        |value| value.shutdown_grace_seconds += 1,
+        |value| value.run_as_user_id += 1,
+        |value| value.run_as_group_id += 1,
+    ];
+    for mutate in mutations {
+        let mut changed = first.clone();
+        mutate(&mut changed);
+        assert_ne!(first_digest, changed.effective_policy_sha256());
+    }
 }
 
 #[test]

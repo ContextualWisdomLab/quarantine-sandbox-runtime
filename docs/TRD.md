@@ -59,7 +59,7 @@ There are intentionally no environment, mount, device, privileged, host-namespac
 
 ### `ApplicationServiceLease`
 
-Records:
+Schema `1.1.0` records:
 
 - schema version;
 - original request ID;

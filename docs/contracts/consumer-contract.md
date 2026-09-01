@@ -37,7 +37,7 @@ The operator supplies `IsolationPolicy`; the consumer cannot raise policy maxima
 
 ### Returned lease
 
-`ApplicationServiceLease` provides:
+`ApplicationServiceLease` schema `1.1.0` provides:
 
 ```text
 schema_version

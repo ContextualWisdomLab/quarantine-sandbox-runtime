@@ -106,7 +106,7 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     let lease = adapter
         .launch_at(&request(), &policy(500), 1_780_000_000)
         .expect("rootless isolated service should become ready");
-    assert_eq!(lease.schema_version(), "1.0.0");
+    assert_eq!(lease.schema_version(), "1.1.0");
     assert_eq!(lease.request_id(), "process_boundary_request");
     assert_eq!(lease.endpoint().host(), "127.0.0.1");
     assert_eq!(lease.endpoint().port(), ready_port);
