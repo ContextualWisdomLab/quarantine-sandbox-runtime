@@ -103,6 +103,17 @@ struct NetworkInspection {
     dns_enabled: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProcessSecurityEvidence {
+    seccomp: String,
+    effective_caps: String,
+    bounding_caps: String,
+    inheritable_caps: String,
+    permitted_caps: String,
+    ambient_caps: String,
+    lsm_label: String,
+}
+
 /// Deterministic, auditable rootless Podman command plan.
 ///
 /// Creating a plan performs no process execution. It exists so the domain
@@ -416,6 +427,21 @@ impl RootlessPodmanAdapter {
             });
         }
 
+        let process_args = [
+            "top".to_owned(),
+            plan.sandbox_name().to_owned(),
+            "pid".to_owned(),
+            "seccomp".to_owned(),
+            "capeff".to_owned(),
+            "capbnd".to_owned(),
+            "capinh".to_owned(),
+            "capprm".to_owned(),
+            "capamb".to_owned(),
+            "label".to_owned(),
+        ];
+        let process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&process_output.stdout)?;
+
         require_control(
             "read_only_root_filesystem",
             container.host_config.readonly_rootfs,
@@ -423,7 +449,9 @@ impl RootlessPodmanAdapter {
         require_control("unprivileged_container", !container.host_config.privileged)?;
         require_control(
             "all_capabilities_dropped",
-            container.effective_caps.is_empty() && container.bounding_caps.is_empty(),
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
         )?;
         let security_options = container
             .host_config
@@ -440,7 +468,8 @@ impl RootlessPodmanAdapter {
             "seccomp",
             !security_options
                 .iter()
-                .any(|option| option == "seccomp=unconfined"),
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(process.seccomp.to_ascii_lowercase().as_str(), "filter" | "strict"),
         )?;
         require_control(
             "isolated_user_namespace",
@@ -463,7 +492,7 @@ impl RootlessPodmanAdapter {
             "resource_limits",
             resource_limits_match(&container.host_config, request),
         )?;
-        require_control("lsm", effective_lsm_verified(info, &container))?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
 
         let network_args = [
             "network".to_owned(),
@@ -630,13 +659,81 @@ fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationService
     Ok(())
 }
 
-fn effective_lsm_verified(info: &PodmanInfo, container: &ContainerInspection) -> bool {
+fn effective_lsm_verified(
+    info: &PodmanInfo,
+    container: &ContainerInspection,
+    process: &ProcessSecurityEvidence,
+) -> bool {
+    let process_label = process.lsm_label.trim();
+    if process_label.is_empty() || process_label.eq_ignore_ascii_case("unconfined") {
+        return false;
+    }
     let apparmor_profile = container.apparmor_profile.trim();
     let apparmor_verified = info.host.security.apparmor_enabled
         && !apparmor_profile.is_empty()
         && !apparmor_profile.eq_ignore_ascii_case("unconfined");
     let selinux_verified = info.host.security.selinux_enabled && !container.process_label.trim().is_empty();
     apparmor_verified || selinux_verified
+}
+
+fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
+    [
+        process.effective_caps.as_str(),
+        process.bounding_caps.as_str(),
+        process.inheritable_caps.as_str(),
+        process.permitted_caps.as_str(),
+        process.ambient_caps.as_str(),
+    ]
+    .into_iter()
+    .all(capability_set_is_empty)
+}
+
+fn capability_set_is_empty(value: &str) -> bool {
+    let normalized = value.trim();
+    if normalized.is_empty()
+        || normalized == "-"
+        || normalized.eq_ignore_ascii_case("none")
+        || normalized == "0"
+        || normalized.eq_ignore_ascii_case("0x0")
+    {
+        return true;
+    }
+    let hexadecimal = normalized.strip_prefix("0x").unwrap_or(normalized);
+    !hexadecimal.is_empty() && hexadecimal.chars().all(|character| character == '0')
+}
+
+fn parse_process_security_top(
+    bytes: &[u8],
+) -> Result<ProcessSecurityEvidence, ApplicationServiceError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: "process_security_top",
+        }
+    })?;
+    let mut matched = None;
+    for line in text.lines().skip(1).filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.first().copied() != Some("1") {
+            continue;
+        }
+        if fields.len() < 8 || matched.is_some() {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "process_security_top",
+            });
+        }
+        matched = Some(ProcessSecurityEvidence {
+            seccomp: fields[1].to_owned(),
+            effective_caps: fields[2].to_owned(),
+            bounding_caps: fields[3].to_owned(),
+            inheritable_caps: fields[4].to_owned(),
+            permitted_caps: fields[5].to_owned(),
+            ambient_caps: fields[6].to_owned(),
+            lsm_label: fields[7..].join(" "),
+        });
+    }
+    matched.ok_or(ApplicationServiceError::MalformedIsolationInspection {
+        operation: "process_security_top",
+    })
 }
 
 fn resource_limits_match(
