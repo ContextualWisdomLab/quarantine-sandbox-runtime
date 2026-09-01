@@ -144,7 +144,13 @@ fn rootless_podman_effective_isolation_and_cleanup() {
             &["exec", &sandbox, "sh", "-c", "touch /qsr-root-write-test"],
             "read-only root filesystem must reject writes",
         );
-        let tmp_write = podman(&["exec", &sandbox, "sh", "-c", "touch /tmp/qsr-tmp-write-test"]);
+        let tmp_write = podman(&[
+            "exec",
+            &sandbox,
+            "sh",
+            "-c",
+            "touch /tmp/qsr-tmp-write-test",
+        ]);
         assert!(
             tmp_write.status.success(),
             "bounded tmpfs must remain writable: {}",
@@ -201,7 +207,10 @@ fn rootless_podman_effective_isolation_and_cleanup() {
             .expect("cpu.max must contain period")
             .parse::<u64>()
             .expect("CPU period must be numeric");
-        assert!(cpu_parts.next().is_none(), "cpu.max must have exactly two values");
+        assert!(
+            cpu_parts.next().is_none(),
+            "cpu.max must have exactly two values"
+        );
         assert_eq!(
             quota * 1_000,
             period * u64::from(request.resources.cpu_millicores),

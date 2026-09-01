@@ -152,18 +152,31 @@ fn isolation_policy_rejects_every_invalid_bound() {
     candidate.policy_id = "bad\npolicy".to_owned();
     assert!(candidate.validate().is_err());
 
-    let field_cases: [(&str, fn(&mut IsolationPolicy)); 11] = [
-        ("maximum_memory_bytes", |value| value.maximum_memory_bytes = 0),
-        ("maximum_cpu_millicores", |value| value.maximum_cpu_millicores = 0),
+    type PolicyMutation = fn(&mut IsolationPolicy);
+    let field_cases: [(&str, PolicyMutation); 11] = [
+        ("maximum_memory_bytes", |value| {
+            value.maximum_memory_bytes = 0
+        }),
+        ("maximum_cpu_millicores", |value| {
+            value.maximum_cpu_millicores = 0
+        }),
         ("maximum_processes", |value| value.maximum_processes = 0),
-        ("maximum_lease_seconds", |value| value.maximum_lease_seconds = 0),
+        ("maximum_lease_seconds", |value| {
+            value.maximum_lease_seconds = 0
+        }),
         ("maximum_tmpfs_bytes", |value| value.maximum_tmpfs_bytes = 0),
-        ("readiness_timeout_millis", |value| value.readiness_timeout_millis = 0),
-        ("readiness_poll_interval_millis", |value| value.readiness_poll_interval_millis = 0),
+        ("readiness_timeout_millis", |value| {
+            value.readiness_timeout_millis = 0
+        }),
+        ("readiness_poll_interval_millis", |value| {
+            value.readiness_poll_interval_millis = 0
+        }),
         ("readiness_poll_interval_millis", |value| {
             value.readiness_poll_interval_millis = value.readiness_timeout_millis + 1;
         }),
-        ("shutdown_grace_seconds", |value| value.shutdown_grace_seconds = 0),
+        ("shutdown_grace_seconds", |value| {
+            value.shutdown_grace_seconds = 0
+        }),
         ("run_as_user_id", |value| value.run_as_user_id = 0),
         ("run_as_group_id", |value| value.run_as_group_id = 0),
     ];

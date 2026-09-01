@@ -31,7 +31,11 @@ fn accepted_adr_numbers_are_unique() {
             .split_once('-')
             .map(|(number, _)| number)
             .expect("ADR filename should have a numeric prefix and dash");
-        assert_eq!(number.len(), 4, "ADR identifier must be four digits: {name}");
+        assert_eq!(
+            number.len(),
+            4,
+            "ADR identifier must be four digits: {name}"
+        );
         assert!(
             number.bytes().all(|byte| byte.is_ascii_digit()),
             "ADR identifier must be numeric: {name}"

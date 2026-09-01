@@ -30,7 +30,9 @@ pub use sandbox_execution::{IsolationPolicy, ResourceRequest, SandboxExecutionEr
 impl From<SandboxExecutionError> for ApplicationServiceError {
     fn from(error: SandboxExecutionError) -> Self {
         match error {
-            SandboxExecutionError::InvalidPolicy { field_name } => Self::InvalidPolicy { field_name },
+            SandboxExecutionError::InvalidPolicy { field_name } => {
+                Self::InvalidPolicy { field_name }
+            }
             SandboxExecutionError::ResourceLimitExceeded { resource_name } => {
                 Self::ResourceLimitExceeded { resource_name }
             }

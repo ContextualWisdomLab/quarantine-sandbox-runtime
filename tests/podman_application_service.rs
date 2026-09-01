@@ -82,7 +82,10 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
 
 fn closed_loopback_port() -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
-    listener.local_addr().expect("address should resolve").port()
+    listener
+        .local_addr()
+        .expect("address should resolve")
+        .port()
 }
 
 fn remove_fixture(program: PathBuf, log: PathBuf) {
@@ -171,7 +174,10 @@ fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created(
                 operation: "rootless_probe",
             },
         ),
-        ("rootless_false", ApplicationServiceError::BackendNotRootless),
+        (
+            "rootless_false",
+            ApplicationServiceError::BackendNotRootless,
+        ),
     ] {
         let (program, log) = write_fake_podman(mode, closed_loopback_port());
         let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -248,7 +254,11 @@ fn start_and_port_failures_stop_or_remove_started_resources() {
 
 #[test]
 fn malformed_port_mappings_fail_closed_after_cleanup() {
-    for mode in ["invalid_port_host", "invalid_port_text", "invalid_port_zero"] {
+    for mode in [
+        "invalid_port_host",
+        "invalid_port_text",
+        "invalid_port_zero",
+    ] {
         let (program, log) = write_fake_podman(mode, closed_loopback_port());
         let adapter = RootlessPodmanAdapter::new(program.clone());
         assert_eq!(
@@ -293,7 +303,10 @@ fn cleanup_failure_is_never_hidden_by_readiness_or_termination_results() {
     remove_fixture(program, log);
 
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let (program, log) = write_fake_podman("termination_cleanup_fail", ready_port);
     let adapter = RootlessPodmanAdapter::new(program.clone());
     let lease = adapter

@@ -86,7 +86,10 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
             .any(|pair| pair == ["--internal", "--disable-dns"])
     );
     assert!(
-        !plan.network_create_args().iter().any(|argument| argument == "--ignore"),
+        !plan
+            .network_create_args()
+            .iter()
+            .any(|argument| argument == "--ignore"),
         "per-sandbox networks must fail on a name collision instead of reusing an unverified pre-existing network"
     );
 
@@ -123,7 +126,15 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
     );
     assert!(!create.iter().any(|argument| argument == "--privileged"));
     assert!(!create.iter().any(|argument| argument == "--network=host"));
-    assert!(!create.iter().any(|argument| argument.contains("docker.sock")));
-    assert!(!create.iter().any(|argument| argument.contains("podman.sock")));
+    assert!(
+        !create
+            .iter()
+            .any(|argument| argument.contains("docker.sock"))
+    );
+    assert!(
+        !create
+            .iter()
+            .any(|argument| argument.contains("podman.sock"))
+    );
     assert_eq!(plan.expires_at_epoch_seconds(), 1_780_000_300);
 }

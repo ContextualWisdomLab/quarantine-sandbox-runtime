@@ -93,7 +93,7 @@ impl ApplicationServiceRequest {
                 return Err(ApplicationServiceError::InvalidCommandArgument { argument_index });
             }
         }
-        self.resources.validate_against(policy)
+        self.resources.validate_against(policy).map_err(Into::into)
     }
 }
 
@@ -331,7 +331,10 @@ pub struct CleanupReceipt {
 }
 
 impl CleanupReceipt {
-    pub(crate) fn complete(lease: &ApplicationServiceLease, terminated_at_epoch_seconds: u64) -> Self {
+    pub(crate) fn complete(
+        lease: &ApplicationServiceLease,
+        terminated_at_epoch_seconds: u64,
+    ) -> Self {
         Self {
             schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
             sandbox_id: lease.sandbox_id.clone(),
@@ -453,7 +456,9 @@ pub enum ApplicationServiceError {
 fn is_digest_pinned_image_reference(value: &str) -> bool {
     if value.is_empty()
         || value.len() > MAX_IMAGE_REFERENCE_BYTES
-        || value.chars().any(|character| character.is_control() || character.is_whitespace())
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
     {
         return false;
     }
@@ -462,7 +467,7 @@ fn is_digest_pinned_image_reference(value: &str) -> bool {
     };
     !repository.is_empty()
         && digest.len() == 64
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit()))
+        && digest.bytes().all(|byte| {
+            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+        })
 }

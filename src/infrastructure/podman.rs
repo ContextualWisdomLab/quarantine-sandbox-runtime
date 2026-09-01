@@ -168,7 +168,10 @@ impl RootlessPodmanAdapter {
             "--label".to_owned(),
             format!("org.contextualwisdomlab.sandbox.identity={identity}"),
             "--label".to_owned(),
-            format!("org.contextualwisdomlab.sandbox.policy={}", policy.policy_id),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy={}",
+                policy.policy_id
+            ),
             request.image_reference.clone(),
         ];
         container_create_args.extend(request.command.iter().cloned());

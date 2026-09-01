@@ -54,8 +54,7 @@ impl ResourceRequest {
             ),
             (
                 "maximum_processes",
-                self.maximum_processes == 0
-                    || self.maximum_processes > policy.maximum_processes,
+                self.maximum_processes == 0 || self.maximum_processes > policy.maximum_processes,
             ),
             (
                 "lease_seconds",
@@ -125,7 +124,10 @@ impl IsolationPolicy {
             ("maximum_processes", self.maximum_processes == 0),
             ("maximum_lease_seconds", self.maximum_lease_seconds == 0),
             ("maximum_tmpfs_bytes", self.maximum_tmpfs_bytes == 0),
-            ("readiness_timeout_millis", self.readiness_timeout_millis == 0),
+            (
+                "readiness_timeout_millis",
+                self.readiness_timeout_millis == 0,
+            ),
             (
                 "readiness_poll_interval_millis",
                 self.readiness_poll_interval_millis == 0
