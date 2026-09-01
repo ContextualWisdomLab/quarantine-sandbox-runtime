@@ -22,8 +22,9 @@ fn ci_separates_rootless_apparmor_negative_evidence_from_positive_lsm_acceptance
 
     let negative = job_section(&workflow, "podman-e2e-negative-rootless-apparmor");
     assert!(negative.contains("runs-on: ubuntu-24.04"));
-    assert!(negative.contains("ApparmorEnabled"));
-    assert!(negative.contains("SelinuxEnabled"));
+    assert!(negative.contains("podman info --format json"));
+    assert!(negative.contains("apparmorEnabled"));
+    assert!(negative.contains("selinuxEnabled"));
     assert!(negative.contains("rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up"));
     assert!(negative.contains("if: always()"));
     assert!(negative.contains("qsr-net-"));
@@ -32,7 +33,8 @@ fn ci_separates_rootless_apparmor_negative_evidence_from_positive_lsm_acceptance
     assert!(positive.contains("self-hosted"));
     assert!(positive.contains("cwl-hostile-workload"));
     assert!(positive.contains("selinux"));
-    assert!(positive.contains("SelinuxEnabled"));
+    assert!(positive.contains("podman info --format json"));
+    assert!(positive.contains("selinuxEnabled"));
     assert!(positive.contains("rootless_podman_effective_isolation_and_cleanup"));
     assert!(positive.contains("RUNNER_NAME"));
     assert!(positive.contains("github.event_name == 'push'"));
