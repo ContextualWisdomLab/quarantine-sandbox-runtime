@@ -1,6 +1,7 @@
 //! Core sandbox-execution resource, lease, and isolation policy values.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const MAX_POLICY_IDENTIFIER_BYTES: usize = 128;
@@ -102,6 +103,68 @@ pub struct IsolationPolicy {
 }
 
 impl IsolationPolicy {
+    /// Return the canonical SHA-256 identity of every effective policy field.
+    ///
+    /// The `qsr.isolation-policy.v1` profile frames each ordered field name and value
+    /// with an unsigned 64-bit big-endian byte length; numeric values are big-endian.
+    #[must_use]
+    pub fn effective_policy_sha256(&self) -> String {
+        let mut hasher = Sha256::new();
+        hash_component(&mut hasher, "profile", b"qsr.isolation-policy.v1");
+        hash_component(&mut hasher, "policy_id", self.policy_id.as_bytes());
+        hash_component(
+            &mut hasher,
+            "maximum_memory_bytes",
+            &self.maximum_memory_bytes.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "maximum_cpu_millicores",
+            &self.maximum_cpu_millicores.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "maximum_processes",
+            &self.maximum_processes.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "maximum_lease_seconds",
+            &self.maximum_lease_seconds.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "maximum_tmpfs_bytes",
+            &self.maximum_tmpfs_bytes.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "readiness_timeout_millis",
+            &self.readiness_timeout_millis.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "readiness_poll_interval_millis",
+            &self.readiness_poll_interval_millis.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "shutdown_grace_seconds",
+            &self.shutdown_grace_seconds.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "run_as_user_id",
+            &self.run_as_user_id.to_be_bytes(),
+        );
+        hash_component(
+            &mut hasher,
+            "run_as_group_id",
+            &self.run_as_group_id.to_be_bytes(),
+        );
+        format!("{:x}", hasher.finalize())
+    }
+
     /// Validate the operator policy before it can authorize a workload.
     ///
     /// # Errors
@@ -145,11 +208,27 @@ impl IsolationPolicy {
     }
 }
 
+fn hash_component(hasher: &mut Sha256, name: &str, value: &[u8]) {
+    hasher.update(
+        u64::try_from(name.len())
+            .expect("Rust target pointer width must fit u64")
+            .to_be_bytes(),
+    );
+    hasher.update(name.as_bytes());
+    hasher.update(
+        u64::try_from(value.len())
+            .expect("Rust target pointer width must fit u64")
+            .to_be_bytes(),
+    );
+    hasher.update(value);
+}
+
 pub(crate) struct RuntimeLeaseMetadata {
     pub(crate) backend_id: &'static str,
     pub(crate) sandbox_id: String,
     pub(crate) network_id: String,
     pub(crate) policy_id: String,
+    pub(crate) policy_sha256: String,
     pub(crate) started_at_epoch_seconds: u64,
     pub(crate) expires_at_epoch_seconds: u64,
     pub(crate) shutdown_grace_seconds: u32,

@@ -38,7 +38,7 @@ The runtime is deliberately not the authority for the consumer's business decisi
 - Validate operator isolation policy before starting work.
 - Apply consumer resource requests only within operator maxima.
 - Give each sandbox a deterministic/auditable identity without exposing raw caller text as infrastructure names.
-- Record backend/runtime identity, immutable workload identity, policy, resource bounds, timestamps, endpoint where applicable, and isolation facts.
+- Record backend/runtime identity, immutable workload identity, canonical effective-policy identity, resource bounds, timestamps, endpoint where applicable, and isolation facts.
 - Support explicit termination and bounded failure cleanup.
 - Keep backend-specific implementation behind the sandbox boundary.
 

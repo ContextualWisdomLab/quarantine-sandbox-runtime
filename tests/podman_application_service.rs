@@ -106,7 +106,7 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     let lease = adapter
         .launch_at(&request(), &policy(500), 1_780_000_000)
         .expect("rootless isolated service should become ready");
-    assert_eq!(lease.schema_version(), "1.0.0");
+    assert_eq!(lease.schema_version(), "1.1.0");
     assert_eq!(lease.request_id(), "process_boundary_request");
     assert_eq!(lease.endpoint().host(), "127.0.0.1");
     assert_eq!(lease.endpoint().port(), ready_port);
@@ -114,6 +114,11 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     assert_eq!(lease.image_reference(), digest_image());
     assert_eq!(lease.backend_id(), "rootless_podman");
     assert_eq!(lease.policy_id(), "process_boundary_policy_v1");
+    assert_eq!(lease.policy_sha256(), policy(500).effective_policy_sha256());
+    assert_eq!(
+        serde_json::to_value(&lease).expect("lease must serialize")["policy_sha256"],
+        lease.policy_sha256()
+    );
     assert_eq!(lease.started_at_epoch_seconds(), 1_780_000_000);
     assert_eq!(lease.expires_at_epoch_seconds(), 1_780_000_300);
     assert!(lease.isolation_attestation().rootless());

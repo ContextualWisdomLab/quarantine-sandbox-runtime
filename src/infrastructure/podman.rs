@@ -172,6 +172,11 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy={}",
                 policy.policy_id
             ),
+            "--label".to_owned(),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy_sha256={}",
+                policy.effective_policy_sha256()
+            ),
             request.image_reference.clone(),
         ];
         container_create_args.extend(request.command.iter().cloned());
@@ -248,6 +253,7 @@ impl RootlessPodmanAdapter {
                 sandbox_id: plan.sandbox_name().to_owned(),
                 network_id: plan.network_name().to_owned(),
                 policy_id: policy.policy_id.clone(),
+                policy_sha256: policy.effective_policy_sha256(),
                 started_at_epoch_seconds,
                 expires_at_epoch_seconds: plan.expires_at_epoch_seconds(),
                 shutdown_grace_seconds: policy.shutdown_grace_seconds,

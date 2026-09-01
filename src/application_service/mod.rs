@@ -19,6 +19,7 @@ const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 64;
 const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
+const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.1.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,6 +227,7 @@ pub struct ApplicationServiceLease {
     sandbox_id: String,
     network_id: String,
     policy_id: String,
+    policy_sha256: String,
     endpoint: ServiceEndpoint,
     started_at_epoch_seconds: u64,
     expires_at_epoch_seconds: u64,
@@ -240,13 +242,14 @@ impl ApplicationServiceLease {
         endpoint: ServiceEndpoint,
     ) -> Self {
         Self {
-            schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
+            schema_version: APPLICATION_SERVICE_LEASE_SCHEMA_VERSION.to_owned(),
             request_id: request.request_id.clone(),
             image_reference: request.image_reference.clone(),
             backend_id: metadata.backend_id.to_owned(),
             sandbox_id: metadata.sandbox_id,
             network_id: metadata.network_id,
             policy_id: metadata.policy_id,
+            policy_sha256: metadata.policy_sha256,
             endpoint,
             started_at_epoch_seconds: metadata.started_at_epoch_seconds,
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
@@ -295,6 +298,12 @@ impl ApplicationServiceLease {
     #[must_use]
     pub fn policy_id(&self) -> &str {
         &self.policy_id
+    }
+
+    /// Return the canonical SHA-256 identity of the full effective isolation policy.
+    #[must_use]
+    pub fn policy_sha256(&self) -> &str {
+        &self.policy_sha256
     }
 
     /// Return the loopback-scoped service endpoint.

@@ -59,14 +59,14 @@ There are intentionally no environment, mount, device, privileged, host-namespac
 
 ### `ApplicationServiceLease`
 
-Records:
+Schema `1.1.0` records:
 
 - schema version;
 - original request ID;
 - image digest reference;
 - runtime backend ID;
 - sandbox/network IDs;
-- policy ID;
+- policy ID and canonical SHA-256 of every effective policy field;
 - loopback endpoint;
 - start/expiry/shutdown values;
 - P0 isolation attestation.

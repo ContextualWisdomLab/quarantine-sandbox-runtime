@@ -22,6 +22,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Supporting `application_service` bounded context for Agent/Chat consumers that need to launch one approved immutable application as a short-lived service.
 - Rootless Podman P0 adapter with immutable image/no-pull policy, internal DNS-disabled network, loopback-only publication, read-only rootfs, bounded tmpfs, host-proxy inheritance disabled, capability drop, no-new-privileges, isolated namespaces, numeric non-root identity, CPU/RAM/PID/TTL bounds, readiness gating, and cleanup.
 - Versioned `ApplicationServiceLease`, `IsolationAttestation`, and `CleanupReceipt` evidence contracts.
+- Canonical effective-policy SHA-256 bound to both Podman ownership labels and application-service leases.
+- Application-service lease schema `1.1.0`; request and cleanup contracts remain `1.0.0`.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
 - Real rootless-Podman acceptance covering the pinned backend, immutable fixture pre-pull, effective isolation, bounded HTTP readiness, explicit cleanup, and final container/network leak rejection on the reviewed source head.
 - Caller-scoped `LeaseOwnerId`, `ApplicationServiceBackend` port, and process-local `ApplicationServiceCoordinator` for active-lease ownership, idempotent replay, bounded expiry cleanup, and backend-neutral lifecycle coordination.
@@ -56,7 +58,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Podman host proxy environment inheritance is explicitly disabled so `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` values cannot become ambient application inputs.
 - Partial-launch/readiness failures attempt cleanup and cleanup uncertainty becomes `CleanupFailed` rather than being hidden.
 - Lease ownership is scoped by authenticated command context rather than an untrusted request field; wrong-owner cleanup fails before the backend is invoked.
-- Application-service replay is bound to both immutable request content and the effective isolation policy, so a changed policy cannot silently reuse a lease created under older limits.
+- Application-service replay is bound to both immutable request content and the full effective isolation policy, so a changed policy cannot silently reuse a lease created under older limits.
 
 ### Not yet release evidence
 
