@@ -10,8 +10,13 @@ fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     let body_start = start + marker.len();
     let remainder = &workflow[body_start..];
     let end = remainder
-        .find("\n  ")
-        .map_or(workflow.len(), |offset| body_start + offset);
+        .match_indices("\n  ")
+        .find_map(|(offset, _)| {
+            let next_indent_byte = remainder.as_bytes().get(offset + 3).copied();
+            (next_indent_byte.is_some() && next_indent_byte != Some(b' '))
+                .then_some(body_start + offset)
+        })
+        .unwrap_or(workflow.len());
     &workflow[start..end]
 }
 
