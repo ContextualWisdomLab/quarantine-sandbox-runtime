@@ -32,7 +32,7 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     for required in [
         "tags:",
         "v*",
-        "refs/heads/main",
+        "refs/remotes/origin/main",
         "cargo package --locked",
         "cargo llvm-cov",
         "--branch",
