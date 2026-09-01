@@ -104,6 +104,9 @@ pub struct IsolationPolicy {
 
 impl IsolationPolicy {
     /// Return the canonical SHA-256 identity of every effective policy field.
+    ///
+    /// The `qsr.isolation-policy.v1` profile frames each ordered field name and value
+    /// with an unsigned 64-bit big-endian byte length; numeric values are big-endian.
     #[must_use]
     pub fn effective_policy_sha256(&self) -> String {
         let mut hasher = Sha256::new();

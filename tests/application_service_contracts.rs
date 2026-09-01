@@ -71,6 +71,10 @@ fn application_service_rejects_resource_requests_above_policy() {
 fn effective_policy_identity_changes_with_enforced_fields() {
     let first = policy();
     let first_digest = first.effective_policy_sha256();
+    assert_eq!(
+        first_digest,
+        "9dd0cb7a934dbe89d596d5bcd39d0451a3cdb8653913519c187a1a3b3b936b7b"
+    );
     assert_eq!(first_digest.len(), 64);
     assert_eq!(first_digest, first.clone().effective_policy_sha256());
     assert!(
@@ -98,6 +102,25 @@ fn effective_policy_identity_changes_with_enforced_fields() {
         mutate(&mut changed);
         assert_ne!(first_digest, changed.effective_policy_sha256());
     }
+}
+
+#[test]
+fn policy_bound_lease_schema_is_versioned() {
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../schemas/application-service-lease.schema.json"
+    ))
+    .expect("lease schema must be JSON");
+    assert_eq!(
+        schema["$id"],
+        "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.1.0.schema.json"
+    );
+    assert_eq!(schema["properties"]["schema_version"]["const"], "1.1.0");
+    assert!(
+        schema["required"]
+            .as_array()
+            .expect("required must be an array")
+            .contains(&serde_json::Value::String("policy_sha256".to_owned()))
+    );
 }
 
 #[test]
