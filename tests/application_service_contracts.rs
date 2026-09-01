@@ -85,6 +85,10 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
             .windows(2)
             .any(|pair| pair == ["--internal", "--disable-dns"])
     );
+    assert!(
+        !plan.network_create_args().iter().any(|argument| argument == "--ignore"),
+        "per-sandbox networks must fail on a name collision instead of reusing an unverified pre-existing network"
+    );
 
     let create = plan.container_create_args();
     for required in [
