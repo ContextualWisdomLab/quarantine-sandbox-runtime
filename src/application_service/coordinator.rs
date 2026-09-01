@@ -5,10 +5,10 @@ use std::{collections::BTreeMap, sync::Mutex};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{
+use super::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationPolicy,
 };
+use crate::IsolationPolicy;
 
 const MAX_LEASE_OWNER_ID_BYTES: usize = 128;
 const MAX_EXPIRED_CLEANUPS_PER_CALL: usize = 64;
@@ -256,41 +256,19 @@ where
         {
             Ok(lease) => lease,
             Err(error) => {
-                self.remove_matching_reservation(&key, &request_fingerprint)?;
+                self.lock_registry()?.remove(&key);
                 return Err(error.into());
             }
         };
 
-        let mut leases = match self.leases.lock() {
-            Ok(leases) => leases,
-            Err(_) => {
-                return match self.backend.terminate_at(&lease, started_at_epoch_seconds) {
-                    Ok(_) => Err(ApplicationServiceCoordinatorError::StateUnavailable),
-                    Err(error) => Err(error.into()),
-                };
-            }
-        };
-        match leases.get(&key) {
-            Some(RegistryEntry::Launching {
-                request_fingerprint: existing,
-            }) if existing == &request_fingerprint => {
-                leases.insert(
-                    key,
-                    RegistryEntry::Active {
-                        request_fingerprint,
-                        lease: lease.clone(),
-                    },
-                );
-                Ok(lease)
-            }
-            _ => {
-                drop(leases);
-                match self.backend.terminate_at(&lease, started_at_epoch_seconds) {
-                    Ok(_) => Err(ApplicationServiceCoordinatorError::StateUnavailable),
-                    Err(error) => Err(error.into()),
-                }
-            }
-        }
+        self.lock_registry()?.insert(
+            key,
+            RegistryEntry::Active {
+                request_fingerprint,
+                lease: lease.clone(),
+            },
+        );
+        Ok(lease)
     }
 
     /// Terminate one lease only when the caller owns the active registry entry.
@@ -360,27 +338,22 @@ where
     ) -> Result<Vec<ExpiredLeaseCleanupResult>, ApplicationServiceCoordinatorError> {
         let candidates = {
             let mut leases = self.lock_registry()?;
-            let keys: Vec<LeaseKey> = leases
+            let candidates: Vec<(LeaseKey, String, ApplicationServiceLease)> = leases
                 .iter()
                 .filter_map(|(key, entry)| match entry {
-                    RegistryEntry::Active { lease, .. }
-                        if lease.expires_at_epoch_seconds() <= now_epoch_seconds =>
-                    {
-                        Some(key.clone())
-                    }
+                    RegistryEntry::Active {
+                        request_fingerprint,
+                        lease,
+                    } if lease.expires_at_epoch_seconds() <= now_epoch_seconds => Some((
+                        key.clone(),
+                        request_fingerprint.clone(),
+                        lease.clone(),
+                    )),
                     _ => None,
                 })
                 .take(MAX_EXPIRED_CLEANUPS_PER_CALL)
                 .collect();
-            let mut candidates = Vec::with_capacity(keys.len());
-            for key in keys {
-                let Some(RegistryEntry::Active {
-                    request_fingerprint,
-                    lease,
-                }) = leases.get(&key).cloned()
-                else {
-                    continue;
-                };
+            for (key, request_fingerprint, lease) in &candidates {
                 leases.insert(
                     key.clone(),
                     RegistryEntry::Terminating {
@@ -388,7 +361,6 @@ where
                         lease: lease.clone(),
                     },
                 );
-                candidates.push((key, request_fingerprint, lease));
             }
             candidates
         };
@@ -418,23 +390,6 @@ where
             .map_err(|_| ApplicationServiceCoordinatorError::StateUnavailable)
     }
 
-    fn remove_matching_reservation(
-        &self,
-        key: &LeaseKey,
-        request_fingerprint: &str,
-    ) -> Result<(), ApplicationServiceCoordinatorError> {
-        let mut leases = self.lock_registry()?;
-        if matches!(
-            leases.get(key),
-            Some(RegistryEntry::Launching {
-                request_fingerprint: existing,
-            }) if existing == request_fingerprint
-        ) {
-            leases.remove(key);
-        }
-        Ok(())
-    }
-
     fn finish_termination(
         &self,
         key: &LeaseKey,
@@ -443,35 +398,16 @@ where
         result: &Result<CleanupReceipt, ApplicationServiceError>,
     ) -> Result<(), ApplicationServiceCoordinatorError> {
         let mut leases = self.lock_registry()?;
-        match result {
-            Ok(_) => {
-                if matches!(
-                    leases.get(key),
-                    Some(RegistryEntry::Terminating {
-                        request_fingerprint: existing,
-                        lease: registered_lease,
-                    }) if existing == &request_fingerprint && registered_lease == &lease
-                ) {
-                    leases.remove(key);
-                }
-            }
-            Err(_) => {
-                if matches!(
-                    leases.get(key),
-                    Some(RegistryEntry::Terminating {
-                        request_fingerprint: existing,
-                        lease: registered_lease,
-                    }) if existing == &request_fingerprint && registered_lease == &lease
-                ) {
-                    leases.insert(
-                        key.clone(),
-                        RegistryEntry::Active {
-                            request_fingerprint,
-                            lease,
-                        },
-                    );
-                }
-            }
+        if result.is_ok() {
+            leases.remove(key);
+        } else {
+            leases.insert(
+                key.clone(),
+                RegistryEntry::Active {
+                    request_fingerprint,
+                    lease,
+                },
+            );
         }
         Ok(())
     }
