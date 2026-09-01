@@ -5,11 +5,12 @@
 //! fixture image named by `QSR_PODMAN_E2E_IMAGE`.
 
 use std::{
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::TcpStream,
     panic::{catch_unwind, resume_unwind},
     process::{Command, Output},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
@@ -101,20 +102,33 @@ fn assert_podman_fails(args: &[&str], reason: &str) {
     );
 }
 
-fn assert_http_ready(port: u16) {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))
-        .expect("leased loopback endpoint must remain reachable");
-    stream
-        .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
-        .expect("HTTP probe request should be writable");
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .expect("HTTP probe response should be readable UTF-8");
-    assert!(
-        response.starts_with("HTTP/1.0 200") || response.starts_with("HTTP/1.1 200"),
-        "isolated fixture did not return HTTP 200: {response:?}"
-    );
+fn assert_http_ready(port: u16, timeout: Duration, poll: Duration) {
+    let deadline = Instant::now() + timeout;
+    let mut last_response = String::new();
+    loop {
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port))
+            && stream
+                .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                .is_ok()
+        {
+            let mut response = String::new();
+            let read_result = stream.read_to_string(&mut response);
+            let reset_after_response = read_result
+                .as_ref()
+                .is_err_and(|error| error.kind() == ErrorKind::ConnectionReset)
+                && !response.is_empty();
+            if (read_result.is_ok() || reset_after_response)
+                && (response.starts_with("HTTP/1.0 200") || response.starts_with("HTTP/1.1 200"))
+            {
+                return;
+            }
+            last_response = response;
+        }
+        if Instant::now() >= deadline {
+            panic!("isolated fixture did not return HTTP 200: {last_response:?}");
+        }
+        thread::sleep(poll);
+    }
 }
 
 #[test]
@@ -134,12 +148,16 @@ fn rootless_podman_effective_isolation_and_cleanup() {
         .launch_at(&request, &policy, started_at)
         .expect("digest-pinned fixture must launch under the P0 isolation policy");
 
-    assert_eq!(lease.endpoint().host(), "127.0.0.1");
-    assert_http_ready(lease.endpoint().port());
     let sandbox = lease.sandbox_id().to_owned();
     let network = lease.network_id().to_owned();
 
     let verification = catch_unwind(|| {
+        assert_eq!(lease.endpoint().host(), "127.0.0.1");
+        assert_http_ready(
+            lease.endpoint().port(),
+            Duration::from_millis(policy.readiness_timeout_millis),
+            Duration::from_millis(policy.readiness_poll_interval_millis),
+        );
         assert_podman_fails(
             &["exec", &sandbox, "sh", "-c", "touch /qsr-root-write-test"],
             "read-only root filesystem must reject writes",
