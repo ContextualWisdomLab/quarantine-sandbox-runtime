@@ -192,6 +192,19 @@ fn isolation_policy_rejects_every_invalid_bound() {
 }
 
 #[test]
+fn request_validation_preserves_invalid_policy_identity_at_the_application_boundary() {
+    let mut invalid_policy = policy();
+    invalid_policy.policy_id.clear();
+
+    assert_eq!(
+        request().validate(&invalid_policy),
+        Err(ApplicationServiceError::InvalidPolicy {
+            field_name: "policy_id",
+        })
+    );
+}
+
+#[test]
 fn resource_request_rejects_zero_and_over_policy_for_every_dimension() {
     for value in [0, policy().maximum_memory_bytes + 1] {
         let mut candidate = request();
