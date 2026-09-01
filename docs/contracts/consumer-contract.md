@@ -47,6 +47,7 @@ backend_id
 sandbox_id
 network_id
 policy_id
+policy_sha256       canonical identity of every effective policy field
 endpoint
   host               127.0.0.1
   port               random host port

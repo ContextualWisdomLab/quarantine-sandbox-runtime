@@ -12,6 +12,7 @@
     "sandbox_id",
     "network_id",
     "policy_id",
+    "policy_sha256",
     "endpoint",
     "started_at_epoch_seconds",
     "expires_at_epoch_seconds",
@@ -42,6 +43,10 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     },
     "endpoint": {
       "type": "object",

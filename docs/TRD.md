@@ -66,7 +66,7 @@ Records:
 - image digest reference;
 - runtime backend ID;
 - sandbox/network IDs;
-- policy ID;
+- policy ID and canonical SHA-256 of every effective policy field;
 - loopback endpoint;
 - start/expiry/shutdown values;
 - P0 isolation attestation.

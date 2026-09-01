@@ -68,6 +68,23 @@ fn application_service_rejects_resource_requests_above_policy() {
 }
 
 #[test]
+fn effective_policy_identity_changes_with_enforced_fields() {
+    let first = policy();
+    let mut second = first.clone();
+    second.run_as_user_id += 1;
+
+    let first_digest = first.effective_policy_sha256();
+    assert_eq!(first_digest.len(), 64);
+    assert_eq!(first_digest, first.clone().effective_policy_sha256());
+    assert!(
+        first_digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
+    assert_ne!(first_digest, second.effective_policy_sha256());
+}
+
+#[test]
 fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
     let plan = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_780_000_000)
         .expect("valid application service request should create a launch plan");
@@ -118,6 +135,15 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
         );
     }
     assert!(create.windows(2).any(|pair| pair == ["--timeout", "300"]));
+    assert!(create.windows(2).any(|pair| {
+        pair == [
+            "--label",
+            &format!(
+                "org.contextualwisdomlab.sandbox.policy_sha256={}",
+                policy().effective_policy_sha256()
+            ),
+        ]
+    }));
     assert!(create.iter().any(|argument| argument == "--publish"));
     assert!(
         create
