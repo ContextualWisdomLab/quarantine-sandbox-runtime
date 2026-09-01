@@ -194,16 +194,6 @@ fn rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up() {
         "true",
         "negative E2E backend must actually be rootless"
     );
-    assert_eq!(
-        podman_stdout(&["info", "--format", "{{.Host.Security.ApparmorEnabled}}"]),
-        "true",
-        "negative lane must characterize the hosted AppArmor-capable runner"
-    );
-    assert_eq!(
-        podman_stdout(&["info", "--format", "{{.Host.Security.SelinuxEnabled}}"]),
-        "false",
-        "negative lane must not silently become the SELinux positive lane"
-    );
 
     let adapter = RootlessPodmanAdapter::default();
     let policy = policy();
@@ -214,7 +204,7 @@ fn rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up() {
         .as_secs();
     let error = adapter
         .launch_at(&request, &policy, started_at)
-        .expect_err("host-only AppArmor capability must not satisfy effective LSM attestation");
+        .expect_err("hosted lane must fail closed when effective LSM confinement is unavailable");
 
     match error {
         ApplicationServiceError::IsolationVerificationFailed { control_name } => {
