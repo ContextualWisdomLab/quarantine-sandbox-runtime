@@ -3,14 +3,44 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
-use super::{
+use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
+    IsolationPolicy, RootlessPodmanAdapter,
 };
-use crate::IsolationPolicy;
 
 const MAX_LEASE_OWNER_ID_BYTES: usize = 128;
 const MAX_EXPIRED_CLEANUPS_PER_CALL: usize = 64;
+
+/// Coordinator-owned caller/idempotency errors.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum ApplicationServiceCoordinatorError {
+    /// The authenticated caller identity could not be represented safely.
+    #[error("invalid application-service lease owner identity")]
+    InvalidLeaseOwnerId,
+    /// The same caller/request identity was reused for different request content.
+    #[error("application-service idempotency conflict")]
+    IdempotencyConflict,
+    /// An identical caller/request launch is already executing.
+    #[error("application-service launch already in progress")]
+    LaunchInProgress,
+    /// Cleanup for the same active lease is already executing.
+    #[error("application-service termination already in progress")]
+    TerminationInProgress,
+    /// The caller does not own an active lease matching the supplied receipt.
+    #[error("application-service lease is unknown to this caller")]
+    UnknownLease,
+    /// The caller supplied a receipt that differs from the registered active lease.
+    #[error("application-service lease receipt does not match active registry state")]
+    LeaseMismatch,
+    /// The process-local coordinator registry could not be accessed safely.
+    #[error("application-service coordinator state is unavailable")]
+    StateUnavailable,
+    /// The application-service request or sandbox backend failed.
+    #[error(transparent)]
+    Backend(#[from] ApplicationServiceError),
+}
 
 /// Opaque authenticated-caller identity used to scope leases and idempotency.
 ///
@@ -26,16 +56,17 @@ impl LeaseOwnerId {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError::InvalidLeaseOwnerId`] for empty,
-    /// oversized, whitespace-bearing, non-ASCII, or unsupported identities.
-    pub fn new(value: &str) -> Result<Self, ApplicationServiceError> {
+    /// Returns [`ApplicationServiceCoordinatorError::InvalidLeaseOwnerId`] for
+    /// empty, oversized, whitespace-bearing, non-ASCII, or unsupported identities.
+    pub fn new(value: &str) -> Result<Self, ApplicationServiceCoordinatorError> {
         let valid = !value.is_empty()
             && value.len() <= MAX_LEASE_OWNER_ID_BYTES
             && value.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'@' | b'-')
+                byte.is_ascii_alphanumeric()
+                    || matches!(byte, b'.' | b'_' | b':' | b'/' | b'@' | b'-')
             });
         if !valid {
-            return Err(ApplicationServiceError::InvalidLeaseOwnerId);
+            return Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId);
         }
         Ok(Self(value.to_owned()))
     }
@@ -77,6 +108,25 @@ pub trait ApplicationServiceBackend: Send + Sync {
         lease: &ApplicationServiceLease,
         terminated_at_epoch_seconds: u64,
     ) -> Result<CleanupReceipt, ApplicationServiceError>;
+}
+
+impl ApplicationServiceBackend for RootlessPodmanAdapter {
+    fn launch_at(
+        &self,
+        request: &ApplicationServiceRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
+        RootlessPodmanAdapter::launch_at(self, request, policy, started_at_epoch_seconds)
+    }
+
+    fn terminate_at(
+        &self,
+        lease: &ApplicationServiceLease,
+        terminated_at_epoch_seconds: u64,
+    ) -> Result<CleanupReceipt, ApplicationServiceError> {
+        RootlessPodmanAdapter::terminate_at(self, lease, terminated_at_epoch_seconds)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -176,8 +226,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError`] for invalid requests, idempotency
-    /// conflicts, concurrent duplicate launches, coordinator-state failure, or
+    /// Returns [`ApplicationServiceCoordinatorError`] for invalid requests,
+    /// idempotency conflicts, concurrent duplicate launches, state failure, or
     /// backend isolation failures.
     pub fn launch_at(
         &self,
@@ -185,7 +235,7 @@ where
         request: &ApplicationServiceRequest,
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
-    ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
+    ) -> Result<ApplicationServiceLease, ApplicationServiceCoordinatorError> {
         request.validate(policy)?;
         let key = LeaseKey::new(lease_owner_id, &request.request_id);
         let request_fingerprint = fingerprint_request(request);
@@ -195,7 +245,7 @@ where
                 Some(RegistryEntry::Launching {
                     request_fingerprint: existing,
                 }) if existing == &request_fingerprint => {
-                    return Err(ApplicationServiceError::LaunchInProgress);
+                    return Err(ApplicationServiceCoordinatorError::LaunchInProgress);
                 }
                 Some(RegistryEntry::Active {
                     request_fingerprint: existing,
@@ -205,9 +255,9 @@ where
                     request_fingerprint: existing,
                     ..
                 }) if existing == &request_fingerprint => {
-                    return Err(ApplicationServiceError::TerminationInProgress);
+                    return Err(ApplicationServiceCoordinatorError::TerminationInProgress);
                 }
-                Some(_) => return Err(ApplicationServiceError::IdempotencyConflict),
+                Some(_) => return Err(ApplicationServiceCoordinatorError::IdempotencyConflict),
                 None => {
                     leases.insert(
                         key.clone(),
@@ -219,14 +269,14 @@ where
             }
         }
 
-        let launch_result = self
+        let lease = match self
             .backend
-            .launch_at(request, policy, started_at_epoch_seconds);
-        let lease = match launch_result {
+            .launch_at(request, policy, started_at_epoch_seconds)
+        {
             Ok(lease) => lease,
             Err(error) => {
                 self.remove_matching_reservation(&key, &request_fingerprint)?;
-                return Err(error);
+                return Err(error.into());
             }
         };
 
@@ -234,8 +284,8 @@ where
             Ok(leases) => leases,
             Err(_) => {
                 return match self.backend.terminate_at(&lease, started_at_epoch_seconds) {
-                    Ok(_) => Err(ApplicationServiceError::CoordinatorStateUnavailable),
-                    Err(_) => Err(ApplicationServiceError::CleanupFailed),
+                    Ok(_) => Err(ApplicationServiceCoordinatorError::StateUnavailable),
+                    Err(error) => Err(error.into()),
                 };
             }
         };
@@ -255,8 +305,8 @@ where
             _ => {
                 drop(leases);
                 match self.backend.terminate_at(&lease, started_at_epoch_seconds) {
-                    Ok(_) => Err(ApplicationServiceError::CoordinatorStateUnavailable),
-                    Err(_) => Err(ApplicationServiceError::CleanupFailed),
+                    Ok(_) => Err(ApplicationServiceCoordinatorError::StateUnavailable),
+                    Err(error) => Err(error.into()),
                 }
             }
         }
@@ -266,15 +316,14 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError::UnknownLease`] for a wrong owner or
-    /// unknown lease before any backend cleanup operation is attempted. Other
-    /// errors preserve active state unless cleanup actually succeeded.
+    /// Returns [`ApplicationServiceCoordinatorError::UnknownLease`] for a wrong
+    /// owner or unknown lease before any backend cleanup operation is attempted.
     pub fn terminate_at(
         &self,
         lease_owner_id: &LeaseOwnerId,
         lease: &ApplicationServiceLease,
         terminated_at_epoch_seconds: u64,
-    ) -> Result<CleanupReceipt, ApplicationServiceError> {
+    ) -> Result<CleanupReceipt, ApplicationServiceCoordinatorError> {
         let key = LeaseKey::new(lease_owner_id, lease.request_id());
         let (request_fingerprint, registered_lease) = {
             let mut leases = self.lock_registry()?;
@@ -284,7 +333,7 @@ where
                     lease: registered_lease,
                 }) => {
                     if registered_lease != lease {
-                        return Err(ApplicationServiceError::LeaseMismatch);
+                        return Err(ApplicationServiceCoordinatorError::LeaseMismatch);
                     }
                     let request_fingerprint = request_fingerprint.clone();
                     let registered_lease = registered_lease.clone();
@@ -298,12 +347,12 @@ where
                     (request_fingerprint, registered_lease)
                 }
                 Some(RegistryEntry::Launching { .. }) => {
-                    return Err(ApplicationServiceError::LaunchInProgress);
+                    return Err(ApplicationServiceCoordinatorError::LaunchInProgress);
                 }
                 Some(RegistryEntry::Terminating { .. }) => {
-                    return Err(ApplicationServiceError::TerminationInProgress);
+                    return Err(ApplicationServiceCoordinatorError::TerminationInProgress);
                 }
-                None => return Err(ApplicationServiceError::UnknownLease),
+                None => return Err(ApplicationServiceCoordinatorError::UnknownLease),
             }
         };
 
@@ -311,7 +360,7 @@ where
             .backend
             .terminate_at(&registered_lease, terminated_at_epoch_seconds);
         self.finish_termination(&key, request_fingerprint, registered_lease, &result)?;
-        result
+        result.map_err(Into::into)
     }
 
     /// Clean up at most 64 active leases whose expiry is not later than `now`.
@@ -322,12 +371,12 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError::CoordinatorStateUnavailable`] if the
+    /// Returns [`ApplicationServiceCoordinatorError::StateUnavailable`] if the
     /// in-memory registry cannot be accessed safely.
     pub fn cleanup_expired_at(
         &self,
         now_epoch_seconds: u64,
-    ) -> Result<Vec<ExpiredLeaseCleanupResult>, ApplicationServiceError> {
+    ) -> Result<Vec<ExpiredLeaseCleanupResult>, ApplicationServiceCoordinatorError> {
         let candidates = {
             let mut leases = self.lock_registry()?;
             let keys: Vec<LeaseKey> = leases
@@ -366,12 +415,7 @@ where
         let mut outcomes = Vec::with_capacity(candidates.len());
         for (key, request_fingerprint, lease) in candidates {
             let result = self.backend.terminate_at(&lease, now_epoch_seconds);
-            self.finish_termination(
-                &key,
-                request_fingerprint,
-                lease.clone(),
-                &result,
-            )?;
+            self.finish_termination(&key, request_fingerprint, lease.clone(), &result)?;
             outcomes.push(ExpiredLeaseCleanupResult {
                 lease_owner_id: key.lease_owner_id,
                 request_id: key.request_id,
@@ -386,18 +430,18 @@ where
         &self,
     ) -> Result<
         std::sync::MutexGuard<'_, BTreeMap<LeaseKey, RegistryEntry>>,
-        ApplicationServiceError,
+        ApplicationServiceCoordinatorError,
     > {
         self.leases
             .lock()
-            .map_err(|_| ApplicationServiceError::CoordinatorStateUnavailable)
+            .map_err(|_| ApplicationServiceCoordinatorError::StateUnavailable)
     }
 
     fn remove_matching_reservation(
         &self,
         key: &LeaseKey,
         request_fingerprint: &str,
-    ) -> Result<(), ApplicationServiceError> {
+    ) -> Result<(), ApplicationServiceCoordinatorError> {
         let mut leases = self.lock_registry()?;
         if matches!(
             leases.get(key),
@@ -416,7 +460,7 @@ where
         request_fingerprint: String,
         lease: ApplicationServiceLease,
         result: &Result<CleanupReceipt, ApplicationServiceError>,
-    ) -> Result<(), ApplicationServiceError> {
+    ) -> Result<(), ApplicationServiceCoordinatorError> {
         let mut leases = self.lock_registry()?;
         match result {
             Ok(_) => {
