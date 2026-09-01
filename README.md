@@ -1,5 +1,7 @@
 # Quarantine Sandbox Runtime
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ContextualWisdomLab/quarantine-sandbox-runtime)
+
 **Credential-free hostile-workload isolation and evidence runtime for ContextualWisdomLab products.**
 
 Quarantine Sandbox Runtime gives security and agent products a reusable place to run untrusted work **without moving product credentials, verdict authority, or user-facing policy into the sandbox**. It owns isolation lifecycle and evidence; the calling product keeps the decisions that belong to its domain.
@@ -106,6 +108,7 @@ Do not translate those engineering gates into unsupported customer, certificatio
 
 ## Documentation map
 
+- [`docs/index.md`](docs/index.md) — public documentation home.
 - [`docs/PRD.md`](docs/PRD.md) — product requirements and buyer boundary.
 - [`docs/TRD.md`](docs/TRD.md) — technical requirements.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — runtime architecture and adapter boundary.
