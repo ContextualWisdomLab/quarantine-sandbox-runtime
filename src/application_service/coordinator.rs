@@ -203,7 +203,7 @@ where
     ///
     /// An identical retry for an active lease returns that lease without
     /// invoking the backend again. Reusing the same caller/request identity for
-    /// different immutable request content fails closed.
+    /// different immutable request or effective policy content fails closed.
     ///
     /// # Errors
     ///
@@ -219,7 +219,7 @@ where
     ) -> Result<ApplicationServiceLease, ApplicationServiceCoordinatorError> {
         request.validate(policy)?;
         let key = LeaseKey::new(lease_owner_id, &request.request_id);
-        let request_fingerprint = fingerprint_request(request);
+        let request_fingerprint = fingerprint_request_and_policy(request, policy);
         {
             let mut leases = self.lock_registry()?;
             match leases.get(&key) {
@@ -477,13 +477,17 @@ where
     }
 }
 
-fn fingerprint_request(request: &ApplicationServiceRequest) -> String {
+fn fingerprint_request_and_policy(
+    request: &ApplicationServiceRequest,
+    policy: &IsolationPolicy,
+) -> String {
     let mut hasher = Sha256::new();
     for component in [
         request.schema_version.as_str(),
         request.request_id.as_str(),
         request.image_reference.as_str(),
         request.protocol.as_str(),
+        policy.policy_id.as_str(),
     ] {
         hasher.update(component.as_bytes());
         hasher.update([0]);
@@ -493,10 +497,24 @@ fn fingerprint_request(request: &ApplicationServiceRequest) -> String {
         hasher.update(argument.as_bytes());
         hasher.update([0]);
     }
-    hasher.update(request.resources.memory_bytes.to_be_bytes());
-    hasher.update(request.resources.cpu_millicores.to_be_bytes());
-    hasher.update(request.resources.maximum_processes.to_be_bytes());
-    hasher.update(request.resources.lease_seconds.to_be_bytes());
-    hasher.update(request.resources.tmpfs_bytes.to_be_bytes());
+    for value in [
+        request.resources.memory_bytes,
+        u64::from(request.resources.cpu_millicores),
+        u64::from(request.resources.maximum_processes),
+        u64::from(request.resources.lease_seconds),
+        request.resources.tmpfs_bytes,
+        policy.maximum_memory_bytes,
+        u64::from(policy.maximum_cpu_millicores),
+        u64::from(policy.maximum_processes),
+        u64::from(policy.maximum_lease_seconds),
+        policy.maximum_tmpfs_bytes,
+        policy.readiness_timeout_millis,
+        policy.readiness_poll_interval_millis,
+        u64::from(policy.shutdown_grace_seconds),
+        u64::from(policy.run_as_user_id),
+        u64::from(policy.run_as_group_id),
+    ] {
+        hasher.update(value.to_be_bytes());
+    }
     format!("{:x}", hasher.finalize())
 }
