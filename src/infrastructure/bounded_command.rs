@@ -306,15 +306,16 @@ mod tests {
 
     #[test]
     fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {
-        let completed = finalize_output(
-            Ok(success_status()),
-            Ok(b"stdout".to_vec()),
-            Ok(b"stderr".to_vec()),
-            false,
-        )
-        .expect("complete bounded output should be returned");
-        assert_eq!(completed.stdout, b"stdout");
-        assert_eq!(completed.stderr, b"stderr");
+        assert_eq!(
+            finalize_output(
+                Ok(success_status()),
+                Ok(b"stdout".to_vec()),
+                Ok(b"stderr".to_vec()),
+                false,
+            )
+            .map(|output| (output.stdout, output.stderr)),
+            Ok((b"stdout".to_vec(), b"stderr".to_vec()))
+        );
 
         assert_eq!(
             finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),
