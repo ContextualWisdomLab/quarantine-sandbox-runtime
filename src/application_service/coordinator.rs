@@ -171,7 +171,6 @@ impl ExpiredLeaseCleanupResult {
     }
 
     /// Return the cleanup receipt or attributable backend failure.
-    #[must_use]
     pub const fn result(&self) -> &Result<CleanupReceipt, ApplicationServiceError> {
         &self.result
     }
@@ -388,11 +387,8 @@ where
                     _ => None,
                 })
                 .collect();
-            candidates.sort_by(|left, right| {
-                left.3
-                    .cmp(&right.3)
-                    .then_with(|| left.0.cmp(&right.0))
-            });
+            candidates
+                .sort_by(|left, right| left.3.cmp(&right.3).then_with(|| left.0.cmp(&right.0)));
             candidates.truncate(MAX_EXPIRED_CLEANUPS_PER_CALL);
             for (key, request_fingerprint, lease, cleanup_attempts) in &candidates {
                 leases.insert(
@@ -526,7 +522,27 @@ mod tests {
         ApplicationServiceCoordinatorError, ApplicationServiceError, ApplicationServiceLease,
         ApplicationServiceRequest, CleanupReceipt, LeaseOwnerId,
     };
-    use crate::{IsolationPolicy, ResourceRequest, ServiceEndpoint, ServiceProtocol};
+    use crate::{
+        IsolationControlStatus, IsolationPolicy, ResourceRequest, ServiceEndpoint, ServiceProtocol,
+        VerifiedIsolationState,
+    };
+
+    /// A fully-verified isolation state for fixtures that do not exercise attestation.
+    fn verified_isolation_state() -> VerifiedIsolationState {
+        VerifiedIsolationState {
+            rootless: IsolationControlStatus::Verified,
+            read_only_root_filesystem: IsolationControlStatus::Verified,
+            all_capabilities_dropped: IsolationControlStatus::Verified,
+            no_new_privileges: IsolationControlStatus::Verified,
+            isolated_user_namespace: IsolationControlStatus::Verified,
+            external_egress_denied: IsolationControlStatus::Verified,
+            loopback_only_publication: IsolationControlStatus::Verified,
+            seccomp_enforced: IsolationControlStatus::Verified,
+            lsm_enforced: IsolationControlStatus::Verified,
+            resource_limits_verified: IsolationControlStatus::Verified,
+            credentials_available: false,
+        }
+    }
 
     struct BlockingBackend {
         launch_entered: Arc<Barrier>,
@@ -547,6 +563,7 @@ mod tests {
                 request,
                 crate::sandbox_execution::RuntimeLeaseMetadata {
                     backend_id: "test_backend",
+                    backend_version: "0.0.0-test".to_owned(),
                     sandbox_id: "sandbox-registration-gap".to_owned(),
                     network_id: "network-registration-gap".to_owned(),
                     policy_id: policy.policy_id.clone(),
@@ -555,6 +572,7 @@ mod tests {
                     expires_at_epoch_seconds: started_at_epoch_seconds
                         + u64::from(request.resources.lease_seconds),
                     shutdown_grace_seconds: policy.shutdown_grace_seconds,
+                    isolation_state: verified_isolation_state(),
                 },
                 ServiceEndpoint::loopback(45_321, request.protocol),
             ))
@@ -586,6 +604,7 @@ mod tests {
                 request,
                 crate::sandbox_execution::RuntimeLeaseMetadata {
                     backend_id: "test_backend",
+                    backend_version: "0.0.0-test".to_owned(),
                     sandbox_id: "sandbox-cleanup-failure".to_owned(),
                     network_id: "network-cleanup-failure".to_owned(),
                     policy_id: policy.policy_id.clone(),
@@ -594,6 +613,7 @@ mod tests {
                     expires_at_epoch_seconds: started_at_epoch_seconds
                         + u64::from(request.resources.lease_seconds),
                     shutdown_grace_seconds: policy.shutdown_grace_seconds,
+                    isolation_state: verified_isolation_state(),
                 },
                 ServiceEndpoint::loopback(45_322, request.protocol),
             ))
@@ -654,8 +674,11 @@ mod tests {
             launch_resume: Arc::clone(&launch_resume),
             terminate_calls: Arc::clone(&terminate_calls),
         }));
-        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
-            .expect("test owner should satisfy the bounded identity contract");
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test").unwrap_or_else(|_| {
+            std::panic::resume_unwind(Box::new(
+                "test owner should satisfy the bounded identity contract",
+            ))
+        });
         let worker_coordinator = Arc::clone(&coordinator);
         let worker_owner = owner.clone();
         let worker = thread::spawn(move || {
@@ -665,17 +688,20 @@ mod tests {
         launch_entered.wait();
         let poison_target = Arc::clone(&coordinator);
         let poison = thread::spawn(move || {
-            let _guard = poison_target
-                .leases
-                .lock()
-                .expect("registry should be healthy before explicit poisoning");
-            panic!("poison registry after backend launch begins");
+            let _guard = poison_target.leases.lock().unwrap_or_else(|_| {
+                std::panic::resume_unwind(Box::new(
+                    "registry should be healthy before explicit poisoning",
+                ))
+            });
+            std::panic::resume_unwind(Box::new("poison registry after backend launch begins"));
         });
         assert!(poison.join().is_err());
         launch_resume.wait();
 
         assert_eq!(
-            worker.join().expect("launch worker should not panic"),
+            worker.join().unwrap_or_else(|_| {
+                std::panic::resume_unwind(Box::new("launch worker should not panic"))
+            }),
             Err(ApplicationServiceCoordinatorError::StateUnavailable)
         );
         assert_eq!(
@@ -689,15 +715,22 @@ mod tests {
     fn cleanup_failure_is_not_hidden_by_later_registry_failure() {
         let terminate_entered = Arc::new(Barrier::new(2));
         let terminate_resume = Arc::new(Barrier::new(2));
-        let coordinator = Arc::new(ApplicationServiceCoordinator::new(TerminationFailureBackend {
-            terminate_entered: Arc::clone(&terminate_entered),
-            terminate_resume: Arc::clone(&terminate_resume),
-        }));
-        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
-            .expect("test owner should satisfy the bounded identity contract");
+        let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+            TerminationFailureBackend {
+                terminate_entered: Arc::clone(&terminate_entered),
+                terminate_resume: Arc::clone(&terminate_resume),
+            },
+        ));
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test").unwrap_or_else(|_| {
+            std::panic::resume_unwind(Box::new(
+                "test owner should satisfy the bounded identity contract",
+            ))
+        });
         let lease = coordinator
             .launch_at(&owner, &request(), &policy(), 1_780_000_000)
-            .expect("test lease should register before termination");
+            .unwrap_or_else(|_| {
+                std::panic::resume_unwind(Box::new("test lease should register before termination"))
+            });
         let worker_coordinator = Arc::clone(&coordinator);
         let worker_owner = owner.clone();
         let worker_lease = lease.clone();
@@ -708,17 +741,20 @@ mod tests {
         terminate_entered.wait();
         let poison_target = Arc::clone(&coordinator);
         let poison = thread::spawn(move || {
-            let _guard = poison_target
-                .leases
-                .lock()
-                .expect("registry should be healthy before explicit poisoning");
-            panic!("poison registry after backend cleanup begins");
+            let _guard = poison_target.leases.lock().unwrap_or_else(|_| {
+                std::panic::resume_unwind(Box::new(
+                    "registry should be healthy before explicit poisoning",
+                ))
+            });
+            std::panic::resume_unwind(Box::new("poison registry after backend cleanup begins"));
         });
         assert!(poison.join().is_err());
         terminate_resume.wait();
 
         assert_eq!(
-            worker.join().expect("termination worker should not panic"),
+            worker.join().unwrap_or_else(|_| {
+                std::panic::resume_unwind(Box::new("termination worker should not panic"))
+            }),
             Err(ApplicationServiceCoordinatorError::Backend(
                 ApplicationServiceError::CleanupFailed,
             )),
