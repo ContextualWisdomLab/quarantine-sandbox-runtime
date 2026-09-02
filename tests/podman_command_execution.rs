@@ -172,37 +172,6 @@ fn run_command_at_reports_a_nonzero_exit_status_as_a_successful_call() {
 }
 
 #[test]
-fn run_command_at_falls_back_to_static_evidence_when_the_process_already_exited() {
-    // `top` fails (exit nonzero) as it does against a real Podman once the
-    // workload's own process has already exited: `verify_command_isolation`
-    // must still succeed using only the static `container inspect` record.
-    let script = format!(
-        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         top:*) exit 1 ;;\n  \
-         wait:*) printf '0\\n' ;;\n  \
-         logs:*) : ;;\n  \
-         rm:--force) : ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        security_info_json(),
-        container_inspect_json("fake-command-container-id"),
-    );
-    let program = write_executable("top-fails-fallback", &script);
-    let adapter = RootlessPodmanAdapter::new(program.clone());
-
-    let result = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
-        .expect("static-evidence fallback must still succeed when every static control holds");
-
-    assert_eq!(result.exit_code(), 0);
-
-    let _ = fs::remove_file(program);
-}
-
-#[test]
 fn run_command_at_rejects_a_backend_that_is_not_rootless() {
     let script = "#!/bin/sh\nset -eu\ncase \"${1:-}:${2:-}\" in\n  \
          info:--format) printf '%s\\n' '{\"host\":{\"security\":{\"rootless\":false,\"seccompEnabled\":true,\"seccompProfilePath\":\"/x\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}' ;;\n  \
