@@ -87,7 +87,10 @@ fn spawn_piped_child(
         .map(|(stdout, stderr)| (child, stdout, stderr))
 }
 
-fn captured_pipes<T, U>(stdout: Option<T>, stderr: Option<U>) -> Result<(T, U), BoundedCommandError> {
+fn captured_pipes<T, U>(
+    stdout: Option<T>,
+    stderr: Option<U>,
+) -> Result<(T, U), BoundedCommandError> {
     match (stdout, stderr) {
         (Some(stdout), Some(stderr)) => Ok((stdout, stderr)),
         _ => Err(BoundedCommandError::Spawn),
@@ -341,11 +344,7 @@ mod tests {
         let mut overflow_cleanup_failed = FakeChild::new([]);
         overflow_cleanup_failed.reap_ok = false;
         assert_eq!(
-            supervise_child(
-                &mut overflow_cleanup_failed,
-                Instant::now(),
-                &overflow,
-            ),
+            supervise_child(&mut overflow_cleanup_failed, Instant::now(), &overflow,),
             Err(BoundedCommandError::Wait)
         );
 
@@ -353,11 +352,7 @@ mod tests {
         let mut timeout_cleanup_failed = FakeChild::new([PollOutcome::Running]);
         timeout_cleanup_failed.reap_ok = false;
         assert_eq!(
-            supervise_child(
-                &mut timeout_cleanup_failed,
-                Instant::now(),
-                &overflow,
-            ),
+            supervise_child(&mut timeout_cleanup_failed, Instant::now(), &overflow,),
             Err(BoundedCommandError::Wait)
         );
 
