@@ -16,8 +16,9 @@ mod sandbox_execution;
 pub use application_service::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId, ServiceEndpoint,
-    ServiceProtocol,
+    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
+    CommandExecutionResult, ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId,
+    ServiceEndpoint, ServiceProtocol, execute_command,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,

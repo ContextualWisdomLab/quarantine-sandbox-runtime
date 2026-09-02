@@ -55,6 +55,23 @@ Core `sandbox_execution` owns backend-neutral isolation requirements and verifie
 | Crash/restart orphan reclamation | No durable lease journal or orphan reconciliation. | Missing | Extract `recovery` and `session_lifecycle`; add deterministic crash/orphan E2E. |
 | gVisor/containerd/VM backends | No production adapter. | Missing | Add only behind the same verified isolation ACL after P0 contract/release stabilizes. |
 
+## Bounded command execution
+
+`ContextualWisdomLab/.github` central review (Noema, OpenCode Review) currently evaluates every PR by
+reading diffs and reasoning about them; it never executes the code under review. Its own
+`scripts/ci/sandboxed_verify.py` and `scripts/ci/sandboxed_web_e2e.py` -- named as the
+"actually-executed PoC" evidence mechanism the OpenCode review gate requires -- isolate locally on the
+CI runner itself (a scrubbed `tempfile` workspace plus direct `subprocess.run`, and `bwrap` when
+available) rather than calling out to this runtime. This is a third consumer path, alongside Wardnet
+(issue #38) and `contextual-orchestrator` (issue #991), not previously tracked in this table.
+
+| Capability | Current evidence | Status | Required action |
+| --- | --- | --- | --- |
+| Bounded command-to-completion contract | `CommandExecutionRequest`/`CommandExecutionResult`/`CommandExecutionBackend` (ADR-0007) validated, coordinated by `execute_command`, and proven against a `#[cfg(test)]`-only fake backend. | Implemented on active PR | Merge through the existing dependency-ordered stack once ready; keep the contract stable once a real backend consumes it. |
+| Real command-execution backend | No production `CommandExecutionBackend`. The application-service Podman adapter's isolation profile (rootless, no-pull, read-only rootfs, dropped capabilities, internal network, resource limits) is the intended reuse target, but running a command *to completion* and capturing bounded stdout/stderr/exit status is new adapter work, not present in `src/infrastructure/podman.rs`. | Missing | Implement in `src/infrastructure/podman.rs`; same real-isolation release bar as ADR-0006, same `.github#1590` blocker for release-time LSM proof. |
+| CLI or HTTP entrypoint | None. This crate ships `[lib]` only (see `Cargo.toml`); there is no `[[bin]]` target and no network transport. | Missing | Add once a real backend exists; a CI reviewer script cannot shell out to or call this runtime without one. |
+| `.github` central-review wiring | `scripts/ci/sandboxed_verify.py`/`scripts/ci/sandboxed_web_e2e.py` are unmodified; they do not call this runtime. | Missing (external repo) | Owned by `.github`; wire once the two rows above land. Track as a gap in `.github`'s own `docs/product-technical-gap-baseline.md`. |
+
 ### Current real-backend blocker
 
 PR #9 exact head `3ec25392f829a5cbe0a1df4c632f299bb4d7d3a0` closes the residual bounding-capability defect found by hostile RED `55704a220eceb25e6f7f586b0f102c5bb6028e98`. Real Podman CI on that exact head uses Podman 5.8.4 in rootless mode and fails closed at `IsolationVerificationFailed { control_name: "lsm" }`; the unconditional final container/network leak check succeeds. This is evidence that the Ubuntu-hosted lane cannot prove the P0 LSM requirement, not evidence that the requirement should be relaxed.
@@ -108,6 +125,7 @@ Production consumers must pin a released package plus SHA-256 and verified prove
 | --- | --- | --- |
 | Wardnet | SOC/gateway policy, maliciousness verdict, incidents, quarantine/block/review, notification, retention | Issue #38 remains the owner path; must consume released artifact-analysis evidence contract only. |
 | contextual-orchestrator | model/Agent orchestration, authorization, application selection, secrets, task/user actions | Issue #991 remains the owner path; must consume released application-service lease contract through an ACL, never direct Podman/containerd or sibling source. |
+| `.github` central review (Noema, OpenCode Review) | PR review verdict, evidence-gate policy, what counts as an "actually-executed PoC" | No owner-path issue filed yet. Currently isolates locally (`sandboxed_verify.py`/`sandboxed_web_e2e.py`); must consume a released command-execution result contract through an ACL once a real backend and entrypoint exist -- see "Bounded command execution" above. |
 
 ## Context Graph and Enterprise Architecture read-only integration
 
@@ -140,3 +158,4 @@ After both required releases exist, quarantine runtime/backend identity, technol
 6. Extract durable Workload Admission, Session Lifecycle and Recovery contracts; add crash/replay/resource-reservation E2E.
 7. Add artifact-analysis adapters and dynamic detonation only on top of the released isolation boundary.
 8. Continue Context Fabric linkage read-only until released shared contracts exist; then hand off exact runtime release evidence to its sole writer.
+9. Implement a real `CommandExecutionBackend` (Podman, run-to-completion with bounded stdout/stderr/exit status) and a CLI or HTTP entrypoint on top of the accepted `CommandExecutionRequest`/`CommandExecutionResult` contract (ADR-0007), then file an owner-path issue for `.github` central review and wire `scripts/ci/sandboxed_verify.py`/`scripts/ci/sandboxed_web_e2e.py` to consume the released result contract through an ACL.

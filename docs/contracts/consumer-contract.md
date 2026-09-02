@@ -13,6 +13,8 @@ The first release candidate carries independently versioned wire contracts rathe
 | Isolation policy | `1.0.0` |
 | Application-service lease | `1.2.0` |
 | Application-service cleanup receipt | `1.0.0` |
+| Command-execution request | `1.0.0` |
+| Command-execution result | `1.0.0` |
 | Release evidence manifest | `1.0.0` |
 
 All public JSON Schemas use Draft 2020-12 and reject unknown top-level fields. A consumer therefore validates an exact schema version it explicitly supports; it must not infer compatibility from the repository package version or silently coerce an unknown contract revision. A breaking field removal, meaning change, or relaxation requires a new major contract version. A minor contract revision may add security evidence that is required for that revision, as the application-service lease `1.2.0` did for backend version and effective seccomp/LSM/resource-control state. Strict consumers upgrade deliberately rather than treating that addition as wire-compatible with `1.1.0`.
@@ -98,6 +100,58 @@ A lease means the runtime reached its isolation/readiness contract. It does **no
 Every consumer terminal path—success, cancellation, timeout, workflow failure, or user abort—must request lease termination. `CleanupReceipt` proves container/network removal only when both removal operations succeed. Consumers must surface cleanup failure rather than treating it as successful termination.
 
 The runtime also applies a Podman container timeout matching the requested lease. A durable orphan/network reaper remains required before a distributed restart-recovery claim.
+
+## Bounded command execution
+
+A CI-style consumer -- for example a central review pipeline that must execute a pull request's own
+test suite or a proof-of-concept command and report a structured pass/fail -- submits a
+`CommandExecutionRequest` instead of an `ApplicationServiceRequest`:
+
+```text
+schema_version
+request_id
+image_reference      immutable OCI @sha256 digest only
+command               bounded direct argv; no shell; at least one entry required
+resources
+  memory_bytes
+  cpu_millicores
+  maximum_processes
+  lease_seconds
+  tmpfs_bytes
+```
+
+`execute_command` validates the request against the operator's `IsolationPolicy` (reusing the same
+identifier, digest-pinning, argv, and resource-budget rules as `ApplicationServiceRequest`) and
+delegates to a `CommandExecutionBackend`, which runs the command to completion -- there is no
+readiness-gated endpoint to poll or connect to. It returns a `CommandExecutionResult`:
+
+```text
+schema_version
+request_id
+image_reference
+backend_id
+backend_version
+sandbox_id
+exit_code
+timed_out
+stdout
+stdout_truncated
+stderr
+stderr_truncated
+started_at_epoch_seconds
+finished_at_epoch_seconds
+```
+
+`exit_code` is the command's own process exit status. A nonzero value is an observed fact, not a
+runtime error -- the consumer decides how it affects its own verdict. `CommandExecutionError` is
+returned only when the request fails validation or the backend itself cannot establish or observe the
+sandbox (for example `BackendInvocationFailed`, `IsolationVerificationFailed`); it is never returned
+merely because the executed command exited nonzero.
+
+**Not yet available:** a production backend (the runtime ships only a `#[cfg(test)]`-only fake backend
+today) and any CLI or HTTP transport a caller can invoke from outside this crate. See
+`docs/adr/0007-bounded-command-execution-contract.md` and
+`docs/product-technical-gap-baseline.md`.
 
 ## Forbidden consumer coupling
 
