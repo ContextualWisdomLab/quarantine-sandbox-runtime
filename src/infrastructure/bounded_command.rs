@@ -312,7 +312,7 @@ mod tests {
             Arc,
             atomic::{AtomicBool, Ordering},
         },
-        time::Instant,
+        time::{Duration, Instant},
     };
 
     use super::{
@@ -411,6 +411,16 @@ mod tests {
         let overflow = AtomicBool::new(false);
         let mut exited = FakeChild::new([PollOutcome::Exited]);
         assert!(supervise_child(&mut exited, Instant::now(), &overflow).is_ok());
+
+        let mut eventually_exited = FakeChild::new([PollOutcome::Running, PollOutcome::Exited]);
+        assert!(
+            supervise_child(
+                &mut eventually_exited,
+                Instant::now() + Duration::from_millis(100),
+                &overflow,
+            )
+            .is_ok()
+        );
 
         let mut timed_out = FakeChild::new([PollOutcome::Running]);
         assert_eq!(
