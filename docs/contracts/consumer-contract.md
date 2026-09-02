@@ -148,10 +148,21 @@ returned only when the request fails validation or the backend itself cannot est
 sandbox (for example `BackendInvocationFailed`, `IsolationVerificationFailed`); it is never returned
 merely because the executed command exited nonzero.
 
-**Not yet available:** a production backend (the runtime ships only a `#[cfg(test)]`-only fake backend
-today) and any CLI or HTTP transport a caller can invoke from outside this crate. See
-`docs/adr/0007-bounded-command-execution-contract.md` and
-`docs/product-technical-gap-baseline.md`.
+`RootlessPodmanAdapter::run_command_at` is the production `CommandExecutionBackend`: a fresh
+`--network none`, read-only-rootfs, all-capabilities-dropped, non-root sandbox per call, verified
+against the same effective-isolation evidence as the service lease where a live process can still be
+observed (a command that exits before that observation is possible falls back to Podman's own static
+container-configuration record rather than failing the call). A caller outside this crate reaches it
+through the `quarantine-sandbox-runtime run --image <digest> [resource flags] -- <command> [args...]`
+CLI (`src/main.rs`), which prints the `CommandExecutionResult` as JSON on stdout and exits with the
+sandboxed command's own exit code, or `2` with no JSON on stdout for a request/policy validation
+failure that never reached a backend. A caller that needs to tell "the sandboxed command itself exited
+2" apart from "validation rejected the request" must check for JSON on stdout, not exit-code value
+alone: both paths can legitimately produce `2`. There is no `--network-policy` flag: the contract has
+no network field (ADR-0007) and egress is unconditionally denied. See
+`docs/adr/0007-bounded-command-execution-contract.md`, `docs/adr/0008-podman-backed-command-execution-and-cli.md`,
+and `docs/product-technical-gap-baseline.md` for what remains before an HTTP transport or a released
+package exist.
 
 ## Forbidden consumer coupling
 

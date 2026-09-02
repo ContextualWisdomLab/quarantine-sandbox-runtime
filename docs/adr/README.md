@@ -9,5 +9,6 @@
 | [0005](0005-sandbox-execution-context.md) | Accepted | `sandbox_execution` is the Core bounded context; `artifact_analysis` and `application_service` are Supporting contexts. |
 | [0006](0006-isolated-application-service.md) | Accepted | Rootless Podman is the first isolated application-service adapter with immutable images, bounded resources, internal network, loopback ingress, readiness and cleanup. |
 | [0007](0007-bounded-command-execution-contract.md) | Accepted | `CommandExecutionRequest`/`CommandExecutionResult`/`CommandExecutionBackend` add a "run one bounded command to completion" contract alongside the service lease; contract and coordinator ship now, a real backend and CLI/HTTP entrypoint remain planned. |
+| [0008](0008-podman-backed-command-execution-and-cli.md) | Accepted | `RootlessPodmanAdapter::run_command_at` is the production `CommandExecutionBackend`; a synchronous `quarantine-sandbox-runtime run` CLI (`src/main.rs`, first `[[bin]]` target) is the first consumer-facing transport. |
 
 Superseding an Accepted ADR requires a new ADR that names the superseded decision. Changing implementation detail without changing a binding architectural decision does not require a new ADR, but the relevant ADR and traceability must remain code-current.

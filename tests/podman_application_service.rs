@@ -67,7 +67,11 @@ fn temporary_path(name: &str) -> PathBuf {
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
-    let rootless = if mode == "rootless_false" { "false" } else { "true" };
+    let rootless = if mode == "rootless_false" {
+        "false"
+    } else {
+        "true"
+    };
     let info = format!(
         r#"{{"host":{{"security":{{"rootless":{rootless},"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}},"version":{{"Version":"5.6.2"}}}}"#
     );

@@ -29,7 +29,6 @@ use thiserror::Error;
 use super::ApplicationServiceError;
 use crate::{CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest, SandboxExecutionError};
 
-#[cfg(test)]
 const COMMAND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "1.0.0";
 
 /// Consumer request to run one bounded command to completion inside an isolated sandbox.
@@ -137,12 +136,9 @@ pub fn execute_command(
 ///
 /// Bundled into one type, rather than passed as separate constructor
 /// arguments, to keep the constructor a small, clippy-clean call site for
-/// every backend that builds a result. `#[cfg(test)]`-only for now: no
-/// production backend exists yet (see the module docs), so today this type
-/// is exercised only by [`tests::FakeCommandExecutionBackend`]. A real
-/// backend adapter is expected to reintroduce (or un-gate) an equivalent
-/// type when it lands.
-#[cfg(test)]
+/// every backend that builds a result. Built by
+/// [`crate::RootlessPodmanAdapter::run_command_at`] for a real run and by
+/// `tests::FakeCommandExecutionBackend` for contract tests.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommandExecutionOutcome {
     pub(crate) backend_id: &'static str,
@@ -179,10 +175,8 @@ pub struct CommandExecutionResult {
 
 /// Constructs a [`CommandExecutionResult`] from backend-supplied fields.
 ///
-/// `#[cfg(test)]`-only alongside [`CommandExecutionOutcome`]: see that type's
-/// docs for why. A real backend adapter builds a `CommandExecutionResult` the
-/// same way once it exists.
-#[cfg(test)]
+/// `pub(crate)`, alongside [`CommandExecutionOutcome`]: see that type's docs
+/// for the two call sites that use it.
 impl CommandExecutionResult {
     pub(crate) fn new(request: &CommandExecutionRequest, outcome: CommandExecutionOutcome) -> Self {
         Self {

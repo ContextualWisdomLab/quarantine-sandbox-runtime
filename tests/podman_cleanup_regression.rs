@@ -62,7 +62,10 @@ fn temporary_path(name: &str) -> PathBuf {
 
 fn closed_loopback_port() -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
-    listener.local_addr().expect("address should resolve").port()
+    listener
+        .local_addr()
+        .expect("address should resolve")
+        .port()
 }
 
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
@@ -133,7 +136,10 @@ fn termination_attempts_all_cleanup_resources_when_any_step_fails() {
         "termination_network_fail",
     ] {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-        let ready_port = listener.local_addr().expect("address should resolve").port();
+        let ready_port = listener
+            .local_addr()
+            .expect("address should resolve")
+            .port();
         let (program, log) = write_fake_podman(mode, ready_port);
         let adapter = RootlessPodmanAdapter::new(program.clone());
         let lease = adapter
