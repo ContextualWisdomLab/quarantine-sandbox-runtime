@@ -1,5 +1,7 @@
 # Quarantine Sandbox Runtime
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ContextualWisdomLab/quarantine-sandbox-runtime)
+
 `quarantine-sandbox-runtime` is the ContextualWisdomLab Rust runtime for **reusable hostile-workload isolation plus artifact-analysis evidence**.
 
 The repository now supports two explicit consumer verticals:
