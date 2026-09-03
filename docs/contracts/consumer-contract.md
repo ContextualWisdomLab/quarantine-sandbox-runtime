@@ -21,7 +21,7 @@ An Agent/Chat/tool consumer submits an `ApplicationServiceRequest` only after th
 ```text
 schema_version
 request_id
-image_reference      immutable OCI @sha256 digest only
+image_reference      registry/storage image name + immutable @sha256 digest only
 container_port
 protocol             tcp | http
 command              bounded direct argv; no shell
@@ -32,6 +32,8 @@ resources
   lease_seconds
   tmpfs_bytes
 ```
+
+The image reference must be a normal container registry/storage name pinned by a lower-case SHA-256 digest. Explicit Podman/container-image transports such as `dir:`, `docker-archive:`, `docker-daemon:`, `oci:`, `oci-archive:`, and `containers-storage:` are rejected because they can redirect image resolution to host-backed paths, alternate local stores, or another runtime authority. A registry authority may include a numeric port, for example `localhost:5000/cwl/tool@sha256:…`.
 
 The operator supplies `IsolationPolicy`; the consumer cannot raise policy maxima.
 
@@ -74,7 +76,7 @@ Consumers must not:
 
 - import or copy internal Podman/gVisor/containerd modules;
 - shell out directly to Podman/containerd as a substitute for this runtime contract;
-- pass mutable image tags;
+- pass mutable image tags or explicit image transports that resolve host paths/alternate stores;
 - pass prompt text, message bodies, credentials, arbitrary environment variables, broad host paths, runtime sockets, or host devices through the application-service request;
 - treat runtime evidence as verdict policy;
 - expose the returned service endpoint beyond the host loopback boundary;
