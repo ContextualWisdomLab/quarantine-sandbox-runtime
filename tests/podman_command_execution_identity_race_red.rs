@@ -14,6 +14,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -87,23 +88,32 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
     );
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
-    let request = request();
-    let policy = policy();
     let same_start_second = 1_780_000_000;
 
-    let first = adapter
-        .run_command_at(&request, &policy, same_start_second)
-        .expect("first command invocation should complete");
-    let second = adapter
-        .run_command_at(&request, &policy, same_start_second)
-        .expect("second command invocation should complete independently");
+    let first_adapter = adapter.clone();
+    let first_handle = thread::spawn(move || {
+        first_adapter
+            .run_command_at(&request(), &policy(), same_start_second)
+            .expect("first command invocation should complete")
+    });
+    let second_handle = thread::spawn(move || {
+        adapter
+            .run_command_at(&request(), &policy(), same_start_second)
+            .expect("second command invocation should complete independently")
+    });
+    let first = first_handle
+        .join()
+        .expect("first command invocation thread should not panic");
+    let second = second_handle
+        .join()
+        .expect("second command invocation thread should not panic");
 
-    assert_eq!(first.request_id(), request.request_id);
-    assert_eq!(second.request_id(), request.request_id);
+    assert_eq!(first.request_id(), "same-consumer-correlation-id");
+    assert_eq!(second.request_id(), "same-consumer-correlation-id");
     assert_ne!(
         first.sandbox_id(),
         second.sandbox_id(),
-        "two one-shot invocations must not share a runtime resource identity"
+        "parallel one-shot invocations must not share a runtime resource identity"
     );
 
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
