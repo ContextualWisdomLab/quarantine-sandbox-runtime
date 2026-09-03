@@ -13,7 +13,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
@@ -183,6 +183,45 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_failure() {
     );
     let program = write_executable("logs-and-cleanup-fail", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let error = adapter
+        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
+    );
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(calls.lines().any(|line| line.starts_with("logs ")));
+    assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(call_log);
+}
+
+#[test]
+fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
+    let call_log = temporary_path("logs-timeout-and-cleanup-fail-call-log");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         top:*) printf '%s' '{}' ;;\n  \
+         wait:*) printf '0\\n' ;;\n  \
+         logs:*) sleep 1 ;;\n  \
+         rm:--force) exit 88 ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        call_log.display(),
+        security_info_json(),
+        container_inspect_json(),
+        top_output(),
+    );
+    let program = write_executable("logs-timeout-and-cleanup-fail", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_timeout(Duration::from_millis(200));
 
     let error = adapter
         .run_command_at(&request(), &policy(), 1_780_000_000)
