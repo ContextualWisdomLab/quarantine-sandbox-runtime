@@ -733,9 +733,7 @@ fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
         return None;
     }
 
-    let Some((profile, mode_with_suffix)) = normalized.rsplit_once(" (") else {
-        return Some(normalized);
-    };
+    let (profile, mode_with_suffix) = normalized.rsplit_once(" (")?;
     let mode = mode_with_suffix.strip_suffix(')')?;
     let profile = profile.trim();
     (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
