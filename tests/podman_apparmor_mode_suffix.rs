@@ -11,8 +11,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
+    RootlessPodmanAdapter, ServiceProtocol,
 };
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -60,10 +60,10 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(ready_port: u16) -> PathBuf {
+fn write_fake_podman(ready_port: u16, runtime_label: &str) -> PathBuf {
     let program = temporary_path("apparmor-mode-suffix-podman");
     let script = format!(
-        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"5.8.4\"}}}}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":67108864,\"NanoCpus\":500000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n"
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"5.8.4\"}}}}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":67108864,\"NanoCpus\":500000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - {runtime_label}\\n' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n"
     );
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -81,7 +81,7 @@ fn confined_apparmor_mode_suffix_is_the_same_effective_profile() {
         .local_addr()
         .expect("listener address should resolve")
         .port();
-    let program = write_fake_podman(ready_port);
+    let program = write_fake_podman(ready_port, "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
@@ -91,5 +91,28 @@ fn confined_apparmor_mode_suffix_is_the_same_effective_profile() {
     assert!(
         result.is_ok(),
         "a confined AppArmor process label may append its enforcement mode while referring to the inspect-reported profile"
+    );
+}
+
+#[test]
+fn apparmor_complain_mode_never_counts_as_effective_confinement() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener address should resolve")
+        .port();
+    let program = write_fake_podman(ready_port, "containers-default (complain)");
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
+
+    let _ = fs::remove_file(program);
+    drop(listener);
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "lsm",
+        }),
+        "AppArmor complain mode logs violations but does not enforce the profile and must fail closed"
     );
 }
