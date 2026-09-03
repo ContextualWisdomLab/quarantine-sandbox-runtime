@@ -358,6 +358,14 @@ jobs:
           subject-path: evidence/*.crate
           predicate-type: https://spdx.dev/Document/v3
           predicate-path: evidence/quarantine-sandbox-runtime.spdx.json
+      - name: Verify signed package attestations before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package_file="$(find evidence -maxdepth 1 -type f -name '*.crate' -print -quit)"
+          test -n "$package_file"
+          gh attestation verify "$package_file" -R "${GITHUB_REPOSITORY}"
+          gh attestation verify "$package_file" -R "${GITHUB_REPOSITORY}" --predicate-type https://spdx.dev/Document/v3
       - name: Build release notes from the exact dated changelog section
         env:
           RELEASE_TAG: ${{ github.ref_name }}
