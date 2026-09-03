@@ -1,9 +1,10 @@
-//! RED regression for a partially successful `podman create` invocation.
+//! Regressions for partially successful `podman create` invocations.
 //!
 //! A container runtime can persist the named container and still return a
 //! nonzero CLI status. The adapter therefore cannot treat a failed create
 //! process as proof that no resource exists. It must idempotently remove the
-//! deterministic sandbox name before returning the create failure.
+//! deterministic sandbox name before returning the create failure, while a
+//! failed removal must still take precedence as the stronger leak-risk error.
 
 #![cfg(target_os = "linux")]
 
@@ -77,13 +78,16 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
+fn security_info_json() -> &'static str {
+    r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#
+}
+
 #[test]
 fn failed_create_process_still_gets_idempotent_cleanup() {
     let call_log = temporary_path("call-log");
-    let security_info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n'; exit 42 ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(), security_info,
+        call_log.display(), security_info_json(),
     );
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -97,6 +101,33 @@ fn failed_create_process_still_gets_idempotent_cleanup() {
         CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
             operation: "container_create",
         })
+    );
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(calls.lines().any(|line| line.starts_with("create --name ")));
+    assert!(calls.lines().any(|line| line.starts_with("rm --force --ignore ")));
+    assert!(!calls.lines().any(|line| line.starts_with("start ")));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(call_log);
+}
+
+#[test]
+fn cleanup_failure_after_failed_create_surfaces_leak_risk() {
+    let call_log = temporary_path("cleanup-fail-call-log");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n'; exit 42 ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
+        call_log.display(), security_info_json(),
+    );
+    let program = write_executable("fake-podman-cleanup-fail", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let error = adapter
+        .run_command_at(&request(), &policy(), 1_780_000_003)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("create --name ")));
