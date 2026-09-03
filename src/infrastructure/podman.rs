@@ -579,18 +579,13 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        // This branch and the container_logs nonzero-status branch below
-        // both have a regression test requiring a cleanup failure to be
-        // surfaced over the original error, via cleanup_or_report --
+        // Cleanup precedence is covered by focused REDs for start failure,
+        // effective-isolation failure, nonzero `podman logs`, and log timeout.
         // `run_command_at_reports_a_genuine_backend_invocation_failure_during_wait`
-        // is the one exception: it deliberately keeps the original error
-        // even when the fake backend's self-deleting-binary technique makes
-        // cleanup fail too (both for the same underlying reason, an
-        // unreachable backend, so a distinct `CleanupFailed` there would be
-        // less informative, not more). Do not generalize cleanup_or_report
-        // to the remaining branches (verify_command_isolation,
-        // wait_for_command, logs timeout) without new test evidence for
-        // each one.
+        // remains the one deliberate exception: its fake backend deletes its own
+        // executable, so cleanup fails for the same unreachable-backend cause and
+        // the original wait error is more informative. Do not generalize
+        // cleanup_or_report to `wait_for_command` without new test evidence.
         if let Err(error) = self.checked_output(
             "container_start",
             &["start".to_owned(), sandbox_name.clone()],
@@ -601,8 +596,7 @@ impl RootlessPodmanAdapter {
         if let Err(error) =
             self.verify_command_isolation(&sandbox_name, request, policy, &info, &container_id)
         {
-            let _ = self.cleanup_created_command_container(&sandbox_name);
-            return Err(error.into());
+            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
         let (exit_code, timed_out) = match self.wait_for_command(&sandbox_name, request) {
@@ -626,11 +620,11 @@ impl RootlessPodmanAdapter {
             // The log driver failing to hand back already-written output
             // promptly is an infrastructure fault, not a fact about the
             // workload (whose own timeout is already captured above).
-            let _ = self.cleanup_created_command_container(&sandbox_name);
-            return Err(CommandExecutionError::Backend(
-                ApplicationServiceError::BackendCommandTimedOut {
+            return Err(self.cleanup_or_report(
+                &sandbox_name,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
                     operation: "container_logs",
-                },
+                }),
             ));
         }
         // A `None` status only occurs on the timeout/output-budget kill
