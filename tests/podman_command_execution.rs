@@ -428,11 +428,11 @@ fn command_execution_backend_trait_forwards_to_run_command_at() {
 }
 
 #[test]
-fn run_command_at_reports_a_genuine_backend_invocation_failure_during_wait() {
+fn run_command_at_fails_closed_when_backend_loss_prevents_cleanup_during_wait() {
     // The script deletes itself once isolation verification's `top` call
-    // completes, so the very next spawn (`podman wait`) genuinely fails to
-    // start (`ENOENT`) rather than merely exiting nonzero -- exercising the
-    // hard-error path distinct from a workload timeout or a bad exit code.
+    // completes. Both the following `podman wait` and the mandatory cleanup
+    // spawn therefore fail. Cleanup provenance has higher safety priority than
+    // the earlier backend error because the sandbox may still be present.
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
@@ -454,19 +454,18 @@ fn run_command_at_reports_a_genuine_backend_invocation_failure_during_wait() {
 
     assert_eq!(
         error,
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "command_wait",
-        })
+        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
 
     let _ = fs::remove_file(program);
 }
 
 #[test]
-fn run_command_at_reports_a_genuine_backend_invocation_failure_during_log_retrieval() {
+fn run_command_at_fails_closed_when_backend_loss_prevents_cleanup_during_log_retrieval() {
     // Same technique as the `command_wait` variant above, one call later:
-    // the script deletes itself once `wait` succeeds, so the subsequent
-    // `podman logs` spawn genuinely fails to start.
+    // the script deletes itself once `wait` succeeds, so `podman logs` and
+    // the mandatory cleanup can no longer be spawned. The unverified cleanup
+    // state must dominate the earlier log-retrieval failure.
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
@@ -489,9 +488,7 @@ fn run_command_at_reports_a_genuine_backend_invocation_failure_during_log_retrie
 
     assert_eq!(
         error,
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "container_logs",
-        })
+        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
 
     let _ = fs::remove_file(program);
