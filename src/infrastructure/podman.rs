@@ -579,15 +579,18 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        // Only this branch (container_start) has a regression test requiring
-        // a cleanup failure to be surfaced over the original error --
+        // This branch and the container_logs nonzero-status branch below
+        // both have a regression test requiring a cleanup failure to be
+        // surfaced over the original error, via cleanup_or_report --
         // `run_command_at_reports_a_genuine_backend_invocation_failure_during_wait`
-        // deliberately keeps the original error even when the fake backend's
-        // self-deleting-binary technique makes cleanup fail too (both for
-        // the same underlying reason, an unreachable backend, so a distinct
-        // `CleanupFailed` there would be less informative, not more). Do not
-        // generalize this to the other branches below without new test
-        // evidence for each one.
+        // is the one exception: it deliberately keeps the original error
+        // even when the fake backend's self-deleting-binary technique makes
+        // cleanup fail too (both for the same underlying reason, an
+        // unreachable backend, so a distinct `CleanupFailed` there would be
+        // less informative, not more). Do not generalize cleanup_or_report
+        // to the remaining branches (verify_command_isolation,
+        // wait_for_command, logs timeout) without new test evidence for
+        // each one.
         if let Err(error) = self.checked_output(
             "container_start",
             &["start".to_owned(), sandbox_name.clone()],
@@ -636,11 +639,11 @@ impl RootlessPodmanAdapter {
         // log driver or container state is broken) and is an infrastructure
         // fault, not empty workload output.
         if !logs_outcome.status.is_none_or(|status| status.success()) {
-            let _ = self.cleanup_created_command_container(&sandbox_name);
-            return Err(CommandExecutionError::Backend(
-                ApplicationServiceError::BackendCommandFailed {
+            return Err(self.cleanup_or_report(
+                &sandbox_name,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
                     operation: "container_logs",
-                },
+                }),
             ));
         }
 
