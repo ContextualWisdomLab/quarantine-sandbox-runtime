@@ -42,7 +42,7 @@ An Agent/Chat/tool consumer submits an `ApplicationServiceRequest` only after th
 ```text
 schema_version
 request_id
-image_reference      immutable OCI @sha256 digest only
+image_reference      registry/storage image name + immutable @sha256 digest only
 container_port
 protocol             tcp | http
 command              bounded direct argv; no shell
@@ -53,6 +53,8 @@ resources
   lease_seconds
   tmpfs_bytes
 ```
+
+The image reference must be a normal container registry/storage name pinned by a lower-case SHA-256 digest. Explicit Podman/container-image transports such as `dir:`, `docker-archive:`, `docker-daemon:`, `oci:`, `oci-archive:`, and `containers-storage:` are rejected because they can redirect resolution to host-backed paths, alternate local stores, or another runtime authority. A registry authority may include a numeric port, for example `localhost:5000/cwl/tool@sha256:…`.
 
 The operator supplies `IsolationPolicy`; the consumer cannot raise policy maxima.
 
@@ -103,14 +105,12 @@ The runtime also applies a Podman container timeout matching the requested lease
 
 ## Bounded command execution
 
-A CI-style consumer -- for example a central review pipeline that must execute a pull request's own
-test suite or a proof-of-concept command and report a structured pass/fail -- submits a
-`CommandExecutionRequest` instead of an `ApplicationServiceRequest`:
+A CI-style consumer, such as a central review pipeline that must execute a pull request's own test suite or a proof-of-concept command and report structured evidence, submits a `CommandExecutionRequest` instead of an `ApplicationServiceRequest`:
 
 ```text
 schema_version
 request_id
-image_reference      immutable OCI @sha256 digest only
+image_reference      registry/storage image name + immutable @sha256 digest only
 command               bounded direct argv; no shell; at least one entry required
 resources
   memory_bytes
@@ -120,10 +120,9 @@ resources
   tmpfs_bytes
 ```
 
-`execute_command` validates the request against the operator's `IsolationPolicy` (reusing the same
-identifier, digest-pinning, argv, and resource-budget rules as `ApplicationServiceRequest`) and
-delegates to a `CommandExecutionBackend`, which runs the command to completion -- there is no
-readiness-gated endpoint to poll or connect to. It returns a `CommandExecutionResult`:
+The command contract reuses the same registry-only image identity and resource policy as the application-service path. Explicit image transports resolving host paths or alternate stores are rejected before any backend invocation.
+
+`execute_command` validates the request against the operator's `IsolationPolicy` and delegates to a `CommandExecutionBackend`, which runs the command to completion without a readiness-gated endpoint. It returns a `CommandExecutionResult`:
 
 ```text
 schema_version
@@ -142,27 +141,11 @@ started_at_epoch_seconds
 finished_at_epoch_seconds
 ```
 
-`exit_code` is the command's own process exit status. A nonzero value is an observed fact, not a
-runtime error -- the consumer decides how it affects its own verdict. `CommandExecutionError` is
-returned only when the request fails validation or the backend itself cannot establish or observe the
-sandbox (for example `BackendInvocationFailed`, `IsolationVerificationFailed`); it is never returned
-merely because the executed command exited nonzero.
+`exit_code` is the sandboxed workload's process exit status. A nonzero value is observed workload evidence, not a runtime error; the consumer decides how that evidence affects its own verdict. `CommandExecutionError` is reserved for request validation or runtime/backend failure, including inability to establish or verify the sandbox.
 
-`RootlessPodmanAdapter::run_command_at` is the production `CommandExecutionBackend`: a fresh
-`--network none`, read-only-rootfs, all-capabilities-dropped, non-root sandbox per call, verified
-against the same effective-isolation evidence as the service lease where a live process can still be
-observed (a command that exits before that observation is possible falls back to Podman's own static
-container-configuration record rather than failing the call). A caller outside this crate reaches it
-through the `quarantine-sandbox-runtime run --image <digest> [resource flags] -- <command> [args...]`
-CLI (`src/main.rs`), which prints the `CommandExecutionResult` as JSON on stdout and exits with the
-sandboxed command's own exit code, or `2` with no JSON on stdout for a request/policy validation
-failure that never reached a backend. A caller that needs to tell "the sandboxed command itself exited
-2" apart from "validation rejected the request" must check for JSON on stdout, not exit-code value
-alone: both paths can legitimately produce `2`. There is no `--network-policy` flag: the contract has
-no network field (ADR-0007) and egress is unconditionally denied. See
-`docs/adr/0007-bounded-command-execution-contract.md`, `docs/adr/0008-podman-backed-command-execution-and-cli.md`,
-and `docs/product-technical-gap-baseline.md` for what remains before an HTTP transport or a released
-package exist.
+`RootlessPodmanAdapter::run_command_at` is the production `CommandExecutionBackend`. Each invocation creates a fresh digest-pinned, read-only-rootfs, non-root sandbox with `--network none`, dropped capabilities, no-new-privileges, isolated namespaces, and bounded CPU/RAM/PID/tmpfs/lifetime controls. The adapter starts the container detached and requires live `podman top` evidence for effective seccomp, LSM, and capability state before accepting the sandbox. If a short-lived workload exits before live process evidence can be sampled, execution fails closed; static `container inspect` configuration is not a substitute. Supporting such workloads requires a reviewed start/hold/attest/release handshake or an equivalently stronger backend primitive.
+
+An external caller reaches the backend through `quarantine-sandbox-runtime run --image <digest> [resource flags] -- <command> [args...]`. The CLI emits `CommandExecutionResult` JSON on stdout for a completed sandboxed workload and preserves the workload's own exit status; request/policy/backend failures are typed runtime failures rather than synthetic workload results. The command contract has no network-policy field and does not permit Internet egress. There is no released package or HTTP transport yet; consumers may depend only on a future immutable publication, not this branch.
 
 ## Forbidden consumer coupling
 
@@ -170,8 +153,8 @@ Consumers must not:
 
 - import or copy internal Podman/gVisor/containerd modules;
 - shell out directly to Podman/containerd as a substitute for this runtime contract;
-- pass mutable image tags;
-- pass prompt text, message bodies, credentials, arbitrary environment variables, broad host paths, runtime sockets, or host devices through the application-service request;
+- pass mutable image tags or explicit image transports that resolve host paths/alternate stores;
+- pass prompt text, message bodies, credentials, arbitrary environment variables, broad host paths, runtime sockets, or host devices through the application-service or command-execution request;
 - treat runtime evidence as verdict policy;
 - expose the returned service endpoint beyond the reviewed loopback/co-location topology;
 - reuse an expired lease;

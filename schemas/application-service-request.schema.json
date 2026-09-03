@@ -24,9 +24,10 @@
     },
     "image_reference": {
       "type": "string",
+      "description": "Registry/storage image name pinned by lower-case sha256 digest. Explicit Podman image transports and host-backed archive/storage paths are forbidden.",
       "minLength": 73,
       "maxLength": 512,
-      "pattern": "^[^\\s\\u0000-\\u001F\\u007F-\\u009F]+@sha256:[0-9a-f]{64}$",
+      "pattern": "^(?:[^\\s/@:]+(?::[0-9]+)?/)?[^\\s/@:]+(?:/[^\\s/@:]+)*@sha256:[0-9a-f]{64}$",
       "x-cwl-maxUtf8Bytes": 512
     },
     "container_port": {

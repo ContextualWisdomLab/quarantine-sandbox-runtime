@@ -92,16 +92,22 @@ fn request_validation_rejects_schema_identity_and_port_errors() {
 
 #[test]
 fn request_validation_rejects_every_mutable_or_malformed_image_identity_class() {
+    let digest = "a".repeat(64);
     let invalid_images = [
         String::new(),
         "x".repeat(513),
-        format!("localhost/tool @sha256:{}", "a".repeat(64)),
-        format!("localhost/tool\n@sha256:{}", "a".repeat(64)),
+        format!("localhost/tool @sha256:{digest}"),
+        format!("localhost/tool\n@sha256:{digest}"),
         "localhost/tool:latest".to_owned(),
-        format!("@sha256:{}", "a".repeat(64)),
+        format!("@sha256:{digest}"),
         format!("localhost/tool@sha256:{}", "a".repeat(63)),
         format!("localhost/tool@sha256:{}", "A".repeat(64)),
         format!("localhost/tool@sha256:{}", "g".repeat(64)),
+        format!("dir:/tmp/untrusted-image@sha256:{digest}"),
+        format!("docker-archive:/tmp/untrusted-image.tar@sha256:{digest}"),
+        format!("oci-archive:/tmp/untrusted-image.tar@sha256:{digest}"),
+        format!("containers-storage:[overlay@/tmp/foreign-store]cwl/tool@sha256:{digest}"),
+        format!("docker-daemon:cwl/tool@sha256:{digest}"),
     ];
     for image_reference in invalid_images {
         let mut candidate = request();
@@ -111,6 +117,10 @@ fn request_validation_rejects_every_mutable_or_malformed_image_identity_class() 
             Err(ApplicationServiceError::ImageReferenceNotDigestPinned)
         );
     }
+
+    let mut registry_with_port = request();
+    registry_with_port.image_reference = format!("localhost:5000/cwl/tool@sha256:{digest}");
+    assert_eq!(registry_with_port.validate(&policy()), Ok(()));
     assert_eq!(request().validate(&policy()), Ok(()));
 }
 
