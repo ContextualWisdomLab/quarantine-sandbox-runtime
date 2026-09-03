@@ -25,11 +25,11 @@ fn concrete_child_success_preserves_bounded_output() {
 
 #[test]
 fn concrete_child_spawn_failure_is_typed() {
-    let result = BoundedCommandRunner::new(Duration::from_millis(10), 64)
+    let error = BoundedCommandRunner::new(Duration::from_millis(10), 64)
         .run(Path::new("/definitely-missing-qsr-command"), &[])
-        .map(|_| ());
+        .err();
 
-    assert_eq!(result, Err(BoundedCommandError::Spawn));
+    assert_eq!(error, Some(BoundedCommandError::Spawn));
 }
 
 #[test]
@@ -38,20 +38,20 @@ fn concrete_child_timeout_is_killed_and_reaped() {
     // would create a grandchild that killing the supervised shell cannot reap.
     let args = vec!["-c".to_owned(), "while :; do :; done".to_owned()];
 
-    let result = BoundedCommandRunner::new(Duration::from_millis(1), 64)
+    let error = BoundedCommandRunner::new(Duration::from_millis(1), 64)
         .run(Path::new("/bin/sh"), &args)
-        .map(|_| ());
+        .err();
 
-    assert_eq!(result, Err(BoundedCommandError::Timeout));
+    assert_eq!(error, Some(BoundedCommandError::Timeout));
 }
 
 #[test]
 fn concrete_child_output_overflow_is_killed_and_reaped() {
     let args = vec!["-c".to_owned(), "printf 'overflow'".to_owned()];
 
-    let result = BoundedCommandRunner::new(Duration::from_secs(1), 4)
+    let error = BoundedCommandRunner::new(Duration::from_secs(1), 4)
         .run(Path::new("/bin/sh"), &args)
-        .map(|_| ());
+        .err();
 
-    assert_eq!(result, Err(BoundedCommandError::OutputLimit));
+    assert_eq!(error, Some(BoundedCommandError::OutputLimit));
 }
