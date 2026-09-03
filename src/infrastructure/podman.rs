@@ -716,12 +716,29 @@ fn effective_lsm_verified(
 
     if info.host.security.apparmor_enabled {
         let inspect_profile = container.apparmor_profile.trim();
+        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+            return false;
+        };
         return !inspect_profile.is_empty()
             && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_label;
+            && inspect_profile == runtime_profile;
     }
 
     false
+}
+
+fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
+    let normalized = runtime_label.trim();
+    if normalized.is_empty() || normalized.eq_ignore_ascii_case("unconfined") {
+        return None;
+    }
+
+    let Some((profile, mode_with_suffix)) = normalized.rsplit_once(" (") else {
+        return Some(normalized);
+    };
+    let mode = mode_with_suffix.strip_suffix(')')?;
+    let profile = profile.trim();
+    (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
