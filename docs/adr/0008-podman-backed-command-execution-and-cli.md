@@ -1,7 +1,25 @@
 # ADR 0008: Podman-backed command execution and a CLI transport
 
-- **Status:** Accepted
+- **Status:** Accepted, with a superseding correction below (2026-09-03)
 - **Date:** 2026-09-02
+
+**Correction (2026-09-03):** the Decision section's point 2 below, as originally written and merged,
+described `run_command_at` falling back to Podman's static `container inspect` record
+(`statically_declared_lsm`) when a fast-exiting workload leaves no live `podman top` evidence, and
+called that an accepted, equally-valid source of P0 verification. That design was reversed in the same
+PR stack, on the same day, once a security review (`tests/podman_command_execution_live_attestation.rs`,
+added by commit `957034f`, fixed by `08db9d8`) established that static configuration is Podman's record
+of what was *requested*, not positive proof of the effective per-process seccomp/LSM/capability state --
+a fast-exiting one-shot workload is exactly the case an attacker-controlled or buggy image could exploit
+to have its confinement silently unverified while still reporting a plausible pass. `run_command_at` now
+fails closed (`BackendCommandFailed { operation: "process_security_top" }` via the ordinary
+`checked_output` path) when live evidence is unavailable, matching the service-lease path
+(`verify_effective_isolation`), which never had a static-fallback branch to begin with. The now-dead
+`statically_declared_lsm` function was removed. Point 2's own rationale for *why* command execution must
+tolerate a workload finishing before `podman top` samples it is unchanged and still correct -- only the
+originally-chosen response to that race (accept weaker evidence) was wrong; failing closed is the
+correction, not a retraction of the underlying problem statement. Read point 2 below as historical
+context for the race this ADR identified, not as this repository's current verification behavior.
 
 ## Context
 
