@@ -570,11 +570,13 @@ impl RootlessPodmanAdapter {
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
-                let _ = self.cleanup_created_command_container(&sandbox_name);
-                return Err(CommandExecutionError::Backend(
-                    ApplicationServiceError::MalformedIsolationInspection {
-                        operation: "container_create",
-                    },
+                return Err(self.cleanup_or_report(
+                    &sandbox_name,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::MalformedIsolationInspection {
+                            operation: "container_create",
+                        },
+                    ),
                 ));
             }
         };
@@ -1148,20 +1150,18 @@ fn effective_lsm_verified(
 
     if info.host.security.apparmor_enabled {
         let inspect_profile = container.apparmor_profile.trim();
-        // A confined AppArmor process label reads `<profile> (<mode>)` (mode
-        // is `enforce` or `complain`) from `/proc/<pid>/attr/current`, while
-        // `podman container inspect` records only the bare profile name.
-        // Complain mode logs policy violations instead of enforcing them, so
-        // a profile-name match alone is not sufficient: an explicit mode
-        // suffix must name "enforce", not merely differ from "unconfined".
-        // No suffix at all (older Podman/kernel combinations may omit it)
-        // is treated as already-enforcing, matching this function's prior
-        // behavior for every fixture that never included one.
-        let (runtime_profile, mode) = match runtime_label.split_once(" (") {
-            Some((profile, mode)) => (profile, mode.strip_suffix(')').unwrap_or(mode)),
-            None => (runtime_label, "enforce"),
+        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
+        // context as `<profile> (<mode>)`. A bare profile name is not positive
+        // enforcement evidence, and complain mode audits without enforcing.
+        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
+            return false;
         };
+        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
+            return false;
+        };
+        let runtime_profile = runtime_profile.trim();
         return mode.eq_ignore_ascii_case("enforce")
+            && !runtime_profile.is_empty()
             && !inspect_profile.is_empty()
             && !inspect_profile.eq_ignore_ascii_case("unconfined")
             && inspect_profile == runtime_profile;
