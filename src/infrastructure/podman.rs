@@ -579,13 +579,10 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        // Cleanup precedence is covered by focused REDs for start failure,
-        // effective-isolation failure, nonzero `podman logs`, and log timeout.
-        // `run_command_at_reports_a_genuine_backend_invocation_failure_during_wait`
-        // remains the one deliberate exception: its fake backend deletes its own
-        // executable, so cleanup fails for the same unreachable-backend cause and
-        // the original wait error is more informative. Do not generalize
-        // cleanup_or_report to `wait_for_command` without new test evidence.
+        // Once a command container exists, every later failure must attempt
+        // cleanup. If cleanup cannot be proven, leak risk takes precedence over
+        // the earlier backend/isolation/log error and the call fails closed with
+        // `CleanupFailed`.
         if let Err(error) = self.checked_output(
             "container_start",
             &["start".to_owned(), sandbox_name.clone()],
@@ -601,21 +598,27 @@ impl RootlessPodmanAdapter {
 
         let (exit_code, timed_out) = match self.wait_for_command(&sandbox_name, request) {
             Ok(outcome) => outcome,
-            Err(error) => {
-                let _ = self.cleanup_created_command_container(&sandbox_name);
-                return Err(error);
-            }
+            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error)),
         };
 
         let logs_runner =
             BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
-        let logs_outcome = logs_runner
-            .run_to_completion(&self.program, &["logs".to_owned(), sandbox_name.clone()])
-            .map_err(|_| {
-                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                    operation: "container_logs",
-                })
-            })?;
+        let logs_outcome = match logs_runner.run_to_completion(
+            &self.program,
+            &["logs".to_owned(), sandbox_name.clone()],
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return Err(self.cleanup_or_report(
+                    &sandbox_name,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "container_logs",
+                        },
+                    ),
+                ));
+            }
+        };
         if logs_outcome.timed_out {
             // The log driver failing to hand back already-written output
             // promptly is an infrastructure fault, not a fact about the
