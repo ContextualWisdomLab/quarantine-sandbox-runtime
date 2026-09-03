@@ -139,7 +139,9 @@ jobs:
           toolchain: 1.97.1
       - name: Capture hosted negative LSM capability evidence
         run: |
-          test "$(podman --version)" = "podman version 5.8.4"
+          # The current ubuntu-24.04 image exposes distribution Podman 4.9.3.
+          # Version identity is recorded separately from effective LSM proof below.
+          test "$(podman --version)" = "podman version 4.9.3"
           podman info --format json > podman-info.json
           python3 - <<'PY'
           import json
