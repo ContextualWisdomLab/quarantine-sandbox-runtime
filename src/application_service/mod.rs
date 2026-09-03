@@ -43,7 +43,7 @@ pub struct ApplicationServiceRequest {
     pub schema_version: String,
     /// Opaque consumer idempotency and correlation identifier.
     pub request_id: String,
-    /// OCI image reference pinned to an immutable lower-case SHA-256 digest.
+    /// Registry image reference pinned to an immutable lower-case SHA-256 digest.
     pub image_reference: String,
     /// TCP port exposed by the application inside the sandbox.
     pub container_port: u16,
@@ -486,9 +486,41 @@ fn is_digest_pinned_image_reference(value: &str) -> bool {
     let Some((repository, digest)) = value.rsplit_once("@sha256:") else {
         return false;
     };
-    !repository.is_empty()
+    registry_repository_is_safe(repository)
         && digest.len() == 64
         && digest.bytes().all(|byte| {
             byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
         })
+}
+
+fn registry_repository_is_safe(repository: &str) -> bool {
+    if repository.is_empty()
+        || repository.contains('@')
+        || repository.contains("//")
+        || repository.starts_with('/')
+        || repository.ends_with('/')
+    {
+        return false;
+    }
+
+    let mut components = repository.split('/');
+    let Some(first_component) = components.next() else {
+        return false;
+    };
+    if !registry_authority_or_name_is_safe(first_component) {
+        return false;
+    }
+    components.all(|component| {
+        !component.is_empty()
+            && component != "."
+            && component != ".."
+            && !component.contains(':')
+    })
+}
+
+fn registry_authority_or_name_is_safe(component: &str) -> bool {
+    let Some((host, port)) = component.rsplit_once(':') else {
+        return !component.is_empty();
+    };
+    !host.is_empty() && !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())
 }
