@@ -137,9 +137,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
         with:
           toolchain: 1.97.1
-      - name: Verify pinned runner Podman contract
+      - name: Verify supported hosted Podman contract
         run: |
-          test "$(podman --version)" = "podman version 5.8.4"
+          # GitHub rolled ubuntu-24.04 back from Podman 5.8.4 to the
+          # distribution-validated 4.9.3 beginning 2026-09-01. Keep the
+          # hosted acceptance explicit; effective isolation is proven below.
+          test "$(podman --version)" = "podman version 4.9.3"
           test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
       - name: Pre-pull immutable fixture outside the application launch path
         run: |
