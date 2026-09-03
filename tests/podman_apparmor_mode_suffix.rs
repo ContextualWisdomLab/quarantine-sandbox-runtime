@@ -116,3 +116,26 @@ fn apparmor_complain_mode_never_counts_as_effective_confinement() {
         "AppArmor complain mode logs violations but does not enforce the profile and must fail closed"
     );
 }
+
+#[test]
+fn bare_apparmor_profile_without_effective_mode_is_not_positive_proof() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener address should resolve")
+        .port();
+    let program = write_fake_podman(ready_port, "containers-default");
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
+
+    let _ = fs::remove_file(program);
+    drop(listener);
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "lsm",
+        }),
+        "AppArmor /proc task context normally carries an explicit mode; a bare profile name is insufficient positive evidence of enforcement"
+    );
+}
