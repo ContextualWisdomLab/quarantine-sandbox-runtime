@@ -566,7 +566,10 @@ impl RootlessPodmanAdapter {
         ];
         create_args.extend(request.command.iter().cloned());
 
-        let create_output = self.checked_output("container_create", &create_args)?;
+        let create_output = match self.checked_output("container_create", &create_args) {
+            Ok(output) => output,
+            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error.into())),
+        };
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
@@ -581,7 +584,7 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        // Once a command container exists, every later failure must attempt
+        // Once a command container might exist, every later failure must attempt
         // cleanup. If cleanup cannot be proven, leak risk takes precedence over
         // the earlier backend/isolation/log error and the call fails closed with
         // `CleanupFailed`.
@@ -863,9 +866,14 @@ impl RootlessPodmanAdapter {
         &self,
         sandbox_name: &str,
     ) -> Result<(), ApplicationServiceError> {
+        // `--ignore` makes cleanup idempotent: a failed create may or may not
+        // have persisted the deterministic name, and absence is also a proven
+        // leak-free terminal state. Podman documents `rm --ignore` for exactly
+        // this absent-container case.
         let remove_args = [
             "rm".to_owned(),
             "--force".to_owned(),
+            "--ignore".to_owned(),
             sandbox_name.to_owned(),
         ];
         if self.command_succeeded(&remove_args) {
