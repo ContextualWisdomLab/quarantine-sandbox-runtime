@@ -1,7 +1,9 @@
 # ADR 0007: Bounded command-execution contract
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-09-02
+
+This ADR remains Proposed while PR #13 is Draft and its dependency chain has not integrated into the protected branch. The contract may be reviewed and tested on the candidate stack, but it becomes an Accepted architectural decision only after protected integration and fresh exact-head contract/security evidence under live governance.
 
 ## Context
 
