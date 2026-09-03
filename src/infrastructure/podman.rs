@@ -579,12 +579,20 @@ impl RootlessPodmanAdapter {
             }
         };
 
+        // Only this branch (container_start) has a regression test requiring
+        // a cleanup failure to be surfaced over the original error --
+        // `run_command_at_reports_a_genuine_backend_invocation_failure_during_wait`
+        // deliberately keeps the original error even when the fake backend's
+        // self-deleting-binary technique makes cleanup fail too (both for
+        // the same underlying reason, an unreachable backend, so a distinct
+        // `CleanupFailed` there would be less informative, not more). Do not
+        // generalize this to the other branches below without new test
+        // evidence for each one.
         if let Err(error) = self.checked_output(
             "container_start",
             &["start".to_owned(), sandbox_name.clone()],
         ) {
-            let _ = self.cleanup_created_command_container(&sandbox_name);
-            return Err(error.into());
+            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
         if let Err(error) =
@@ -618,6 +626,19 @@ impl RootlessPodmanAdapter {
             let _ = self.cleanup_created_command_container(&sandbox_name);
             return Err(CommandExecutionError::Backend(
                 ApplicationServiceError::BackendCommandTimedOut {
+                    operation: "container_logs",
+                },
+            ));
+        }
+        // A `None` status only occurs on the timeout/output-budget kill
+        // paths already handled above (or by the truncation flags on
+        // success); anything else is `podman logs` itself failing (e.g. the
+        // log driver or container state is broken) and is an infrastructure
+        // fault, not empty workload output.
+        if !logs_outcome.status.is_none_or(|status| status.success()) {
+            let _ = self.cleanup_created_command_container(&sandbox_name);
+            return Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendCommandFailed {
                     operation: "container_logs",
                 },
             ));
@@ -784,47 +805,32 @@ impl RootlessPodmanAdapter {
             "capamb".to_owned(),
             "label".to_owned(),
         ];
-        let live_process = self
-            .command_runner()
-            .run(&self.program, &process_args)
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| parse_process_security_top(&output.stdout).ok());
+        // A one-shot command can exit before `top` samples it, unlike the
+        // long-lived service-lease path this mirrors (`verify_effective_isolation`),
+        // which never falls back either. Static `container inspect` configuration
+        // proves what was requested, not the effective per-process seccomp/LSM/
+        // capability state the release boundary requires positive proof of --
+        // fail closed instead of downgrading to it when live evidence is gone.
+        let live_process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&live_process_output.stdout)?;
 
-        match live_process {
-            Some(process) => {
-                require_control(
-                    "all_capabilities_dropped",
-                    container.effective_caps.is_empty()
-                        && container.bounding_caps.is_empty()
-                        && process_capabilities_empty(&process),
-                )?;
-                require_control(
-                    "seccomp",
-                    !security_options
-                        .iter()
-                        .any(|option| option == "seccomp=unconfined")
-                        && matches!(
-                            process.seccomp.to_ascii_lowercase().as_str(),
-                            "filter" | "strict"
-                        ),
-                )?;
-                require_control("lsm", effective_lsm_verified(info, &container, &process))?;
-            }
-            None => {
-                require_control(
-                    "all_capabilities_dropped",
-                    container.effective_caps.is_empty() && container.bounding_caps.is_empty(),
-                )?;
-                require_control(
-                    "seccomp",
-                    !security_options
-                        .iter()
-                        .any(|option| option == "seccomp=unconfined"),
-                )?;
-                require_control("lsm", statically_declared_lsm(info, &container))?;
-            }
-        }
+        require_control(
+            "all_capabilities_dropped",
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
+        )?;
+        require_control(
+            "seccomp",
+            !security_options
+                .iter()
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(
+                    process.seccomp.to_ascii_lowercase().as_str(),
+                    "filter" | "strict"
+                ),
+        )?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
         Ok(())
     }
 
@@ -841,6 +847,21 @@ impl RootlessPodmanAdapter {
             Ok(())
         } else {
             Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    /// Attempt cleanup for a failed command-execution attempt and return the
+    /// error to surface: a failed cleanup means a container is leaked, which
+    /// must never be hidden behind `original`, the earlier backend error
+    /// that triggered this cleanup in the first place.
+    fn cleanup_or_report(
+        &self,
+        sandbox_name: &str,
+        original: CommandExecutionError,
+    ) -> CommandExecutionError {
+        match self.cleanup_created_command_container(sandbox_name) {
+            Ok(()) => original,
+            Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
         }
     }
 
@@ -1132,33 +1153,23 @@ fn effective_lsm_verified(
         let inspect_profile = container.apparmor_profile.trim();
         // A confined AppArmor process label reads `<profile> (<mode>)` (mode
         // is `enforce` or `complain`) from `/proc/<pid>/attr/current`, while
-        // `podman container inspect` records only the bare profile name; only
-        // the profile name is compared.
-        let runtime_profile = runtime_label
-            .split_once(" (")
-            .map_or(runtime_label, |(profile, _mode)| profile);
-        return !inspect_profile.is_empty()
+        // `podman container inspect` records only the bare profile name.
+        // Complain mode logs policy violations instead of enforcing them, so
+        // a profile-name match alone is not sufficient: an explicit mode
+        // suffix must name "enforce", not merely differ from "unconfined".
+        // No suffix at all (older Podman/kernel combinations may omit it)
+        // is treated as already-enforcing, matching this function's prior
+        // behavior for every fixture that never included one.
+        let (runtime_profile, mode) = match runtime_label.split_once(" (") {
+            Some((profile, mode)) => (profile, mode.strip_suffix(')').unwrap_or(mode)),
+            None => (runtime_label, "enforce"),
+        };
+        return mode.eq_ignore_ascii_case("enforce")
+            && !inspect_profile.is_empty()
             && !inspect_profile.eq_ignore_ascii_case("unconfined")
             && inspect_profile == runtime_profile;
     }
 
-    false
-}
-
-/// Weaker fallback for [`effective_lsm_verified`] when no live process
-/// evidence is available (the command already exited): confirm Podman's own
-/// static record names a real, non-`unconfined` confinement profile for the
-/// backend's enabled LSM, without cross-checking it against a live process
-/// label that no longer exists to inspect.
-fn statically_declared_lsm(info: &PodmanInfo, container: &ContainerInspection) -> bool {
-    if info.host.security.selinux_enabled {
-        let label = container.process_label.trim();
-        return !label.is_empty() && !label.eq_ignore_ascii_case("unconfined");
-    }
-    if info.host.security.apparmor_enabled {
-        let profile = container.apparmor_profile.trim();
-        return !profile.is_empty() && !profile.eq_ignore_ascii_case("unconfined");
-    }
     false
 }
 
