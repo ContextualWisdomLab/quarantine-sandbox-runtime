@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-01 against parent PR #1 exact head `c78fd491f84fae773b3691b10b6a0c21940808d5` and stacked PR #6 exact head `b9ce1ea86c8440157c7a78d6c30e91649d8895fd`. The stack is reconciled onto the current parent security/wire contract and now includes caller-scoped lease ownership plus starvation-resistant bounded expiry cleanup. Protected `develop` remains shipped authority until protected integration. Hosted evidence must be generated for the unchanged current heads; predecessor results do not transfer.
+Last reviewed on 2026-09-04 against parent PR #1 exact head `06b39670ba5a434e8e34aac6f5b7fa2b6b75fe87` and stacked PR #6 source/restack head `60440480ba779599a7dbe917d19ec8e0e4ff7749`. The immediately following ledger commit changes documentation only. The stack is non-force reconciled onto the current parent security/wire contract and includes caller-scoped lease ownership plus starvation-resistant bounded expiry cleanup. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority until protected integration. Hosted evidence must be generated for unchanged current heads; predecessor results do not transfer.
 
 ## Product responsibility
 
@@ -25,9 +25,9 @@ Core `sandbox_execution` owns isolation policy, resource bounds, runtime lease m
 
 | Capability | Current evidence | Status | Required action |
 | --- | --- | --- | --- |
-| Immutable workload identity | `ApplicationServiceRequest` accepts digest-pinned lower-case SHA-256 OCI references; Podman uses no-pull launch semantics. | Parent PR | If image admission is added, make it a separate trusted operation and retain digest identity. |
-| Rootless execution | Podman adapter verifies rootless backend state and fails closed otherwise. | Parent PR | Keep real rootless backend acceptance on every release head. |
-| Filesystem isolation | Read-only root filesystem, bounded noexec/nosuid/nodev tmpfs, image volumes ignored, no arbitrary host mount request. | Parent PR | Add only typed reviewed read-only input mounts when a buyer flow requires them. |
+| Immutable workload identity | Parent PR #1 now rejects explicit `containers/image` transports that can redirect Podman to host-backed directories, archives, alternate local stores, or another runtime authority. RED `02ee218a…` covers `dir:`, `docker-archive:`, `oci-archive:`, `docker-daemon:`, and `containers-storage:`; repair `6df890ca…` preserves normal registry names with optional numeric ports; schema/docs/traceability are aligned. PR #6 inherited that repair through merge-base `06b39670…`. | Corrected on parent and inherited by PR #6; exact-head proof required | Keep image import/admission separate from launch; never reintroduce host-path/alternate-store transports or implicit pulls. |
+| Rootless execution | Podman adapter verifies rootless backend state and fails closed otherwise. Parent hosted contract now explicitly tests Ubuntu 24.04 distribution Podman 4.9.3. | Parent PR | Keep real rootless backend acceptance on every release head. |
+| Filesystem isolation | Read-only root filesystem, bounded noexec/nosuid/nodev tmpfs, image volumes ignored, no arbitrary host mount request; host-backed image transports are rejected before launch. | Parent PR | Add only typed reviewed read-only input mounts when a buyer flow requires them. |
 | Privilege isolation | Capabilities dropped, no-new-privileges, isolated user/process-related namespaces, numeric non-root identity. | Parent PR | Preserve effective-runtime verification rather than relying only on argv construction. |
 | Network isolation | Per-sandbox internal DNS-disabled network and loopback-only host publication. | Parent PR | Controlled egress must be a separate profile and must not silently enable Internet access. |
 | Credential isolation | No consumer/provider credentials, arbitrary environment, runtime sockets, host devices, or ambient proxy variables enter the P0 workload contract. | Parent PR | Add a task-scoped secret broker only after an accepted ADR and explicit consumer authorization. |
@@ -63,28 +63,28 @@ Current integration rules:
 - no cross-service application-table SQL;
 - Context Fabric owner-path PRs/issues are inventoried read-only and receive exact evidence/acceptance criteria rather than quarantine-writer source changes.
 
-At this review, `context-graph-contracts` still has an unreleased stacked Context Assertion/CloudEvent contract line. PR #21 exact head `a3a3125619ed6e777818811b1c0b97f3a4574b73` repairs structured CloudEvent envelope binding but remains Draft with current hosted lanes non-passing. `enterprise-architecture-core` PR #40 exact head `2b14e008a11712c840d0bf6c8c5d3a1d6e9ec1ba` enforces released Context Graph bindings for foreign projections but does not yet list `quarantine-sandbox-runtime` as a separate owner projection. Both repositories remain read-only here; the Context Fabric owner path must add the quarantine runtime only after the shared contract is released and pinned. Quarantine integration remains fail-closed until then.
+Previously observed Context Fabric PR numbers and heads are historical only until refreshed by the dedicated owner. This writer does not consume their mutable branches as production dependencies. Quarantine integration remains fail-closed until a compatible shared contract is immutably published and pinned.
 
 ## Consumer integrations
 
 | Consumer | Authority retained by consumer | Runtime integration state |
 | --- | --- | --- |
-| Wardnet | gateway/SOC policy, maliciousness verdict, incident, quarantine/block/review, notification, retention | Runtime contract is consumer-neutral; Wardnet issue #38 remains the consumer owner path and must consume published runtime evidence without moving verdict authority here. |
+| Wardnet | gateway/SOC policy, maliciousness verdict, incident, quarantine/block/review, notification, retention | Runtime contract is consumer-neutral; Wardnet owner path must consume published runtime evidence without moving verdict authority here. |
 | contextual-orchestrator | LLM/model routing, chat, Agent/task/tool policy, caller authorization, application selection, secrets, user-visible actions | Issue #991 owns the ACL integration after a protected immutable runtime release. Direct Podman/containerd calls and sibling source copies are not acceptable. |
 
 The runtime currently exposes a Rust library and loopback lease topology. It does not yet publish an authenticated network process boundary or generated Python consumer. A future transport must derive `LeaseOwnerId` from verified caller context, keep idempotency scope stable, return bounded stable wire errors, validate lease/cleanup semantics, and define co-location/network topology explicitly.
 
 ## Verification and release state
 
-- Parent PR #1 current exact head is `c78fd491f84fae773b3691b10b6a0c21940808d5`; CI, Security Scan, and SAST were queued at the latest read, so the head is non-passing despite earlier real rootless-Podman evidence.
-- PR #1 has no formal approving review at the latest read and remains Draft.
-- PR #6 is reconciled on that exact parent. Its current branch includes RED commit `008209f0cf7152f06053f44d65662e4e023787ba` exposing cleanup starvation and causal repair commit `410fce1231c0bedd47e6a4c82ea330825977c2f4`, followed by documentation refresh. Current exact-head CI must prove the new regression and implementation together; predecessor evidence does not transfer.
+- Parent PR #1 exact head is `06b39670ba5a434e8e34aac6f5b7fa2b6b75fe87`, still Draft. Exact-head CI `33797817805` and associated Security/SAST/Scorecard/OSV evidence were queued at the latest read, so the head is non-passing despite earlier real rootless-Podman evidence.
+- PR #1 has no formal approving review at the latest read.
+- PR #6 was non-force restacked with merge commit `60440480ba779599a7dbe917d19ec8e0e4ff7749`; compare against parent `06b39670…` proves `behind_by=0` and exact merge-base equality. Its unique caller ownership/idempotency/cleanup-fairness files remain the only semantic delta over the parent. CI run `33798281628` is queued and therefore non-passing.
 - Active organization rules require qualifying review, resolved threads, and central required workflows. Admin/bypass capability is not merge evidence.
 - No release exists. Version/release claims remain premature until one integrated protected head passes CI, security, SAST, complete coverage/docstrings, real isolation E2E, SBOM/provenance, review, rollback/recovery and protected-merge gates together.
 
 ## Next bounded slices
 
-1. Obtain exact-head GREEN for PR #6 cleanup fairness and caller-scoped lease ownership without changing a clean head merely to retrigger queued jobs.
+1. Obtain exact-head GREEN for PR #6 cleanup fairness, caller-scoped lease ownership, and inherited image-transport rejection without changing a clean head merely to retrigger queued jobs.
 2. Drain parent PR #1 gate/review findings and merge only through protected policy; then revalidate the stacked lease-ownership slice against the protected parent.
 3. Implement one authenticated versioned consumer transport/binding with stable wire errors and caller identity mapping.
 4. Add durable restart/orphan reclamation, lease journal, admission/resource reservation, and crash-recovery evidence.
