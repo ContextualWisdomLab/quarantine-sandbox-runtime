@@ -29,7 +29,9 @@ fn concrete_child_spawn_failure_is_typed() {
 
 #[test]
 fn concrete_child_timeout_is_killed_and_reaped() {
-    let args = vec!["-c".to_owned(), "sleep 1".to_owned()];
+    // Keep the workload inside the shell process itself. Spawning `sleep` here
+    // would create a grandchild that killing the supervised shell cannot reap.
+    let args = vec!["-c".to_owned(), "while :; do :; done".to_owned()];
 
     let error = BoundedCommandRunner::new(Duration::from_millis(1), 64)
         .run(Path::new("/bin/sh"), &args)
