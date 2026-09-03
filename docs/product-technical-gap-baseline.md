@@ -6,7 +6,7 @@ Last reviewed on 2026-09-03 KST from fresh GitHub state and the current candidat
 
 - Default/integration branch remains `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` at this review point.
 - GitHub Releases: **0**. Cargo version `0.1.0` is development metadata, not a shipped release.
-- Organization ruleset `18156473` follows `~DEFAULT_BRANCH`; branch/review governance must be reread before every merge.
+- Organization ruleset `18156473` follows `~DEFAULT_BRANCH`; it currently requires one approving review, resolved review threads, nine central required workflows, and non-fast-forward/deletion protection. Branch/review governance must be reread before every merge.
 - Queued, skipped, cancelled, absent, predecessor-head, static-only, local-only, or unassigned-runner results are non-passing evidence.
 
 Current dependency order is:
@@ -17,10 +17,10 @@ Current dependency order is:
  -> #9  effective isolation             @ 693ee6c096b53f562fb106a3bcb9fb9efa092c8f
  -> #10 release evidence                @ fce2413c9d32bf0363bb38ff7669d6f4ee312738
  -> #13 bounded command contract        @ db5433781be679e7a4239f88b9c435ad7bd7f64c
- -> #14 Podman command backend and CLI  @ 964f2a5c0d6770df294edb3d6c8c820e77355ac0
+ -> #14 Podman command backend and CLI  @ d9c8aa94f1edfd9576b7d9f3e05c65b3127c9898
 ```
 
-The stack remains Draft and dependency-ordered. No predecessor check/review evidence transfers across head/base movement. ADR-0006, ADR-0007, and ADR-0008 remain **Proposed** while unmerged and without protected-integration/current-head acceptance.
+The stack remains Draft and dependency-ordered. #14 non-force extends predecessor `964f2a5c0d6770df294edb3d6c8c820e77355ac0`; its intervening delta strengthens the partial-create cleanup regression and refreshes this ledger. No predecessor check/review evidence transfers across head/base movement. ADR-0006, ADR-0007, and ADR-0008 remain **Proposed** while unmerged and without protected-integration/current-head acceptance.
 
 ## Product responsibility and Context Map
 
@@ -46,7 +46,7 @@ Target bounded contexts remain Workload Admission, Isolation Policy, Runtime Pro
 | Crash/restart recovery | No durable lease journal/orphan reconciliation. | Buyer gap: durable Session Lifecycle/Recovery plus crash/orphan E2E. |
 | Stronger backends | No production gVisor/containerd/microVM adapter. | Add behind the same verified-isolation ACL only when justified. |
 
-#9 exact head `693ee6c096b53f562fb106a3bcb9fb9efa092c8f` remains queued before checkout. Hosted admission is owned by `.github#712`; reviewed positive-LSM capacity is owned by `.github#1590`.
+#9 exact head `693ee6c096b53f562fb106a3bcb9fb9efa092c8f` has CI `33731009971`. Its positive-LSM job `100570709545` requests `[self-hosted, linux, cwl-hostile-workload, selinux]`; verify/coverage/branch-coverage/negative-rootless-AppArmor use `ubuntu-24.04`. All five remain pre-checkout with `runner_id=0` and `steps=[]`. Hosted admission is owned by `.github#712`; reviewed positive-LSM capacity is owned by `.github#1590`.
 
 ## Bounded command execution
 
@@ -62,11 +62,13 @@ Current #14 source lineage contains three causal repairs with focused regression
 
 1. `tests/podman_command_execution_wait_status_red.rs` covers a successful sandbox whose **administrative** `podman wait` process exits nonzero while printing a plausible workload status. Production now requires a successful wait wrapper, rejects administrative output truncation, and does not call `podman logs` after untrustworthy wait evidence. The post-kill wait uses the same bounded checked-output failure contract.
 2. `tests/podman_command_execution_wait_parse_red.rs` covers successful wrapper execution with malformed wait stdout. `parse_wait_exit_code` no longer fabricates `-1`; malformed or missing text is `MalformedIsolationInspection`, with ordinary and post-kill operation identity kept distinct.
-3. `tests/podman_command_execution_create_failure_cleanup_red.rs` covers a `podman create` process that may have persisted the deterministic sandbox name and then exits nonzero. Production now attempts cleanup even on create failure and uses `podman rm --force --ignore <sandbox>`. Podman's documented `--ignore` semantics make “absent because creation never persisted” and “present then removed” both idempotent leak-free terminal states, while a cleanup command failure still surfaces `CleanupFailed`.
+3. `tests/podman_command_execution_create_failure_cleanup_red.rs` now covers both a `podman create` process that may persist the deterministic sandbox name before failing and cleanup failure on that path. Production attempts idempotent cleanup with `podman rm --force --ignore <sandbox>` even when create fails. Absence and successful removal are leak-free terminal states; cleanup failure surfaces `CleanupFailed`; a failed create must never advance to `podman start`.
 
 Existing cleanup regressions also cover malformed create output, start/isolation/log failures, log timeout/status failure, and cleanup-error precedence. A runtime administrative failure must never be recast as workload output.
 
-Exact #14 source head `964f2a5c0d6770df294edb3d6c8c820e77355ac0` produced CI `33749051365`: verify `100628145392`, branch-coverage `100628145605`, positive-LSM `100628145665`, coverage `100628145713`, and negative-rootless-AppArmor `100628145774`. Every job is queued before checkout with `steps=[]` and no runner identity. This is non-passing control-plane evidence, not a source-test result. The connected execution environment also could not resolve `github.com`, so no independent local clone/test result is promoted as evidence.
+Current #14 exact head `d9c8aa94f1edfd9576b7d9f3e05c65b3127c9898` has CI `33749366734`: verify `100629135140`, branch-coverage `100629135147`, negative-rootless-AppArmor `100629135208`, coverage `100629135307`, and positive-LSM `100629135461`. Every job is still queued before checkout with `steps=[]`, no runner identity, and therefore no executable source evidence. The positive-LSM job requests `[self-hosted, linux, cwl-hostile-workload, selinux]`; the remaining jobs request `ubuntu-24.04`.
+
+Predecessor CI `33749051365` on `964f2a5c...` completed as **cancelled** with all five jobs still `runner_id=0` and `steps=[]`. It is historical only and cannot transfer GREEN to `d9c8aa94...`. The central owner paths `.github#712` and `.github#1590` have fresh exact quarantine specimens; leaf source churn and gate weakening are prohibited.
 
 ## Artifact analysis
 
@@ -108,10 +110,10 @@ Quarantine may project runtime/backend identity, technology/provider/version, li
 
 1. Restore hosted runner admission through `.github#712` and execute current exact-head repository gates instead of treating pre-checkout queueing as GREEN.
 2. Provide disposable positive-LSM runtime capacity through `.github#1590`, binding effective LSM/seccomp/capability/resource/cleanup evidence to one exact candidate.
-3. Execute the #14 wait-evidence and partial-create cleanup regressions against the unchanged source lineage; repair any new causal failure rather than weakening the evidence contract.
+3. Execute the #14 wait-evidence and partial-create cleanup regressions against the current exact source lineage; repair any new causal failure rather than weakening the evidence contract.
 4. Drain `#1 -> #6 -> #9 -> #10 -> #13 -> #14` by exact RED→causal GREEN→normal merge→non-force descendant restack, preserving unique deltas and reacquiring evidence after every movement.
 5. Complete the first immutable release from one protected integrated source identity, then bump Wardnet/contextual-orchestrator/central-review consumers to that released contract.
 6. Add durable authenticated admission/session/recovery/idempotency plus orphan reconciliation for remote/multi-process operation.
 7. Add real artifact analyzers and dynamic detonation profiles with immutable chain-of-custody evidence rather than expanding consumer verdict authority into this runtime.
 
-No item above is complete from documentation, queued workflows, local-only results, or open-PR artifacts alone.
+No item above is complete from documentation, queued/cancelled workflows, local-only results, or open-PR artifacts alone.
