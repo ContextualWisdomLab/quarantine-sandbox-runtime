@@ -682,10 +682,10 @@ impl RootlessPodmanAdapter {
     ///
     /// On a wall-clock timeout the sandbox is force-killed and waited on
     /// again (bounded by the adapter's ordinary short administrative
-    /// timeout) to obtain the post-kill exit code -- `podman wait`'s stdout
-    /// is trusted either way, rather than a wrapper CLI's own process exit
-    /// status (observed to not reliably mirror the container's exit code
-    /// for an already-running container against Podman 6.1.0).
+    /// timeout) to obtain the post-kill exit code. The `podman wait` process
+    /// itself must succeed and stay within its tiny output budget before its
+    /// stdout is accepted as workload evidence; wrapper failure is a backend
+    /// failure, never a workload exit status.
     fn wait_for_command(
         &self,
         sandbox_name: &str,
@@ -702,19 +702,42 @@ impl RootlessPodmanAdapter {
             })?;
 
         if !wait_outcome.timed_out {
-            return Ok((parse_wait_exit_code(&wait_outcome.stdout), false));
+            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendOutputLimitExceeded {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            match wait_outcome.status {
+                Some(status) if status.success() => {
+                    return Ok((parse_wait_exit_code(&wait_outcome.stdout), false));
+                }
+                Some(_) => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                None => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+            }
         }
 
         // Best effort: the container may already be exiting on its own.
         let _ = self.command_succeeded(&["kill".to_owned(), sandbox_name.to_owned()]);
         let post_kill = self
-            .command_runner()
-            .run_to_completion(&self.program, &["wait".to_owned(), sandbox_name.to_owned()])
-            .map_err(|_| {
-                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                    operation: "command_wait_after_kill",
-                })
-            })?;
+            .checked_output(
+                "command_wait_after_kill",
+                &["wait".to_owned(), sandbox_name.to_owned()],
+            )
+            .map_err(CommandExecutionError::Backend)?;
         Ok((parse_wait_exit_code(&post_kill.stdout), true))
     }
 
