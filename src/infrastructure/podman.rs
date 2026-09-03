@@ -711,7 +711,7 @@ impl RootlessPodmanAdapter {
             }
             match wait_outcome.status {
                 Some(status) if status.success() => {
-                    return Ok((parse_wait_exit_code(&wait_outcome.stdout), false));
+                    return Ok((parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?, false));
                 }
                 Some(_) => {
                     return Err(CommandExecutionError::Backend(
@@ -738,7 +738,10 @@ impl RootlessPodmanAdapter {
                 &["wait".to_owned(), sandbox_name.to_owned()],
             )
             .map_err(CommandExecutionError::Backend)?;
-        Ok((parse_wait_exit_code(&post_kill.stdout), true))
+        Ok((
+            parse_wait_exit_code(&post_kill.stdout, "command_wait_after_kill")?,
+            true,
+        ))
     }
 
     /// Verify the same P0 isolation invariants as [`Self::verify_effective_isolation`]
@@ -1356,18 +1359,23 @@ fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
     (port != 0).then_some(port)
 }
 
-/// Parse `podman wait`'s stdout (a single decimal exit code) into an `i32`.
+/// Parse one successful `podman wait` stdout payload into the workload exit code.
 ///
-/// Falls back to `-1` -- a value no real POSIX exit status equals -- rather
-/// than fabricating `0` (success) for malformed or missing output, so a
-/// parsing anomaly can never be mistaken for the workload actually
-/// succeeding.
-fn parse_wait_exit_code(stdout: &[u8]) -> i32 {
+/// Malformed or missing stdout is runtime evidence corruption, not a synthetic
+/// workload result. The caller supplies the exact wait operation so ordinary
+/// and post-kill failures retain distinct provenance.
+fn parse_wait_exit_code(
+    stdout: &[u8],
+    operation: &'static str,
+) -> Result<i32, CommandExecutionError> {
     std::str::from_utf8(stdout)
         .ok()
         .map(str::trim)
+        .filter(|text| !text.is_empty())
         .and_then(|text| text.parse::<i32>().ok())
-        .unwrap_or(-1)
+        .ok_or(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection { operation },
+        ))
 }
 
 fn wait_for_readiness(
