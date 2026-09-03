@@ -1,5 +1,9 @@
 # References
 
+AppArmor Project. (2026). *AppArmor (5.0).* https://www.apparmor.net/man/5.0/apparmor/
+
+AppArmor Project. (2026). *Verify AppArmor coverage and audit profiles.* https://www.apparmor.net/getting-started/verify-and-audit/
+
 DÃ¼rst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
 
 Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md
@@ -15,6 +19,10 @@ International Organization for Standardization. (2012). *Information technologyâ
 Kent, K., Chevalier, S., Grance, T., & Dang, H. (2006). *Guide to integrating forensic techniques into incident response* (NIST Special Publication 800-86). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-86
 
 Klyne, G., & Newman, C. (2002). *Date and time on the Internet: Timestamps (RFC 3339).* RFC Editor. https://doi.org/10.17487/RFC3339
+
+Linux Kernel Documentation. (2026). *Linux Security Modules*. https://www.kernel.org/doc/html/latest/userspace-api/lsm.html
+
+Linux Kernel Documentation. (2026). *AppArmor*. https://www.kernel.org/doc/html/next/admin-guide/LSM/apparmor.html
 
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
