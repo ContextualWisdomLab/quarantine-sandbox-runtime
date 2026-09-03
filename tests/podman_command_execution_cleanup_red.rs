@@ -238,3 +238,38 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(call_log);
 }
+
+#[test]
+fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
+    let call_log = temporary_path("isolation-and-cleanup-fail-call-log");
+    let invalid_container = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":false,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         rm:--force) exit 88 ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        call_log.display(),
+        security_info_json(),
+        invalid_container,
+    );
+    let program = write_executable("isolation-and-cleanup-fail", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let error = adapter
+        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
+    );
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(calls.lines().any(|line| line.starts_with("container inspect ")));
+    assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(call_log);
+}
