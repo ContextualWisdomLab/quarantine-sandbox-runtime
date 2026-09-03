@@ -1,7 +1,9 @@
 # ADR 0006: Rootless isolated application-service profile
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-09-01
+
+This ADR remains Proposed while PR #1 is Draft and the exact candidate has not produced the required current-head real rootless Podman isolation/cleanup evidence. Promote it to Accepted only after the decision is integrated into the protected branch and revalidated against the then-live repository/security governance.
 
 ## Context
 
