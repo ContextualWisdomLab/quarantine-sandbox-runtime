@@ -723,17 +723,14 @@ impl RootlessPodmanAdapter {
     /// for a command-execution sandbox, minus the network/port controls that
     /// do not apply to a `--network none` one-shot command.
     ///
-    /// Unlike the service lease (whose workload stays up until the caller
-    /// disconnects it), a bounded command can legitimately finish before this
-    /// method gets to inspect its live process: `podman top` requires a
-    /// running PID 1 and errors once the container has already exited. That
-    /// race is not an isolation failure -- a command finishing in
-    /// microseconds is the sandbox working correctly -- so live-process
-    /// evidence (actual kernel-reported capabilities, seccomp mode, LSM
-    /// label) is used when available and skipped in favor of Podman's own
-    /// static configuration record (still authoritative: it reflects what
-    /// Podman actually applied to the container, not merely what this
-    /// adapter requested) when the process has already exited.
+    /// A bounded command may exit before `podman top` samples its live PID 1.
+    /// That race does not authorize weaker evidence: static `container inspect`
+    /// records configured/requested state, not the effective per-process
+    /// seccomp/LSM/capability state required at this security boundary. When
+    /// live process evidence is unavailable this method therefore fails closed.
+    /// Supporting extremely short-lived commands in the future requires a
+    /// reviewed start/hold/attest/release handshake (or an equivalent stronger
+    /// backend primitive), not a static-only attestation fallback.
     fn verify_command_isolation(
         &self,
         sandbox_name: &str,
