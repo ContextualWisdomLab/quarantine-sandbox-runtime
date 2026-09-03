@@ -1,5 +1,7 @@
 # References
 
+Containers/Image Authors. (2026). *containers-transports — description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
+
 Dürst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
 
 Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md
