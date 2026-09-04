@@ -142,6 +142,36 @@ fn run_command_at_returns_a_successful_result_against_a_well_behaved_fake_backen
 }
 
 #[test]
+fn run_command_at_rejects_an_invalid_policy_before_invoking_podman() {
+    let invocation_log = temporary_path("invalid-policy-invocations");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf 'invoked\\n' >> '{}'\nexit 91\n",
+        invocation_log.display()
+    );
+    let program = write_executable("invalid-policy", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let mut invalid_policy = policy();
+    invalid_policy.run_as_user_id = 0;
+
+    let result = adapter.run_command_at(&request(20), &invalid_policy, 1_780_000_000);
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::InvalidPolicy {
+                field_name: "run_as_user_id",
+            },
+        ))
+    );
+    assert!(
+        !invocation_log.exists(),
+        "invalid direct-adapter requests must not invoke Podman"
+    );
+
+    let _ = fs::remove_file(program);
+}
+
+#[test]
 fn run_command_at_reports_a_nonzero_exit_status_as_a_successful_call() {
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \

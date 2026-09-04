@@ -493,6 +493,7 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
     ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        request.validate(policy)?;
         let info_output = self.checked_output(
             "backend_security_info",
             &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
