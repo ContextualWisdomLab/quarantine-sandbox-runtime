@@ -1,9 +1,9 @@
-//! Regression: configured tmpfs/time argv is not effective resource-bound evidence.
+//! Regression: configured resource intent is not effective resource-bound evidence.
 //!
-//! The P0 profile requires bounded tmpfs and wall time. A backend must not return
-//! a lease merely because the requested `--tmpfs`/`--timeout` arguments were sent;
-//! the running sandbox inspection must positively bind both limits to the exact
-//! request before readiness or publication is trusted.
+//! The P0 profile requires bounded tmpfs and wall time. Podman inspection must
+//! first bind backend-applied configuration to the exact request, and a lease
+//! must still fail closed when no live runtime-enforcement proof exists. Neither
+//! launch argv nor inspect configuration alone may authorize publication.
 
 #![cfg(target_os = "linux")]
 
@@ -144,7 +144,7 @@ fn assert_resource_attestation_failure(container_json: &str, evidence_name: &str
 fn missing_effective_tmpfs_limit_fails_before_publication_and_cleans_up() {
     let container_without_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
 
-    assert_resource_attestation_failure(container_without_tmpfs, "effective tmpfs evidence");
+    assert_resource_attestation_failure(container_without_tmpfs, "applied tmpfs configuration");
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn unbounded_effective_wall_time_fails_before_publication_and_cleans_up() {
 
     assert_resource_attestation_failure(
         container_with_unbounded_timeout,
-        "bounded effective wall time",
+        "bounded applied wall-time configuration",
     );
 }
 
@@ -183,18 +183,16 @@ fn mismatched_positive_wall_time_fails_before_publication_and_cleans_up() {
 
     assert_resource_attestation_failure(
         container_with_wrong_timeout,
-        "request-bound effective wall time",
+        "request-bound applied wall-time configuration",
     );
 }
 
 #[test]
-fn exact_resource_evidence_accepts_order_independent_tmpfs_options() {
-    let container_with_exact_resource_evidence = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"size=16777216,nodev,rw,nosuid,noexec"}}}]"#;
-    let (result, calls) = run_effective_resource_case(container_with_exact_resource_evidence);
+fn exact_inspect_configuration_without_live_runtime_proof_fails_closed() {
+    let container_with_exact_inspect_configuration = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"size=16777216,nodev,rw,nosuid,noexec"}}}]"#;
 
-    assert_eq!(result, Ok(()));
-    assert!(
-        calls.contains("port "),
-        "exact effective resource evidence must allow publication to proceed: {calls}"
+    assert_resource_attestation_failure(
+        container_with_exact_inspect_configuration,
+        "live kernel/runtime resource enforcement proof",
     );
 }
