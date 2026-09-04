@@ -75,6 +75,13 @@ fn container_inspection(network_mode: &str, networks: &str) -> String {
 }
 
 fn assert_network_binding_rejected(container: &str) {
+    let request = request();
+    let policy = policy();
+    let plan = RootlessPodmanAdapter::plan_at(&request, &policy, STARTED_AT_EPOCH_SECONDS)
+        .expect("valid request and policy must yield a launch plan");
+    let expected_sandbox = plan.sandbox_name().to_owned();
+    let expected_network = plan.network_name().to_owned();
+
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
     let ready_port = listener
         .local_addr()
@@ -101,7 +108,7 @@ fn assert_network_binding_rejected(container: &str) {
 
     let adapter = RootlessPodmanAdapter::new(program.clone());
     assert_eq!(
-        adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS),
+        adapter.launch_at(&request, &policy, STARTED_AT_EPOCH_SECONDS),
         Err(ApplicationServiceError::IsolationVerificationFailed {
             control_name: "sandbox_network_binding",
         }),
@@ -110,16 +117,20 @@ fn assert_network_binding_rejected(container: &str) {
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     for expected in [
-        "network create --internal --disable-dns qsr-net-",
-        "container inspect --format json qsr-app-",
-        "stop --time 1 qsr-app-",
-        "rm --force qsr-app-",
-        "network rm --force qsr-net-",
+        format!("network create --internal --disable-dns {expected_network}"),
+        format!("network inspect --format json {expected_network}"),
+        format!("container inspect --format json {expected_sandbox}"),
+        format!("stop --time 1 {expected_sandbox}"),
+        format!("rm --force {expected_sandbox}"),
+        format!("network rm --force {expected_network}"),
     ] {
-        assert!(calls.contains(expected), "missing call {expected}: {calls}");
+        assert!(
+            calls.lines().any(|line| line == expected),
+            "missing exact call {expected}: {calls}"
+        );
     }
     assert!(
-        !calls.contains("port "),
+        !calls.lines().any(|line| line.starts_with("port ")),
         "port/readiness must not be queried after effective network attachment mismatch: {calls}"
     );
 
