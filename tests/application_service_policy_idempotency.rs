@@ -61,8 +61,12 @@ fn request() -> ApplicationServiceRequest {
 }
 
 fn write_fake_podman(program: &PathBuf, ready_port: u16) {
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n"
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        info, network, container,
     );
     fs::write(program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(program)
@@ -75,10 +79,14 @@ fn write_fake_podman(program: &PathBuf, ready_port: u16) {
 #[test]
 fn identical_request_does_not_reuse_lease_when_effective_policy_changes() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-    let ready_port = listener.local_addr().expect("address should resolve").port();
+    let ready_port = listener
+        .local_addr()
+        .expect("address should resolve")
+        .port();
     let program = temporary_path("fake-podman");
     write_fake_podman(&program, ready_port);
-    let coordinator = ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
+    let coordinator =
+        ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
     let owner = LeaseOwnerId::new("urn:cwl:agent:contextual-orchestrator")
         .expect("opaque owner should validate");
     let initial_policy = policy();
