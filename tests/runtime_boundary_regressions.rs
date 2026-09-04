@@ -6,14 +6,18 @@ use std::{
     fs,
     net::TcpListener,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
+    time::Duration,
 };
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+const SECURITY_INFO: &str = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.8.4"}}"#;
+const CONTAINER_INSPECTION: &str = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+const NETWORK_INSPECTION: &str = r#"[{"internal":true,"dns_enabled":false}]"#;
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -49,19 +53,8 @@ fn request(digest: &str) -> ApplicationServiceRequest {
     }
 }
 
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
-        std::process::id()
-    ))
-}
-
-fn write_executable(name: &str, script: &str) -> PathBuf {
-    let program = temporary_path(name);
+fn write_executable(fixture_directory: &Path, name: &str, script: &str) -> PathBuf {
+    let program = fixture_directory.join(name);
     fs::write(&program, script).expect("fake runtime executable should be writable");
     let mut permissions = fs::metadata(&program)
         .expect("fake runtime executable metadata should exist")
@@ -69,10 +62,6 @@ fn write_executable(name: &str, script: &str) -> PathBuf {
     permissions.set_mode(0o700);
     fs::set_permissions(&program, permissions).expect("fake runtime executable should run");
     program
-}
-
-fn security_info_json() -> &'static str {
-    r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.8.4"}}"#
 }
 
 #[test]
@@ -83,11 +72,14 @@ fn digest_pinned_image_accepts_numeric_sha256() {
 
 #[test]
 fn slow_successful_backend_command_is_polled_until_exit() {
-    let script = format!(
-        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) sleep 0.03; printf '%s\\n' '{}' ;;\n  network:create) exit 21 ;;\n  *) exit 91 ;;\nesac\n",
-        security_info_json()
+    let fixture = tempfile::tempdir().expect("isolated runtime boundary fixture directory");
+    let program = write_executable(
+        fixture.path(),
+        "slow-podman",
+        &format!(
+            "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) sleep 0.03; exit 21 ;;\n  *) exit 91 ;;\nesac\n"
+        ),
     );
-    let program = write_executable("slow-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone())
         .with_command_timeout(Duration::from_millis(200));
 
@@ -103,13 +95,13 @@ fn slow_successful_backend_command_is_polled_until_exit() {
 
 #[test]
 fn non_utf8_port_output_fails_closed_and_cleans_every_created_resource() {
-    let log = temporary_path("non-utf8-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated runtime boundary fixture directory");
+    let log = fixture.path().join("non-utf8-podman-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  network:rm) : ;;\n  create:*) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '\\377' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        security_info_json()
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '\\377' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        log.display()
     );
-    let program = write_executable("non-utf8-podman", &script);
+    let program = write_executable(fixture.path(), "non-utf8-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     assert_eq!(
@@ -130,27 +122,31 @@ fn non_utf8_port_output_fails_closed_and_cleans_every_created_resource() {
 
 #[test]
 fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup() {
+    let fixture = tempfile::tempdir().expect("isolated runtime boundary fixture directory");
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
         .expect("listener should expose its address")
         .port();
-    let log = temporary_path("cleanup-output-limit-log");
+    let log = fixture.path().join("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  network:rm) : ;;\n  create:*) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 1024 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 1024 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
-        security_info_json()
+        ready_port
     );
-    let program = write_executable("cleanup-output-limit-podman", &script);
+    let program = write_executable(fixture.path(), "cleanup-output-limit-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone())
         .with_command_output_limit_bytes(512)
         .with_command_timeout(Duration::from_secs(1));
     let lease = adapter
         .launch_at(&request(&"a".repeat(64)), &policy(), 1_780_000_000)
         .expect("launch should succeed before bounded cleanup failure");
+    let cleanup_adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_output_limit_bytes(64)
+        .with_command_timeout(Duration::from_secs(1));
 
     assert_eq!(
-        adapter.terminate_at(&lease, 1_780_000_001),
+        cleanup_adapter.terminate_at(&lease, 1_780_000_001),
         Err(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&log).expect("all cleanup calls should be recorded");
