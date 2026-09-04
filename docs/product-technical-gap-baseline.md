@@ -24,7 +24,8 @@ Quarantine Sandbox Runtime owns reusable sandbox execution, isolation-policy enf
 | Rootless backend | Podman security info is parsed and execution fails closed unless rootless mode plus required seccomp/LSM host capability are present. A causal predecessor ran Ubuntu 24.04 / Podman 4.9.3. | Active repair; current-head verification pending | Re-prove unchanged current head on real Podman; host capability is not per-sandbox proof. |
 | Read-only / writable surfaces | Launch uses read-only rootfs, `--read-only-tmpfs=false`, bounded `/tmp` with `rw,noexec,nosuid,nodev`, image volumes ignored, no generated hosts file, no proxy inheritance, and no systemd/sdnotify integration. Unsupported Podman 4.9.3 `--no-hostname` has been removed and the current fixture asserts it stays absent. | Configured intent plus partial runtime inspection | Bind exact applied tmpfs mount set/options/size, then require live mount proof. |
 | Privilege / namespace isolation | Current repair checks empty container Effective/Bounding caps and process Effective/Bounding/Inheritable/Permitted/Ambient sets, no-new-privileges, seccomp, user/PID/IPC namespaces, numeric non-root identity, and enforcing SELinux/AppArmor evidence. | Implemented on active root | Preserve negative/positive real-backend tests; empty/unconfined/malformed/contradictory LSM evidence never counts as Verified. |
-| Network isolation | Per-sandbox internal DNS-disabled network is inspected and publication must resolve only to loopback. | Implemented on active root | Add final real reachability proof; controlled egress is a separate reviewed profile. |
+| Network object isolation | Per-sandbox internal DNS-disabled network is inspected and publication must resolve only to loopback. | Implemented on active root | Preserve internal/DNS-disabled and loopback checks. |
+| Effective container network binding | Root `ContainerInspection.HostConfig` does not deserialize `NetworkMode` or an equivalent attachment set; `verify_effective_isolation` can validate the intended `qsr-net-*` object without proving that the running container is actually attached only to it. Issue #22 and Draft #23 carry an otherwise-positive hostile RED whose container reports `NetworkMode=bridge`. | P0 false-positive found; RED staged on Draft #23 | Execute the RED on current ancestry. After reproduced failure, bind the running container to the exact runtime-owned deny-by-default network, reject unexpected additional attachments, then prove external egress denial on real rootless Podman. |
 | Credential isolation | P0 request has no provider/user credentials, arbitrary environment map, host device/runtime socket, or broad host mount. | Active contract | Any future secret flow requires an explicit purpose-bound broker. |
 | CPU/RAM/PID bounds | `HostConfig.Memory`, `NanoCpus`, and `PidsLimit` are inspected against the request. | Backend-applied binding only; live proof incomplete | Verify the exact sandbox's authoritative cgroup-v2 values before release claim. |
 | tmpfs / wall time | Launch applies bounded `/tmp` and `--timeout`, but current root does not deserialize/bind `HostConfig.Tmpfs` or `Config.Timeout`; inspect state alone would still not prove live enforcement. Draft #19 carries REDs for missing/wrong hardening, contradictory/duplicate tmpfs options, widened writable mounts, timeout mismatch, cleanup/non-publication, and exact inspect state without live proof. | P0 RED staged on Draft #19 | After root integration, non-force adopt #19, execute RED, add minimal inspect binding, then require live cgroup/mount/wall-time proof. |
@@ -37,6 +38,7 @@ Quarantine Sandbox Runtime owns reusable sandbox execution, isolation-policy enf
 Configured launch intent, backend-applied inspection, and live effective enforcement are different evidence levels. A security control may advance only to the level actually proved for the exact sandbox identity. In particular:
 
 - Podman inspect can bind requested configuration but cannot by itself prove kernel cgroup or mount enforcement or that a wall-time termination actually occurred.
+- A separately inspectable internal network does not prove that the running container is attached to it; exact container attachment must be bound before egress isolation is Verified.
 - CPU/RAM/PID effective claims require authoritative cgroup-v2 evidence where the backend exposes it.
 - `/tmp` effective claims require live mount evidence showing tmpfs, exact mount point, required restrictions, and bounded size.
 - Wall-time effective claims require behavioral/runtime-owned termination and cleanup evidence or an equivalent reviewed watchdog.
@@ -57,10 +59,11 @@ Configured launch intent, backend-applied inspection, and live effective enforce
 - Protected `develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea`; PR #1 is Draft and mergeable, with no qualifying approval.
 - The causal effective-attestation RED on predecessor `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` executed and failed because the old runtime could return a lease without effective sandbox inspection. The same real lane exposed unsupported Podman 4.9.3 `--no-hostname`; both defects have causal repairs on the active root lineage.
 - Root advanced non-force from `06988737...` to source head `5dcabdbd...` by one fixture-alignment/Podman-4.9 regression commit. Its production-file delta is formatting-only.
-- First current-head CI/Security/SAST attempts `33866861441` / `33866861482` / `33866861513` were cancelled before steps when an obsolete predecessor rerun overlapped the legitimate head movement under PR-scoped `cancel-in-progress`. The current exact-head runs were immediately rerun without source churn. Latest CI attempt jobs are `verify=101005027067`, `podman-e2e=101005027234`, `branch-coverage=101005027351`, `coverage=101005027411`; they remain queued before execution. Security/SAST are also queued. Queued evidence is non-passing.
+- Current root CI/Security/SAST attempts remain queued before checkout; `runner_id=0` / `steps=[]` evidence is non-passing and does not transfer.
+- Draft #23 is a test/traceability-only child of exact root `#1@24526eb55cf5db48ea07079b314f7d1b676eb48d`; production repair is forbidden until its network-binding RED actually executes and fails for the intended mismatch.
 - Central hosted-runner admission remains `.github#712`. Positive effective-LSM runner capability remains `.github#1590`; generic hosted recovery cannot substitute for per-sandbox positive confinement proof.
-- Current descendants are deliberately not destructively restacked while the root is non-GREEN. #6/#9/#10/#13/#14 retain valid implementation/test deltas; #18 and #19 retain RED-only deltas on older parent snapshots. They must adopt protected ancestry non-force and reacquire exact-head evidence after root integration.
-- GitHub Releases was freshly read as empty on 2026-09-04. No immutable runtime release exists for Wardnet, contextual-orchestrator, or Noema to pin.
+- Current descendants are deliberately not destructively restacked while the root is non-GREEN. #6/#9/#10/#13/#14 retain valid implementation/test deltas; #18/#19/#21/#23 retain P0 RED or evidence deltas on their stated parent snapshots. They must adopt protected ancestry non-force and reacquire exact-head evidence after root integration.
+- GitHub Releases remains empty. No immutable runtime release exists for Wardnet, contextual-orchestrator, or Noema to pin.
 
 ## Consumer and release contract
 
@@ -70,9 +73,10 @@ The first release remains blocked until one exact integrated protected candidate
 
 ## Next bounded slices
 
-1. Execute the current root exact-head CI/security reruns; repair only an actually reproduced current-head failure and merge normally only after approval/rules/effective-runtime gates are satisfied.
-2. After root integration, adopt Draft #19 non-force and execute its resource-attestation RED; implement only the smallest causal inspect-binding GREEN, then add live cgroup/mount/wall-time proof.
-3. Reconcile #6/#9/#10/#13/#14 dependency-first after root integration; execute and repair issue #16 command identity and Podman-4.9 compatibility REDs before command backend integration.
-4. Obtain dedicated positive LSM real-backend acceptance without weakening the P0 profile.
-5. Reconcile #18 only after higher-stack P0 blockers and parent ancestry are current; keep artifact-analysis receipts as risk evidence, not admission/verdict authority.
-6. Publish the first immutable runtime release only from one exact integrated protected head, then hand off released version/digest pinning to consumer owner paths.
+1. Execute the current root exact-head CI/security runs; repair only an actually reproduced current-head failure and merge normally only after approval/rules/effective-runtime gates are satisfied.
+2. Execute Draft #23's effective network-binding RED; after reproduced failure, add the smallest exact-attachment GREEN and real negative-egress E2E without weakening the dedicated LSM gate.
+3. After root integration, adopt Draft #19 non-force and execute its resource-attestation RED; implement only the smallest causal inspect-binding GREEN, then add live cgroup/mount/wall-time proof.
+4. Reconcile #6/#9/#10/#13/#14 dependency-first after root integration; remove or separately prove the unreviewed shared `Command::spawn` `WouldBlock` retry before protected integration, and execute the preserved command identity/Podman-4.9 regressions on current ancestry.
+5. Obtain dedicated positive LSM real-backend acceptance without weakening the P0 profile.
+6. Reconcile #18 only after higher-stack P0 blockers and parent ancestry are current; keep artifact-analysis receipts as risk evidence, not admission/verdict authority.
+7. Publish the first immutable runtime release only from one exact integrated protected head, then hand off released version/digest pinning to consumer owner paths.
