@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack is now `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14 source/restack@e38537507773a005a74f693fc150004263cf9b49`. The ledger commit containing this file changes documentation/restack metadata only. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
+Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack is `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14@0c8921e45e1686bd94ef1fc367d0d2a6aea06c33 → #18 RED@ddcdae949cce845bfa6c792c6d0c1e36d36c368b`. This ledger commit follows the #18 RED and changes documentation only. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
 
 ## Product responsibility and Context Map
 
@@ -45,11 +45,14 @@ The #14 restack deliberately keeps the current full ADR-0007 from #13 rather tha
 | --- | --- | --- | --- |
 | Static foundation | Immutable SHA-256 identity, bounded source context, deterministic format classification, ordered analyzer port and attributable failures. | Implemented on #1 | Integrate and retain exact release evidence. |
 | Verdict boundary | Evidence/disposition remain risk/analysis evidence and require a consumer verdict. | Implemented | Never promote analyzer output into foreign authoritative truth. |
+| Credential-free Claude plugin package quarantine profile | Issue #17 defines exact catalog/source/artifact identity, an AppGuardrail receipt reference, fixed probe codes, bounded resource budgets, deny-by-default networking/filesystem policy and bounded isolation receipts. Draft #18 RED commit `ddcdae949…` supplies one positive immutable request against the current public contract; production remains unchanged until that exact RED executes and fails. | RED queued; candidate only | After actual RED execution, add the smallest strict profile-specific request/validation contract plus hostile mutable-source, wrong-artifact/policy, duplicate-probe, bounds and Unicode fixtures. Do not consume mutable CGC/AppGuardrail/Noema branches or claim admission/activation authority. |
 | YARA-X / capa / Ghidra / LIEF | No production adapters. | Missing | Add one bounded adapter per TDD slice with tool/version/digest provenance. |
-| Linux dynamic detonation | No artifact detonation vertical yet. | Missing | Reuse the verified sandbox boundary or stronger gVisor/microVM profile; never execute hostile bytes in the host control process. |
+| Linux dynamic detonation | No general artifact detonation vertical yet. | Missing | Reuse the verified sandbox boundary or stronger gVisor/microVM profile; never execute hostile bytes in the host control process. |
 | Windows detonation | No production pool. | Missing | Separate Windows isolation boundary while preserving common evidence contracts. |
 | Controlled network telemetry | No sinkhole/approved-egress analysis profile. | Missing | Add explicit policy, bounded capture and no production credentials. |
 | Durable evidence/chain of custody | Evidence is process-local. | Missing | Add immutable object storage, signing, retention/replay and recovery ownership before GA. |
+
+The Claude-plugin candidate is intentionally local and fail closed. `context-graph-contracts#27` owns the future provider-neutral external-capability artifact/evidence grammar, AppGuardrail #1099 owns static package scan receipts, and Noema #545 owns admission/activation/rollback. `context-graph-contracts` currently has no immutable release, so no PR head, branch, local path or self-asserted receipt is production authority. Quarantine may validate local candidate fixtures while waiting, but the first cross-product adoption requires released compatible contracts and exact producer release/policy/artifact identities.
 
 ## Release delivery
 
@@ -61,7 +64,7 @@ The absence of an immutable release remains an implementation gap. PR #10 contai
 | GitHub Releases | none |
 | Stable release source | no integrated protected product release head yet |
 | Application-service lease contract | `1.2.0` candidate |
-| Artifact-analysis request/evidence | `1.0.0` candidate |
+| Artifact-analysis request/evidence | `1.0.0` candidate; Claude-plugin profile is RED-only on #18 |
 | Command request/result | `1.0.0` candidate |
 | Release evidence contract | `1.0.0` candidate on #10 |
 | Cargo source package | workflow candidate only |
@@ -83,6 +86,7 @@ Strict consumers validate exact schema versions and pin a released package plus 
 | --- | --- | --- |
 | Wardnet | SOC/gateway policy, maliciousness verdict, incidents, quarantine/block/review, notification, retention | Must consume released artifact-analysis evidence through its owner ACL. |
 | contextual-orchestrator | model/Agent orchestration, authorization, application selection, secrets, task/user actions | Owner path #991 remains downstream of an immutable runtime release; direct Podman/containerd calls and sibling source are forbidden. |
+| Noema | external capability admission, activation, expiry, rollback and invocation authority | Issue #545 may consume only a future immutable quarantine isolation receipt through released shared contracts; current #18 is candidate RED evidence only. |
 
 ## Context Graph and Enterprise Architecture read-only integration
 
@@ -97,11 +101,13 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 - #9 non-force restack head `64b1ba4f202843288e9a9c4b104e0f93aad76f43` preserves strict effective-isolation/LSM logic on the current #6 parent.
 - #10 non-force restack head `30a2c2080bc1d2e8d6d049b70477721dccb4d8dc` preserves release evidence on the current isolation head.
 - #13 non-force restack head `3a26a5c27e81fc315c98a88005b8154d2ca95b7f` preserves the bounded command contract on the current release head.
-- #14 source/restack merge `e38537507773a005a74f693fc150004263cf9b49` preserves its command backend/CLI/test delta on current #13 while keeping parent security fixes. A following ledger/restack commit carries the corrected ADR/consumer/baseline resolution; predecessor review/check evidence does not transfer.
+- #14 exact `0c8921e45e1686bd94ef1fc367d0d2a6aea06c33` preserves its command backend/CLI/cleanup/security-test delta on current #13; issue #16's checked-in identity-race RED remains unexecuted and production identity code remains unchanged.
+- #18 RED commit `ddcdae949cce845bfa6c792c6d0c1e36d36c368b` is stacked exactly on #14 and adds only the first Claude-plugin package-analysis public-contract RED. CI run `33820742084` materialized hosted and positive-LSM jobs but they remain pre-checkout queued; this ledger commit follows that RED and invalidates predecessor-head merge evidence.
 - Issue #16 remains the P0 command sandbox-identity defect. Its checked-in Rust RED must actually execute before production identity repair.
-- `.github#712/#1796` own organization queue/admission and duplicate queue-hygiene repair. Leaf source is not churned solely to manufacture runner assignment. Positive LSM capacity remains a separate reviewed infrastructure capability.
-- Organization ruleset `18156473` is active on the default branch and requires one approving review, thread resolution and central required workflows. Legacy branch-protection output alone is not the authority; bypass capability is not merge evidence.
-- No immutable release exists.
+- Issue #17 is a lower-stack artifact-analysis expansion; it must not overtake dependency-root P0 repairs or consume mutable foreign contracts.
+- `.github#712/#1796` own organization queue/admission and duplicate queue-hygiene repair. Leaf source is not churned solely to manufacture runner assignment. `.github#1590` owns the separate positive LSM-capable security-runner requirement.
+- Organization ruleset `18156473` is active on the default branch and still requires one approving review with no named required reviewer. `.github#772` owns the solo-maintainer-compatible central repair; self-approval, bot-as-human approval and routine administrator bypass remain forbidden.
+- No immutable release exists in this repository or `context-graph-contracts`.
 
 ## Next bounded slices
 
@@ -112,4 +118,5 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 5. Publish `0.1.0` only from one exact integrated protected head with dated CHANGELOG, immutable release assets, SBOM/provenance/reproducibility and rollback evidence.
 6. Update Wardnet/contextual-orchestrator owner paths to pin released artifact SHA-256/provenance and exact schema versions.
 7. Add durable Workload Admission, Session Lifecycle and Recovery contracts with crash/replay/resource-reservation E2E.
-8. Add artifact-analysis adapters and detonation only on the released isolation boundary.
+8. After higher-priority isolation/release work advances, execute #18's Claude-plugin package-analysis RED, implement the smallest strict local contract/hostile fixtures, then bind it only to released AppGuardrail/CGC/Noema-facing contracts before runtime probes.
+9. Add other artifact-analysis adapters and detonation only on the released isolation boundary.
