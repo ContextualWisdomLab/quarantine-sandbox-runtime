@@ -120,7 +120,7 @@ jobs:
       - name: Enforce complete production branch coverage
         run: python3 scripts/check_coverage.py --require-branches branch-coverage.json
 
-  podman-e2e:
+  podman-e2e-negative-rootless-apparmor:
     runs-on: ubuntu-24.04
     env:
       # Immutable Docker Official Image index used only as the isolated E2E fixture.
@@ -137,18 +137,75 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
         with:
           toolchain: 1.97.1
-      - name: Verify supported hosted Podman contract
+      - name: Capture hosted negative LSM capability evidence
         run: |
-          # GitHub rolled ubuntu-24.04 back from Podman 5.8.4 to the
-          # distribution-validated 4.9.3 beginning 2026-09-01. Keep the
-          # hosted acceptance explicit; effective isolation is proven below.
+          # The current ubuntu-24.04 image exposes distribution Podman 4.9.3.
+          # Version identity is recorded separately from effective LSM proof below.
           test "$(podman --version)" = "podman version 4.9.3"
-          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert isinstance(security["apparmorEnabled"], bool)
+          assert isinstance(security["selinuxEnabled"], bool)
+          print(f"apparmorEnabled={security['apparmorEnabled']}")
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
       - name: Pre-pull immutable fixture outside the application launch path
         run: |
           podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
           podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
-      - name: Execute real isolation and cleanup acceptance
+      - name: Prove unavailable effective LSM fails closed and cleans up
+        run: >-
+          cargo test --locked
+          --test podman_rootless_e2e
+          -- --ignored --exact rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up --nocapture
+      - name: Reject leaked runtime-owned resources
+        if: always()
+        run: |
+          leaked_containers="$(podman ps -a --filter label=org.contextualwisdomlab.sandbox.identity --format '{{.ID}}')"
+          test -z "$leaked_containers"
+          leaked_networks="$(podman network ls --format '{{.Name}}' | grep '^qsr-net-' || true)"
+          test -z "$leaked_networks"
+
+  podman-e2e-positive-lsm:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, cwl-hostile-workload, selinux]
+    env:
+      # The dedicated runner is a credential-free, disposable security-test host.
+      QSR_PODMAN_E2E_IMAGE: docker.io/library/python@sha256:94457973ea8a27a799f0b8ea1fe3e3147fcbebaed63497a8af63b28195a08108
+      QSR_HOST_SECRET_CANARY: must-not-enter-the-isolated-application
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+      - name: Verify dedicated positive LSM runner contract
+        run: |
+          test -n "$RUNNER_NAME"
+          test "$(podman --version)" = "podman version 5.8.4"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert security["selinuxEnabled"] is True
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
+      - name: Pre-pull immutable fixture outside the application launch path
+        run: |
+          podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
+          podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Execute real positive LSM isolation and cleanup acceptance
         run: >-
           cargo test --locked
           --test podman_rootless_e2e
