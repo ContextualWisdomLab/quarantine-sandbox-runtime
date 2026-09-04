@@ -463,6 +463,18 @@ pub enum ApplicationServiceError {
     /// The backend did not attest that it is running rootless.
     #[error("Podman backend is not rootless")]
     BackendNotRootless,
+    /// A required effective isolation control was not positively verified.
+    #[error("effective isolation verification failed for {control_name}")]
+    IsolationVerificationFailed {
+        /// Stable isolation-control code.
+        control_name: &'static str,
+    },
+    /// Podman inspection output was malformed, contradictory, or bound to another sandbox.
+    #[error("malformed Podman isolation inspection during {operation}")]
+    MalformedIsolationInspection {
+        /// Stable inspection operation code.
+        operation: &'static str,
+    },
     /// Podman returned a service publication other than one IPv4 loopback port.
     #[error("invalid Podman loopback port mapping")]
     InvalidPortMapping,
@@ -511,10 +523,7 @@ fn registry_repository_is_safe(repository: &str) -> bool {
         return false;
     }
     components.all(|component| {
-        !component.is_empty()
-            && component != "."
-            && component != ".."
-            && !component.contains(':')
+        !component.is_empty() && component != "." && component != ".." && !component.contains(':')
     })
 }
 
