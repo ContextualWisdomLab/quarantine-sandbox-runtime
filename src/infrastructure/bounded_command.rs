@@ -77,22 +77,12 @@ fn spawn_piped_child(
     program: &Path,
     args: &[String],
 ) -> Result<(Child, ChildStdout, ChildStderr), BoundedCommandError> {
-    let mut attempts = 0_u8;
-    let mut child = loop {
-        match Command::new(program)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => break child,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock && attempts < 8 => {
-                attempts += 1;
-                thread::sleep(POLL_INTERVAL);
-            }
-            Err(_) => return Err(BoundedCommandError::Spawn),
-        }
-    };
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| BoundedCommandError::Spawn)?;
     captured_pipes(child.stdout.take(), child.stderr.take())
         .map(|(stdout, stderr)| (child, stdout, stderr))
 }
