@@ -74,8 +74,16 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     } else {
         r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.6.2"}}"#
     };
-    let readonly_rootfs = if mode == "readwrite_root" { "false" } else { "true" };
-    let internal_network = if mode == "external_network" { "false" } else { "true" };
+    let readonly_rootfs = if mode == "readwrite_root" {
+        "false"
+    } else {
+        "true"
+    };
+    let internal_network = if mode == "external_network" {
+        "false"
+    } else {
+        "true"
+    };
     let bounding_caps = if mode == "bounding_caps_present" {
         r#"["CAP_SYS_ADMIN"]"#
     } else {

@@ -62,7 +62,10 @@ fn temporary_path(name: &str) -> PathBuf {
 
 fn closed_loopback_port() -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
-    listener.local_addr().expect("address should resolve").port()
+    listener
+        .local_addr()
+        .expect("address should resolve")
+        .port()
 }
 
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
@@ -72,7 +75,7 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  termination_stop_fail:stop:*) exit 27 ;;\n  termination_remove_fail:rm:*) exit 32 ;;\n  termination_network_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  termination_stop_fail:stop:*) exit 27 ;;\n  termination_remove_fail:rm:*) exit 32 ;;\n  termination_network_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
@@ -133,7 +136,10 @@ fn termination_attempts_all_cleanup_resources_when_any_step_fails() {
         "termination_network_fail",
     ] {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
-        let ready_port = listener.local_addr().expect("address should resolve").port();
+        let ready_port = listener
+            .local_addr()
+            .expect("address should resolve")
+            .port();
         let (program, log) = write_fake_podman(mode, ready_port);
         let adapter = RootlessPodmanAdapter::new(program.clone());
         let lease = adapter
