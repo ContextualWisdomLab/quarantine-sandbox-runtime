@@ -26,6 +26,10 @@ Linux Kernel Documentation. (2026). *Linux Security Modules*. https://www.kernel
 
 Linux Kernel Documentation. (2026). *AppArmor*. https://www.kernel.org/doc/html/next/admin-guide/LSM/apparmor.html
 
+Linux man-pages project. (2026). *path_resolution(7)—How a pathname is resolved to a file*. https://man7.org/linux/man-pages/man7/path_resolution.7.html
+
+Linux man-pages project. (2026). *pathname(7)—How pathnames are encoded and interpreted*. https://man7.org/linux/man-pages/man7/pathname.7.html
+
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
 National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). https://doi.org/10.6028/NIST.CSWP.29
