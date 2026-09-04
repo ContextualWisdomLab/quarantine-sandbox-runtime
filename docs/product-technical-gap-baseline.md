@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack is `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14@0c8921e45e1686bd94ef1fc367d0d2a6aea06c33 → #18 RED@ddcdae949cce845bfa6c792c6d0c1e36d36c368b`. This ledger commit follows the #18 RED and changes documentation only. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
+Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack is `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14@0c8921e45e1686bd94ef1fc367d0d2a6aea06c33 → #18@f5a1a6541a27423f86c0957bbff3cfdf41b90b32`. #18 remains a RED-only contract lane; its current exact head strengthens the test contract without changing production behavior. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
 
 ## Product responsibility and Context Map
 
@@ -22,7 +22,7 @@ Wardnet retains gateway/SOC policy, maliciousness verdict, incident, quarantine/
 | Rootless backend | Podman host state is inspected and non-rootless execution fails closed. Backend version is evidence, not isolation proof. | Implemented | Re-run on every release head. |
 | Filesystem isolation | Read-only rootfs, bounded noexec/nosuid/nodev tmpfs, image volumes ignored, no arbitrary host mounts. | Implemented | Add only typed reviewed read-only inputs when a buyer flow requires them. |
 | Effective privilege/seccomp/LSM proof | #9 verifies live process seccomp, effective/bounding/inheritable/permitted/ambient capability sets, non-root identity, namespaces, resource limits and an enforcing AppArmor/SELinux identity rather than trusting launch argv. | Implemented downstream on #9 | The parent #1 contract cannot merge while it still creates an all-positive lease attestation without equivalent effective proof. |
-| Parent attestation truthfulness | #1 exact `3fa5c549…` adds RED `tests/podman_effective_attestation_red.rs`: a fake rootless Podman can accept the configured launch plan and reach readiness while supplying no effective isolation evidence, and the runtime must fail closed instead of returning an all-positive lease. Production code was deliberately not changed before this RED executes. | RED queued; non-passing | Execute the exact RED, prove the old behavior fails, then fold the smallest effective-attestation repair into the canonical merge path without duplicating #9 logic. |
+| Parent attestation truthfulness | #1 exact `3fa5c549…` adds RED `tests/podman_effective_attestation_red.rs`: a fake rootless Podman can accept the configured launch plan and reach readiness while supplying no effective isolation evidence, and the runtime must fail closed instead of returning an all-positive lease attestation. Production code was deliberately not changed before this RED executes. | RED queued; non-passing | Execute the exact RED, prove the old behavior fails, then fold the smallest effective-attestation repair into the canonical merge path without duplicating #9 logic. |
 | Network isolation | Service profile uses per-sandbox internal DNS-disabled network plus loopback-only publication; command profile uses `--network none`. | Implemented on active stack | Controlled egress must be a separate versioned profile. |
 | Credential isolation | P0 has no consumer/provider credentials, arbitrary environment, runtime sockets, host devices or ambient proxy inheritance. | Implemented | Future secrets require an explicit task-scoped broker and authorization contract. |
 | Caller ownership/idempotency | #6 scopes service lease ownership/idempotency by command context, rejects changed request/policy reuse, prevents wrong-owner cleanup and bounds/fairly retries expiry cleanup. | Implemented on active PR | Bind owner to authenticated transport and add durable replay/admission/recovery. |
@@ -45,7 +45,7 @@ The #14 restack deliberately keeps the current full ADR-0007 from #13 rather tha
 | --- | --- | --- | --- |
 | Static foundation | Immutable SHA-256 identity, bounded source context, deterministic format classification, ordered analyzer port and attributable failures. | Implemented on #1 | Integrate and retain exact release evidence. |
 | Verdict boundary | Evidence/disposition remain risk/analysis evidence and require a consumer verdict. | Implemented | Never promote analyzer output into foreign authoritative truth. |
-| Credential-free Claude plugin package quarantine profile | Issue #17 defines exact catalog/source/artifact identity, an AppGuardrail receipt reference, fixed probe codes, bounded resource budgets, deny-by-default networking/filesystem policy and bounded isolation receipts. Draft #18 RED commit `ddcdae949…` supplies one positive immutable request against the current public contract; production remains unchanged until that exact RED executes and fails. | RED queued; candidate only | After actual RED execution, add the smallest strict profile-specific request/validation contract plus hostile mutable-source, wrong-artifact/policy, duplicate-probe, bounds and Unicode fixtures. Do not consume mutable CGC/AppGuardrail/Noema branches or claim admission/activation authority. |
+| Credential-free Claude plugin package quarantine profile | Issue #17 defines exact catalog/source/artifact identity, an AppGuardrail receipt reference, fixed probe codes, bounded resource budgets, deny-by-default networking/filesystem policy and bounded isolation receipts. Draft #18 exact `f5a1a654…` now requires the candidate request to deserialize and pass `AnalysisRequest::validate()`, and predefines fail-closed cases for mutable/malformed commit or digest identity, duplicate probes, zero execution budgets and control text. Production remains unchanged until the exact positive RED actually executes and fails. | RED queued; candidate only | After actual RED execution, add the smallest strict profile-specific request/validation contract, then extend hostile fixtures for producer/artifact/policy mismatch, oversized/deep input, Unicode ambiguity and archive/path hazards. Do not consume mutable CGC/AppGuardrail/Noema branches or claim admission/activation authority. |
 | YARA-X / capa / Ghidra / LIEF | No production adapters. | Missing | Add one bounded adapter per TDD slice with tool/version/digest provenance. |
 | Linux dynamic detonation | No general artifact detonation vertical yet. | Missing | Reuse the verified sandbox boundary or stronger gVisor/microVM profile; never execute hostile bytes in the host control process. |
 | Windows detonation | No production pool. | Missing | Separate Windows isolation boundary while preserving common evidence contracts. |
@@ -61,7 +61,7 @@ The absence of an immutable release remains an implementation gap. PR #10 contai
 | Item | Current state |
 | --- | --- |
 | Package version | `0.1.0` development metadata; not a released identity |
-| GitHub Releases | none |
+| GitHub Releases | none, freshly verified 2026-09-04 |
 | Stable release source | no integrated protected product release head yet |
 | Application-service lease contract | `1.2.0` candidate |
 | Artifact-analysis request/evidence | `1.0.0` candidate; Claude-plugin profile is RED-only on #18 |
@@ -96,18 +96,18 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 
 ## Verification and governance state
 
-- #1 exact `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` is Draft. CI `33800321670`, Security Scan `33800321674`, SAST `33800321679`, Scorecard `33800321680` and OSV `33800322168` are materialized but queued; the new effective-attestation RED has not executed.
+- #1 exact `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` is Draft. CI `33800321670`, Security Scan `33800321674`, SAST `33800321679`, Scorecard `33800321680` and OSV `33800322168` are materialized but queued; the effective-attestation RED has not executed.
 - #6 non-force restack head `89103472cea8f27661614e4f4740e68d2f4a153b` inherits the moved parent while preserving caller ownership/idempotency/cleanup-fairness delta.
-- #9 non-force restack head `64b1ba4f202843288e9a9c4b104e0f93aad76f43` preserves strict effective-isolation/LSM logic on the current #6 parent.
+- #9 non-force restack head `64b1ba4f202843288e9a9c4b104e0f93aad76f43` preserves strict effective-isolation/LSM logic on the current #6 parent. Its dedicated positive-LSM job `100798523349` remains queued without an eligible runner.
 - #10 non-force restack head `30a2c2080bc1d2e8d6d049b70477721dccb4d8dc` preserves release evidence on the current isolation head.
 - #13 non-force restack head `3a26a5c27e81fc315c98a88005b8154d2ca95b7f` preserves the bounded command contract on the current release head.
 - #14 exact `0c8921e45e1686bd94ef1fc367d0d2a6aea06c33` preserves its command backend/CLI/cleanup/security-test delta on current #13; issue #16's checked-in identity-race RED remains unexecuted and production identity code remains unchanged.
-- #18 RED commit `ddcdae949cce845bfa6c792c6d0c1e36d36c368b` is stacked exactly on #14 and adds only the first Claude-plugin package-analysis public-contract RED. CI run `33820742084` materialized hosted and positive-LSM jobs but they remain pre-checkout queued; this ledger commit follows that RED and invalidates predecessor-head merge evidence.
+- #18 exact `f5a1a6541a27423f86c0957bbff3cfdf41b90b32` is stacked exactly on #14. It strengthens the Claude-plugin package-analysis RED so future GREEN must satisfy public validation rather than merely deserialize new fields. CI `33835626261` materialized verify/coverage/branch-coverage/negative-AppArmor and positive-LSM jobs; all were queued/non-passing at the fresh observation.
 - Issue #16 remains the P0 command sandbox-identity defect. Its checked-in Rust RED must actually execute before production identity repair.
 - Issue #17 is a lower-stack artifact-analysis expansion; it must not overtake dependency-root P0 repairs or consume mutable foreign contracts.
 - `.github#712/#1796` own organization queue/admission and duplicate queue-hygiene repair. Leaf source is not churned solely to manufacture runner assignment. `.github#1590` owns the separate positive LSM-capable security-runner requirement.
-- Organization ruleset `18156473` is active on the default branch and still requires one approving review with no named required reviewer. `.github#772` owns the solo-maintainer-compatible central repair; self-approval, bot-as-human approval and routine administrator bypass remain forbidden.
-- No immutable release exists in this repository or `context-graph-contracts`.
+- Organization ruleset `18156473` was freshly verified active for the default branch. It requires one approving review, thread resolution and the central workflow set; it forbids non-fast-forward updates and deletion. No named required reviewer is configured. Administrative bypass capability exists but is not merge evidence and is not used to weaken required gates.
+- No immutable GitHub release exists in this repository as of the fresh release read.
 
 ## Next bounded slices
 
@@ -118,5 +118,5 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 5. Publish `0.1.0` only from one exact integrated protected head with dated CHANGELOG, immutable release assets, SBOM/provenance/reproducibility and rollback evidence.
 6. Update Wardnet/contextual-orchestrator owner paths to pin released artifact SHA-256/provenance and exact schema versions.
 7. Add durable Workload Admission, Session Lifecycle and Recovery contracts with crash/replay/resource-reservation E2E.
-8. After higher-priority isolation/release work advances, execute #18's Claude-plugin package-analysis RED, implement the smallest strict local contract/hostile fixtures, then bind it only to released AppGuardrail/CGC/Noema-facing contracts before runtime probes.
+8. After higher-priority isolation/release work advances, execute #18's strengthened Claude-plugin package-analysis RED, implement the smallest strict local contract, then extend mismatch/oversize/Unicode/archive/path hostile fixtures and bind only to released AppGuardrail/CGC/Noema-facing contracts before runtime probes.
 9. Add other artifact-analysis adapters and detonation only on the released isolation boundary.
