@@ -32,3 +32,26 @@ fn ordinary_hosted_ci_uses_explicit_supported_runner_image() {
         );
     }
 }
+
+#[test]
+fn ci_cancels_only_superseded_heads_of_the_same_pull_request() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+
+    for required in [
+        "github.workflow",
+        "github.repository",
+        "github.event.pull_request.number",
+        "github.run_id",
+        "cancel-in-progress: true",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "CI concurrency must contain {required}"
+        );
+    }
+    assert!(
+        !workflow.contains("github.ref }}"),
+        "non-PR runs must not share a ref-scoped cancellation group"
+    );
+}
