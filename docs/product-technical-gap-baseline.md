@@ -60,10 +60,10 @@ The absence of an immutable release remains an implementation gap. PR #10 contai
 
 | Item | Current state |
 | --- | --- |
-| Package version | `0.2b03.0` development metadata; not a released identity |
+| Package version | `0.1.0` development metadata; not a released identity |
 | GitHub Releases | none, freshly verified 2026-09-04 |
 | Stable release source | no integrated protected product release head yet |
-| work-client lease contract | `1.2.0` candidate |
+| Application-service lease contract | `1.2.0` candidate |
 | Artifact-analysis request/evidence | `1.0.0` candidate; Claude-plugin profile is RED-only on #18 |
 | Command request/result | `1.0.0` candidate |
 | Release evidence contract | `1.0.0` candidate on #10 |
