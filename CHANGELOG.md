@@ -8,12 +8,6 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Added
 
-- Bounded command-execution contract (`CommandExecutionRequest`/`CommandExecutionResult`/
-  `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
-  consumer that needs to run one command to completion and receive a structured exit status plus
-  bounded output rather than a readiness-gated network endpoint. Ships as a validated contract, a
-  coordinator function, and a `#[cfg(test)]`-only fake backend; no production backend or CLI/HTTP
-  entrypoint yet (see ADR-0007).
 - Source-agnostic analysis request and evidence contracts.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
@@ -53,7 +47,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Required free-form source metadata was replaced by a closed typed context capped at 1,024 serialized UTF-8 bytes.
 - Source timestamp and media-type validation trace to RFC 3339 and BCP 13 (RFC 6838 as updated by RFC 9694).
 - Architecture now separates Core `sandbox_execution` from Supporting `artifact_analysis` and `application_service` and treats Podman/gVisor/containerd/Kubernetes mechanisms as infrastructure adapters.
-- Repository CI covers both live `develop` integration and stable `main`; publication remains restricted to a version tag on the exact protected `main` tip.
+- Repository authority is the protected/default `develop` branch. Native CI still has a stale `main`-only push trigger; issue #24 carries the focused RED requiring exact post-integration `develop` evidence before release authority. The release preflight likewise remains Draft behind its protected-default-source RED and must not treat `main` as authoritative while the repository default is `develop`.
 - Production consumers are required to pin a released package checksum and provenance/SBOM evidence rather than a transient pull-request head or branch artifact.
 
 ### Security
