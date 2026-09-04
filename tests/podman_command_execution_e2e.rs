@@ -79,6 +79,7 @@ fn request(command: Vec<String>, lease_seconds: u32) -> CommandExecutionRequest 
         request_id: unique_request_id(),
         image_reference: fixture_image(),
         command,
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: limits.maximum_memory_bytes,
             cpu_millicores: limits.maximum_cpu_millicores,

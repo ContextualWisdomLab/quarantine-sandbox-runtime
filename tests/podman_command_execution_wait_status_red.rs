@@ -66,6 +66,7 @@ fn request() -> CommandExecutionRequest {
         request_id: "command-wait-status-red-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,

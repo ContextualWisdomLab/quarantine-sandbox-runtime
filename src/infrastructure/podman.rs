@@ -17,6 +17,7 @@ use crate::{
     CommandExecutionError, CommandExecutionRequest, CommandExecutionResult, IsolationControlStatus,
     IsolationPolicy, ResourceRequest, ServiceEndpoint, VerifiedIsolationState,
     application_service::CommandExecutionOutcome, sandbox_execution::RuntimeLeaseMetadata,
+    stage_pr_source_artifact,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -73,6 +74,18 @@ struct ContainerInspection {
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
     host_config: ContainerHostConfig,
+    #[serde(default, rename = "Mounts")]
+    mounts: Vec<ContainerMount>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerMount {
+    #[serde(rename = "Destination")]
+    destination: String,
+    #[serde(default, rename = "Options")]
+    options: Vec<String>,
+    #[serde(rename = "RW")]
+    read_write: bool,
 }
 
 /// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
@@ -494,6 +507,11 @@ impl RootlessPodmanAdapter {
         started_at_epoch_seconds: u64,
     ) -> Result<CommandExecutionResult, CommandExecutionError> {
         request.validate(policy)?;
+        let staged_source = request
+            .source_artifact
+            .as_ref()
+            .map(stage_pr_source_artifact)
+            .transpose()?;
         let info_output = self.checked_output(
             "backend_security_info",
             &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
@@ -562,8 +580,17 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy_sha256={}",
                 policy.effective_policy_sha256()
             ),
-            request.image_reference.clone(),
         ];
+        if let Some(staged) = &staged_source {
+            create_args.push("--volume".to_owned());
+            create_args.push(format!(
+                "{}:/workspace:ro,noexec,nosuid,nodev,Z",
+                staged.path().display()
+            ));
+            create_args.push("--workdir".to_owned());
+            create_args.push("/workspace".to_owned());
+        }
+        create_args.push(request.image_reference.clone());
         create_args.extend(request.command.iter().cloned());
 
         let create_output = match self.checked_output("container_create", &create_args) {
@@ -675,6 +702,9 @@ impl RootlessPodmanAdapter {
                 stderr_truncated: logs_outcome.stderr_truncated,
                 started_at_epoch_seconds,
                 finished_at_epoch_seconds,
+                source_artifact_receipt: staged_source
+                    .as_ref()
+                    .map(|staged| staged.receipt().clone()),
             },
         ))
     }
@@ -822,6 +852,24 @@ impl RootlessPodmanAdapter {
             "resource_limits",
             resource_limits_match(&container.host_config, &request.resources),
         )?;
+        if request.source_artifact.is_some() {
+            let source_mount = container
+                .mounts
+                .iter()
+                .find(|mount| mount.destination == "/workspace");
+            require_control(
+                "source_artifact_read_only",
+                source_mount.is_some_and(|mount| !mount.read_write),
+            )?;
+            for required_option in ["noexec", "nosuid", "nodev"] {
+                require_control(
+                    "source_artifact_mount_options",
+                    source_mount.is_some_and(|mount| {
+                        mount.options.iter().any(|option| option == required_option)
+                    }),
+                )?;
+            }
+        }
 
         let process_args = [
             "top".to_owned(),

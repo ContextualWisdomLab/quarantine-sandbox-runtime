@@ -17,8 +17,10 @@ use std::{
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
+    RootlessPodmanAdapter,
 };
+use sha2::{Digest, Sha256};
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -67,6 +69,7 @@ fn request(lease_seconds: u32) -> CommandExecutionRequest {
         request_id: "cmdexec-fake-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,
@@ -75,6 +78,15 @@ fn request(lease_seconds: u32) -> CommandExecutionRequest {
             tmpfs_bytes: 16 * 1024 * 1024,
         },
     }
+}
+
+fn single_file_tree_digest(path: &str, bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update((path.len() as u64).to_be_bytes());
+    hasher.update(path.as_bytes());
+    hasher.update((bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 /// `UsernsMode` empty, `auto` only recorded as the Podman 6.1.0-style annotation.
@@ -91,6 +103,19 @@ fn container_inspect_json(id: &str) -> String {
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
          \"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]"
+    )
+}
+
+fn container_inspect_json_with_source(id: &str) -> String {
+    format!(
+        "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
+         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\"}},\
+         \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
+         \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
+         \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\
+         \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
+         \"Mounts\":[{{\"Destination\":\"/workspace\",\"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
     )
 }
 
@@ -169,6 +194,59 @@ fn run_command_at_rejects_an_invalid_policy_before_invoking_podman() {
     );
 
     let _ = fs::remove_file(program);
+}
+
+#[test]
+fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_receipt() {
+    let source = temporary_path("pr-source");
+    fs::create_dir_all(&source).expect("source directory");
+    let source_bytes = b"print('isolated')\n";
+    fs::write(source.join("check.py"), source_bytes).expect("source file");
+    fs::set_permissions(source.join("check.py"), fs::Permissions::from_mode(0o755))
+        .expect("executable source fixture");
+    let create_log = temporary_path("pr-source-create-args");
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf '%s\\n' \"$@\" > '{}'; printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         top:*) printf '%s' '{}' ;;\n  \
+         wait:*) printf '0\\n' ;;\n  \
+         logs:*) : ;;\n  \
+         rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        create_log.display(),
+        container_inspect_json_with_source("fake-command-container-id"),
+        top_line_apparmor_confined(),
+    );
+    let program = write_executable("pr-source", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let mut command_request = request(20);
+    command_request.source_artifact = Some(PrSourceArtifactInput {
+        host_path: source.clone(),
+        revision_sha: "d".repeat(40),
+        expected_tree_sha256: single_file_tree_digest("check.py", source_bytes),
+    });
+
+    let result = adapter
+        .run_command_at(&command_request, &policy(), 1_780_000_000)
+        .expect("verified staged source should execute");
+
+    let create_args = fs::read_to_string(&create_log).expect("create args should be recorded");
+    assert!(create_args.contains(":/workspace:ro,noexec,nosuid,nodev,Z"));
+    assert!(create_args.contains("--workdir\n/workspace"));
+    assert!(!create_args.contains(&source.display().to_string()));
+    let receipt = result.source_artifact_receipt().expect("source receipt");
+    assert_eq!(receipt.revision_sha(), "d".repeat(40));
+    assert_eq!(receipt.executable_files_stripped(), 1);
+    assert!(receipt.mounted_read_only());
+    assert!(receipt.mounted_noexec());
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(create_log);
+    let _ = fs::remove_dir_all(source);
 }
 
 #[test]

@@ -27,7 +27,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::ApplicationServiceError;
-use crate::{CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest, SandboxExecutionError};
+use crate::{
+    CONTRACT_SCHEMA_VERSION, IsolationPolicy, PrSourceArtifactError, PrSourceArtifactInput,
+    PrSourceArtifactReceipt, ResourceRequest, SandboxExecutionError,
+};
 
 const COMMAND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "1.0.0";
 
@@ -43,6 +46,8 @@ pub struct CommandExecutionRequest {
     pub image_reference: String,
     /// Direct argv executed inside the sandbox; no shell is used.
     pub command: Vec<String>,
+    /// Optional exact-revision PR source tree staged and mounted by the runtime.
+    pub source_artifact: Option<PrSourceArtifactInput>,
     /// Requested resources, which must remain within the operator policy.
     pub resources: ResourceRequest,
 }
@@ -86,6 +91,9 @@ impl CommandExecutionRequest {
             {
                 return Err(CommandExecutionError::InvalidCommandArgument { argument_index });
             }
+        }
+        if let Some(source_artifact) = &self.source_artifact {
+            source_artifact.validate_contract()?;
         }
         self.resources.validate_against(policy)?;
         Ok(())
@@ -152,6 +160,7 @@ pub(crate) struct CommandExecutionOutcome {
     pub(crate) stderr_truncated: bool,
     pub(crate) started_at_epoch_seconds: u64,
     pub(crate) finished_at_epoch_seconds: u64,
+    pub(crate) source_artifact_receipt: Option<PrSourceArtifactReceipt>,
 }
 
 /// Bounded, attributable outcome of one command executed to completion inside an isolated sandbox.
@@ -171,6 +180,7 @@ pub struct CommandExecutionResult {
     stderr_truncated: bool,
     started_at_epoch_seconds: u64,
     finished_at_epoch_seconds: u64,
+    source_artifact_receipt: Option<PrSourceArtifactReceipt>,
 }
 
 /// Constructs a [`CommandExecutionResult`] from backend-supplied fields.
@@ -194,6 +204,7 @@ impl CommandExecutionResult {
             stderr_truncated: outcome.stderr_truncated,
             started_at_epoch_seconds: outcome.started_at_epoch_seconds,
             finished_at_epoch_seconds: outcome.finished_at_epoch_seconds,
+            source_artifact_receipt: outcome.source_artifact_receipt,
         }
     }
 }
@@ -289,6 +300,12 @@ impl CommandExecutionResult {
     pub const fn finished_at_epoch_seconds(&self) -> u64 {
         self.finished_at_epoch_seconds
     }
+
+    /// Return exact-revision and sanitization evidence for the mounted PR source.
+    #[must_use]
+    pub const fn source_artifact_receipt(&self) -> Option<&PrSourceArtifactReceipt> {
+        self.source_artifact_receipt.as_ref()
+    }
 }
 
 /// Fail-closed command-execution validation or runtime error.
@@ -321,10 +338,29 @@ pub enum CommandExecutionError {
         /// Zero-based argument position.
         argument_index: usize,
     },
+    /// The optional PR source artifact failed validation or fail-closed staging.
+    #[error("PR source artifact rejected: {reason}")]
+    InvalidSourceArtifact {
+        /// Stable, non-sensitive rejection reason.
+        reason: &'static str,
+    },
     /// The operator isolation policy was invalid, a resource request exceeded
     /// it, or the backend could not establish or observe the sandbox.
     #[error(transparent)]
     Backend(#[from] ApplicationServiceError),
+}
+
+impl From<PrSourceArtifactError> for CommandExecutionError {
+    fn from(error: PrSourceArtifactError) -> Self {
+        let reason = match error {
+            PrSourceArtifactError::InvalidInput { .. } => "invalid_input",
+            PrSourceArtifactError::UnsupportedEntry { .. } => "unsupported_entry",
+            PrSourceArtifactError::LimitExceeded { .. } => "limit_exceeded",
+            PrSourceArtifactError::DigestMismatch => "digest_mismatch",
+            PrSourceArtifactError::Io(_) => "staging_failed",
+        };
+        Self::InvalidSourceArtifact { reason }
+    }
 }
 
 impl From<SandboxExecutionError> for CommandExecutionError {
@@ -371,6 +407,7 @@ mod tests {
             request_id: "pr-1234-verify".to_owned(),
             image_reference: format!("ci/verify-runner@sha256:{}", "a".repeat(64)),
             command: vec!["pytest".to_owned(), "-q".to_owned()],
+            source_artifact: None,
             resources: resources(),
         }
     }
@@ -396,6 +433,7 @@ mod tests {
             stderr_truncated: false,
             started_at_epoch_seconds: 1,
             finished_at_epoch_seconds: 2,
+            source_artifact_receipt: None,
         }
     }
 

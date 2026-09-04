@@ -18,8 +18,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    execute_command,
+    CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
+    RootlessPodmanAdapter, execute_command,
 };
 
 const SCHEMA_VERSION: &str = "1.0.0";
@@ -56,6 +56,9 @@ struct RunArgs {
     lease_seconds: u32,
     tmpfs_bytes: u64,
     podman_program: String,
+    source_path: Option<String>,
+    source_revision: Option<String>,
+    source_tree_sha256: Option<String>,
     command: Vec<String>,
 }
 
@@ -64,6 +67,7 @@ fn print_usage() {
         "usage: quarantine-sandbox-runtime run --image <repo@sha256:digest> [--request-id ID]\n\
          \x20      [--memory-bytes N] [--cpu-millicores N] [--max-processes N]\n\
          \x20      [--timeout-seconds N] [--tmpfs-bytes N] [--podman PATH] -- <command> [args...]\n\n\
+         \x20      [--source-path PATH --source-revision SHA --source-tree-sha256 SHA256]\n\
          Runs one bounded command to completion inside a rootless-Podman sandbox with no network\n\
          namespace attachment (all egress denied) and prints its exit status plus bounded\n\
          stdout/stderr as JSON on stdout. This process's own exit code mirrors the sandboxed\n\
@@ -95,6 +99,9 @@ fn parse_args(
     let mut lease_seconds = policy.maximum_lease_seconds;
     let mut tmpfs_bytes = policy.maximum_tmpfs_bytes;
     let mut podman_program = "podman".to_owned();
+    let mut source_path = None;
+    let mut source_revision = None;
+    let mut source_tree_sha256 = None;
     let mut command = Vec::new();
 
     while let Some(flag) = args.next() {
@@ -121,6 +128,9 @@ fn parse_args(
             }
             "--tmpfs-bytes" => tmpfs_bytes = parse_number(&next_value()?, "--tmpfs-bytes")?,
             "--podman" => podman_program = next_value()?,
+            "--source-path" => source_path = Some(next_value()?),
+            "--source-revision" => source_revision = Some(next_value()?),
+            "--source-tree-sha256" => source_tree_sha256 = Some(next_value()?),
             other => return Err(format!("unknown flag: {other}")),
         }
     }
@@ -128,6 +138,14 @@ fn parse_args(
     let image_reference = image_reference.ok_or_else(|| "--image is required".to_owned())?;
     if command.is_empty() {
         return Err("no command given after `--`".to_owned());
+    }
+    let source_flags = [
+        source_path.is_some(),
+        source_revision.is_some(),
+        source_tree_sha256.is_some(),
+    ];
+    if source_flags.iter().any(|present| *present) && !source_flags.iter().all(|present| *present) {
+        return Err("PR source input requires --source-path, --source-revision, and --source-tree-sha256 together".to_owned());
     }
 
     Ok(RunArgs {
@@ -139,6 +157,9 @@ fn parse_args(
         lease_seconds,
         tmpfs_bytes,
         podman_program,
+        source_path,
+        source_revision,
+        source_tree_sha256,
         command,
     })
 }
@@ -176,6 +197,11 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         request_id: parsed.request_id.unwrap_or_else(default_request_id),
         image_reference: parsed.image_reference,
         command: parsed.command,
+        source_artifact: parsed.source_path.map(|host_path| PrSourceArtifactInput {
+            host_path: host_path.into(),
+            revision_sha: parsed.source_revision.unwrap_or_default(),
+            expected_tree_sha256: parsed.source_tree_sha256.unwrap_or_default(),
+        }),
         resources: ResourceRequest {
             memory_bytes: parsed.memory_bytes,
             cpu_millicores: parsed.cpu_millicores,
@@ -301,6 +327,61 @@ mod tests {
             parsed.command,
             vec!["sh".to_owned(), "-c".to_owned(), "echo hi".to_owned()]
         );
+    }
+
+    #[test]
+    fn parse_args_accepts_complete_exact_revision_source_identity() {
+        let policy = default_policy();
+        let parsed = parse_args(
+            &policy,
+            args(&[
+                "run",
+                "--image",
+                "repo@sha256:deadbeef",
+                "--source-path",
+                "/trusted/materialized/pr",
+                "--source-revision",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "--source-tree-sha256",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "--",
+                "python",
+                "check.py",
+            ]),
+        )
+        .expect("complete source identity should parse");
+
+        assert_eq!(
+            parsed.source_path.as_deref(),
+            Some("/trusted/materialized/pr")
+        );
+        assert_eq!(
+            parsed.source_revision.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(
+            parsed.source_tree_sha256.as_deref(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+    }
+
+    #[test]
+    fn parse_args_rejects_partial_source_identity() {
+        let policy = default_policy();
+        let error = parse_args(
+            &policy,
+            args(&[
+                "run",
+                "--image",
+                "repo@sha256:deadbeef",
+                "--source-path",
+                "/trusted/materialized/pr",
+                "--",
+                "true",
+            ]),
+        )
+        .expect_err("partial source identity must fail closed");
+        assert!(error.contains("requires --source-path"));
     }
 
     #[test]
