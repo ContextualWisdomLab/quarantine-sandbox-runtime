@@ -29,6 +29,42 @@ pub(crate) enum BoundedCommandError {
     Capture,
 }
 
+/// Terminal facts for a command run to completion under bounded wall-clock and
+/// output budgets, where exceeding either budget is an expected, reportable
+/// outcome rather than a hard error.
+///
+/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
+/// (inspect a JSON payload, create a resource) treat any overflow as an
+/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
+/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
+/// hostile backend. A workload's own stdout/stderr has no such ceiling on
+/// legitimate size, and a workload exceeding its wall-clock lease is routine,
+/// so this variant reports both as facts on a successful outcome instead of
+/// discarding the partial evidence collected before termination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundedRunOutcome {
+    /// The process's own exit status, or `None` when it was killed before
+    /// reporting one (wall-clock timeout or output-budget enforcement).
+    pub(crate) status: Option<ExitStatus>,
+    /// Whether the process was killed for exceeding its wall-clock budget.
+    pub(crate) timed_out: bool,
+    /// Standard output retained up to the configured per-stream budget.
+    pub(crate) stdout: Vec<u8>,
+    /// Whether standard output was truncated to the configured budget.
+    pub(crate) stdout_truncated: bool,
+    /// Standard error retained up to the configured per-stream budget.
+    pub(crate) stderr: Vec<u8>,
+    /// Whether standard error was truncated to the configured budget.
+    pub(crate) stderr_truncated: bool,
+}
+
+type ExecuteOutcome = (
+    Result<ExitStatus, BoundedCommandError>,
+    Result<Vec<u8>, BoundedCommandError>,
+    Result<Vec<u8>, BoundedCommandError>,
+    bool,
+);
+
 /// Execute direct argv with bounded wall-clock and retained stdout/stderr memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BoundedCommandRunner {
@@ -45,6 +81,32 @@ impl BoundedCommandRunner {
         }
     }
 
+    /// Spawn, supervise to a terminal state, and drain both pipes.
+    ///
+    /// Shared by [`Self::run`] and [`Self::run_to_completion`], which differ
+    /// only in how they interpret a timeout or output-budget overflow.
+    fn execute(
+        self,
+        program: &Path,
+        args: &[String],
+    ) -> Result<ExecuteOutcome, BoundedCommandError> {
+        let (mut child, stdout, stderr) = spawn_piped_child(program, args)?;
+        let overflow = Arc::new(AtomicBool::new(false));
+        let stdout_handle = drain_stream(stdout, self.output_limit_bytes, Arc::clone(&overflow));
+        let stderr_handle = drain_stream(stderr, self.output_limit_bytes, Arc::clone(&overflow));
+        let deadline = Instant::now() + self.timeout;
+
+        let status_result = supervise_child(&mut child, deadline, overflow.as_ref());
+        let stdout_result = join_stream(stdout_handle);
+        let stderr_result = join_stream(stderr_handle);
+        Ok((
+            status_result,
+            stdout_result,
+            stderr_result,
+            overflow.load(Ordering::Acquire),
+        ))
+    }
+
     /// Execute one direct command, continuously draining both output pipes.
     ///
     /// Output beyond the configured per-stream limit is discarded while the
@@ -55,21 +117,36 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<Output, BoundedCommandError> {
-        let (mut child, stdout, stderr) = spawn_piped_child(program, args)?;
-        let overflow = Arc::new(AtomicBool::new(false));
-        let stdout_handle = drain_stream(stdout, self.output_limit_bytes, Arc::clone(&overflow));
-        let stderr_handle = drain_stream(stderr, self.output_limit_bytes, Arc::clone(&overflow));
-        let deadline = Instant::now() + self.timeout;
+        let (status_result, stdout_result, stderr_result, overflowed) =
+            self.execute(program, args)?;
+        finalize_output(status_result, stdout_result, stderr_result, overflowed)
+    }
 
-        let status_result = supervise_child(&mut child, deadline, overflow.as_ref());
-        let stdout_result = join_stream(stdout_handle);
-        let stderr_result = join_stream(stderr_handle);
-        finalize_output(
-            status_result,
-            stdout_result,
-            stderr_result,
-            overflow.load(Ordering::Acquire),
-        )
+    /// Run one workload command to completion, reporting a wall-clock timeout
+    /// or output-budget overflow as terminal facts instead of hard errors.
+    ///
+    /// A pipe-capture failure ([`BoundedCommandError::Capture`]) or an
+    /// inability to observe/reap the child ([`BoundedCommandError::Wait`])
+    /// remain hard errors: those indicate the supervising process itself
+    /// malfunctioned, not a fact about the supervised workload.
+    pub(crate) fn run_to_completion(
+        self,
+        program: &Path,
+        args: &[String],
+    ) -> Result<BoundedRunOutcome, BoundedCommandError> {
+        let (status_result, stdout_result, stderr_result, overflowed) =
+            self.execute(program, args)?;
+        let stdout = stdout_result?;
+        let stderr = stderr_result?;
+        let (status, timed_out) = classify_completion_status(status_result)?;
+        Ok(BoundedRunOutcome {
+            status,
+            timed_out,
+            stdout,
+            stdout_truncated: overflowed,
+            stderr,
+            stderr_truncated: overflowed,
+        })
     }
 }
 
@@ -114,6 +191,24 @@ fn finalize_output(
         stdout,
         stderr,
     })
+}
+
+/// Interpret the supervisor's terminal status for [`BoundedCommandRunner::run_to_completion`].
+///
+/// A wall-clock timeout or output-budget overflow become terminal facts
+/// (`None` status, `timed_out` set only for the former); any other
+/// supervision failure (an inability to observe or reap the child) remains a
+/// hard error, since that indicates the supervisor itself malfunctioned, not
+/// a fact about the supervised workload.
+fn classify_completion_status(
+    status_result: Result<ExitStatus, BoundedCommandError>,
+) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
+    match status_result {
+        Ok(status) => Ok((Some(status), false)),
+        Err(BoundedCommandError::Timeout) => Ok((None, true)),
+        Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
+        Err(other) => Err(other),
+    }
 }
 
 trait ChildProcess {
