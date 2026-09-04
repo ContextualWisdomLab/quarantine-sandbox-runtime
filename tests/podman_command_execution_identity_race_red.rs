@@ -5,6 +5,10 @@
 //! in the same supplied start second. Each invocation must still receive an
 //! independent runtime-owned sandbox identity so cleanup can never target a
 //! sibling invocation's container.
+//!
+//! Runtime uniqueness also needs enough retained collision resistance. A
+//! 128-bit execution nonce that is hashed and then truncated to a 64-bit
+//! resource name does not preserve the security margin the runtime generated.
 
 #![cfg(target_os = "linux")]
 
@@ -80,6 +84,22 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
+fn assert_runtime_identity_retains_128_bits(sandbox_id: &str) {
+    let suffix = sandbox_id
+        .strip_prefix("qsr-cmd-")
+        .expect("command sandbox identity must use the qsr-cmd prefix");
+    assert!(
+        suffix.len() >= 32,
+        "command sandbox identity must retain at least 128 bits as 32 hexadecimal characters"
+    );
+    assert!(
+        suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "command sandbox identity suffix must remain lowercase hexadecimal"
+    );
+}
+
 #[test]
 fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resources() {
     let call_log = temporary_path("calls");
@@ -116,6 +136,8 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
         second.sandbox_id(),
         "parallel one-shot invocations must not share a runtime resource identity"
     );
+    assert_runtime_identity_retains_128_bits(first.sandbox_id());
+    assert_runtime_identity_retains_128_bits(second.sandbox_id());
 
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     let create_names = calls
