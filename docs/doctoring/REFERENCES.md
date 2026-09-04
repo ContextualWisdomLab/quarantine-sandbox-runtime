@@ -34,6 +34,8 @@ Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. http
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
+Podman Authors. (n.d.). *Container inspect data definitions (Podman v4.9.3)*. GitHub. Retrieved September 4, 2026, from https://github.com/containers/podman/blob/v4.9.3/libpod/define/container_inspect.go
+
 Podman Authors. (2026). *podman-network-create — Create a network*. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
 
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
