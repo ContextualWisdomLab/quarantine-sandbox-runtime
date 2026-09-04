@@ -3,13 +3,8 @@
 #![cfg(target_os = "linux")]
 
 use std::{
-    fs,
-    net::TcpListener,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-    sync::Arc,
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    fs, net::TcpListener, os::unix::fs::PermissionsExt, path::Path, sync::Arc, thread,
+    time::Duration,
 };
 
 use quarantine_sandbox_runtime::{
@@ -58,17 +53,6 @@ fn request() -> ApplicationServiceRequest {
             tmpfs_bytes: 32 * 1024 * 1024,
         },
     }
-}
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "qsr-ownership-{name}-{}-{nanos}",
-        std::process::id()
-    ))
 }
 
 fn write_fake_podman(program: &Path, log: &Path, mode: &str, ready_port: u16) {
@@ -135,8 +119,9 @@ fn identical_retry_returns_existing_lease_without_second_launch() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
     let coordinator =
         ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
@@ -166,8 +151,9 @@ fn same_owner_and_request_id_with_different_content_fails_closed() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
     let coordinator =
         ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
@@ -198,8 +184,9 @@ fn wrong_owner_cannot_terminate_another_callers_lease() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
     let coordinator =
         ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
@@ -230,8 +217,9 @@ fn failed_launch_releases_idempotency_reservation_for_retry() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "fail_rootless", ready_port);
     let coordinator =
         ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));
@@ -264,8 +252,9 @@ fn concurrent_duplicate_launch_is_rejected_while_first_launch_is_in_flight() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "slow_rootless", ready_port);
     let coordinator = Arc::new(ApplicationServiceCoordinator::new(
         RootlessPodmanAdapter::new(program.clone()),
@@ -302,8 +291,9 @@ fn expired_lease_cleanup_is_bounded_and_attributed_to_owner_and_request() {
         .local_addr()
         .expect("address should resolve")
         .port();
-    let program = temporary_path("fake-podman");
-    let log = temporary_path("fake-podman-log");
+    let fixture = tempfile::tempdir().expect("isolated ownership fixture directory");
+    let program = fixture.path().join("fake-podman");
+    let log = fixture.path().join("fake-podman-log");
     write_fake_podman(&program, &log, "success", ready_port);
     let coordinator =
         ApplicationServiceCoordinator::new(RootlessPodmanAdapter::new(program.clone()));

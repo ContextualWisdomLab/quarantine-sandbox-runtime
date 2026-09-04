@@ -171,7 +171,6 @@ impl ExpiredLeaseCleanupResult {
     }
 
     /// Return the cleanup receipt or attributable backend failure.
-    #[must_use]
     pub const fn result(&self) -> &Result<CleanupReceipt, ApplicationServiceError> {
         &self.result
     }
@@ -388,11 +387,8 @@ where
                     _ => None,
                 })
                 .collect();
-            candidates.sort_by(|left, right| {
-                left.3
-                    .cmp(&right.3)
-                    .then_with(|| left.0.cmp(&right.0))
-            });
+            candidates
+                .sort_by(|left, right| left.3.cmp(&right.3).then_with(|| left.0.cmp(&right.0)));
             candidates.truncate(MAX_EXPIRED_CLEANUPS_PER_CALL);
             for (key, request_fingerprint, lease, cleanup_attempts) in &candidates {
                 leases.insert(
@@ -695,10 +691,12 @@ mod tests {
     fn cleanup_failure_is_not_hidden_by_later_registry_failure() {
         let terminate_entered = Arc::new(Barrier::new(2));
         let terminate_resume = Arc::new(Barrier::new(2));
-        let coordinator = Arc::new(ApplicationServiceCoordinator::new(TerminationFailureBackend {
-            terminate_entered: Arc::clone(&terminate_entered),
-            terminate_resume: Arc::clone(&terminate_resume),
-        }));
+        let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+            TerminationFailureBackend {
+                terminate_entered: Arc::clone(&terminate_entered),
+                terminate_resume: Arc::clone(&terminate_resume),
+            },
+        ));
         let owner = LeaseOwnerId::new("urn:cwl:agent:test").unwrap_or_else(|_| {
             std::panic::resume_unwind(Box::new(
                 "test owner should satisfy the bounded identity contract",
