@@ -55,3 +55,18 @@ fn ci_cancels_only_superseded_heads_of_the_same_pull_request() {
         "non-PR runs must not share a ref-scoped cancellation group"
     );
 }
+
+#[test]
+fn ci_runs_on_integrated_protected_develop_head() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+
+    assert!(
+        workflow.contains("push:\n    branches: [develop]"),
+        "native CI must run after integration into the protected default branch develop"
+    );
+    assert!(
+        !workflow.contains("push:\n    branches: [main]"),
+        "native CI must not retain the stale main-only push trigger"
+    );
+}

@@ -1,94 +1,92 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-04 against parent PR #1 exact head `06b39670ba5a434e8e34aac6f5b7fa2b6b75fe87` and stacked PR #6 source/restack head `60440480ba779599a7dbe917d19ec8e0e4ff7749`. The immediately following ledger commit changes documentation only. The stack is non-force reconciled onto the current parent security/wire contract and includes caller-scoped lease ownership plus starvation-resistant bounded expiry cleanup. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority until protected integration. Hosted evidence must be generated for unchanged current heads; predecessor results do not transfer.
+Last reviewed on 2026-09-05 KST against dependency-root PR #1 exact test-bearing head `c43e5ca27acd96d085a4719fe5cb69de270aa723` and protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, backend-applied configuration evidence, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
 
 ## Product responsibility
 
-Quarantine Sandbox Runtime is a reusable hostile-workload isolation and evidence runtime with two consumer verticals:
-
-1. `artifact_analysis` owns hostile artifact identity, bounded ingestion, analysis execution evidence, provenance, and analysis completeness;
-2. `application_service` owns short-lived isolated application-service leases for authorized Chat/Agent consumers.
-
-Core `sandbox_execution` owns isolation policy, resource bounds, runtime lease metadata, lifecycle primitives, and backend-neutral execution invariants. Podman/gVisor/containerd/Kubernetes/VM mechanisms are infrastructure adapters. Wardnet retains maliciousness verdict, incident, quarantine, blocking, notification, and retention authority. `contextual-orchestrator` retains chat, Agent/task/tool policy, authorization, application selection, secrets, and user-visible actions.
+Quarantine Sandbox Runtime owns reusable sandbox execution, isolation-policy enforcement, resource bounds, lease/readiness/cleanup attestation, and artifact-analysis evidence. `sandbox_execution` is the Core bounded context; `artifact_analysis` and `application_service` are Supporting contexts. Podman/gVisor/containerd/Kubernetes/VM remain infrastructure adapters. Wardnet retains verdict/incident/quarantine authority. Agent/chat consumers retain task/tool/application authorization, identity, secrets, and user-action authority.
 
 ## DDD and repository structure
 
 | Gap | Current evidence | Status | Required action |
 | --- | --- | --- | --- |
-| Artifact analysis was flattened under generic crate-root files. | PR #1 places implementation under `src/artifact_analysis/` and keeps only the public crate facade at root. | Corrected on parent PR | Keep architecture fitness checks green. |
-| Podman implementation lived under Core and depended on Supporting application-service types. | PR #1 keeps Podman under `src/infrastructure/podman.rs`; Core owns `SandboxExecutionError`, while the application boundary translates errors. | Corrected on parent PR | Do not move container adapters back into Core. |
-| Application-service lifecycle had no backend-neutral port or caller ownership. | PR #6 adds `ApplicationServiceBackend`, `ApplicationServiceCoordinator`, and `LeaseOwnerId`; Podman implements the port in infrastructure. | Implemented on stacked PR; exact-head proof required | Preserve port direction for future gVisor/containerd adapters. |
-| Product-authority documentation was split across an older documentation PR. | PR #3 was closed as superseded after preserving applicable material in PR #1. | Converged | Keep one canonical documentation line. |
-| Repository name is narrower than its present responsibility. | Product now serves application-service isolation as well as quarantine/artifact analysis. | Known product-name gap | Reassess rename before GA through repository-settings authority; preserve redirects and consumer migration if changed. |
+| Artifact analysis had been flattened under root modules. | PR #1 keeps implementation under `src/artifact_analysis/` and repository fitness tests forbid obsolete root paths. | Corrected on active PR | Preserve through protected integration. |
+| Podman infrastructure had leaked into Core and Supporting application-service types. | PR #1 keeps Podman under `src/infrastructure/`, backend-neutral Core errors/contracts, and composition-boundary application translation. | Corrected on active PR | Keep dependency direction and unique-ADR fitness tests GREEN. |
+| Pre-publication ADR identities conflicted. | Canonical ADR line is `0001`–`0006`; ADR-0006 remains Proposed while the runtime decision is unmerged. | Corrected on active PR | Promote only after protected integration and then-current runtime evidence. |
+| Admission, session lifecycle, recovery, and network/egress still meet inside process-local application-service coordination. | Issue #8 defines the intended bounded-context extraction and forbids durable/distributed responsibilities from accumulating in generic application-service internals. | Known structural gap | Extract only with executable contracts and compatibility boundaries; no cosmetic folder churn. |
+| Repository name remains security-biased relative to application-service isolation responsibility. | Product scope spans hostile artifact analysis and reusable application isolation. | Known naming gap | Re-evaluate before GA through repository-settings owner path with redirects/consumer migration. |
 
 ## Application-service isolation
 
 | Capability | Current evidence | Status | Required action |
 | --- | --- | --- | --- |
-| Immutable workload identity | Parent PR #1 now rejects explicit `containers/image` transports that can redirect Podman to host-backed directories, archives, alternate local stores, or another runtime authority. RED `02ee218a…` covers `dir:`, `docker-archive:`, `oci-archive:`, `docker-daemon:`, and `containers-storage:`; repair `6df890ca…` preserves normal registry names with optional numeric ports; schema/docs/traceability are aligned. PR #6 inherited that repair through merge-base `06b39670…`. | Corrected on parent and inherited by PR #6; exact-head proof required | Keep image import/admission separate from launch; never reintroduce host-path/alternate-store transports or implicit pulls. |
-| Rootless execution | Podman adapter verifies rootless backend state and fails closed otherwise. Parent hosted contract now explicitly tests Ubuntu 24.04 distribution Podman 4.9.3. | Parent PR | Keep real rootless backend acceptance on every release head. |
-| Filesystem isolation | Read-only root filesystem, bounded noexec/nosuid/nodev tmpfs, image volumes ignored, no arbitrary host mount request; host-backed image transports are rejected before launch. | Parent PR | Add only typed reviewed read-only input mounts when a buyer flow requires them. |
-| Privilege isolation | Capabilities dropped, no-new-privileges, isolated user/process-related namespaces, numeric non-root identity. | Parent PR | Preserve effective-runtime verification rather than relying only on argv construction. |
-| Network isolation | Per-sandbox internal DNS-disabled network and loopback-only host publication. | Parent PR | Controlled egress must be a separate profile and must not silently enable Internet access. |
-| Credential isolation | No consumer/provider credentials, arbitrary environment, runtime sockets, host devices, or ambient proxy variables enter the P0 workload contract. | Parent PR | Add a task-scoped secret broker only after an accepted ADR and explicit consumer authorization. |
-| Resource limits | Memory, CPU, PID, lease duration, tmpfs, readiness timeout/polling, and shutdown grace are policy bounded. | Parent PR | Verify enforcement across supported host/cgroup profiles and fail closed where enforcement is unavailable. |
-| Readiness and cleanup | Real rootless-Podman lane has proven bounded readiness, explicit termination, and final no-container/no-network leak checks on prior parent exact heads. | Current-head proof pending | Preserve the real E2E lane on the reconciled and final release head. |
-| Runtime attestation | Lease schema `1.1.0` records backend/sandbox/network/policy, canonical full-policy SHA-256, loopback endpoint, timestamps, and P0 isolation facts. | Parent PR | Bind verified build/artifact/backend version identity and later sign durable receipts. |
-| Caller-scoped ownership | `LeaseOwnerId` is authenticated command context, not an application payload field; wrong-owner termination fails before backend cleanup. | PR #6 | Bind the owner to an authenticated versioned transport before remote/multi-process use. |
-| Idempotent launch | Coordinator keys process-local state by owner + request; identical active replay returns the lease, changed request/effective policy conflicts, and concurrent duplicate launch fails closed. | PR #6 | Publish stable wire error codes and durable replay semantics before restart claims. |
-| Expiry cleanup | Coordinator cleans at most 64 expired leases per pass, retains failed cleanup for retry, and prioritizes lower-attempt entries so repeatedly failing early keys cannot starve later expired workloads. Hostile regression covers 65 expired leases with the first 64 cleanup attempts failing. | PR #6; exact-head GREEN pending | Add persistent lease journal/orphan reconciliation and admission/resource reservation; retain fairness after persistence. |
-| gVisor/containerd/Kubernetes | No production adapter. | Missing | Add separate infrastructure adapters only after P0/lifecycle contract stabilizes. |
+| Immutable application identity | Registry-style image references require SHA-256 digest identity; explicit host-backed/alternate-store `containers/image` transports are rejected and launch uses `--pull=never`. | Corrected on active PR | Keep import/admission separate from launch; no mutable or host-path consumer resolution. |
+| Rootless backend | Exact root `24526eb55cf5db48ea07079b314f7d1b676eb48d` executed on GitHub-hosted Ubuntu 24.04 / Podman 4.9.3 and passed the explicit rootless/backend-version contract. | Real hosted evidence obtained | Re-prove every moved exact head; rootless capability does not prove per-sandbox LSM confinement. |
+| Read-only / writable surfaces | Launch uses read-only rootfs, `--read-only-tmpfs=false`, bounded `/tmp` with `rw,noexec,nosuid,nodev`, image volumes ignored, no generated hosts file, no proxy inheritance, and no systemd/sdnotify integration. Unsupported Podman 4.9.3 `--no-hostname` has been removed on the root lineage and downstream command contracts keep it absent. | Configured intent plus partial runtime inspection | Bind exact applied tmpfs mount set/options/size, then require live mount proof. |
+| Privilege / namespace isolation | Current repair checks empty container Effective/Bounding caps and process Effective/Bounding/Inheritable/Permitted/Ambient sets, no-new-privileges, seccomp, user/PID/IPC namespaces, numeric non-root identity, and enforcing SELinux/AppArmor evidence. Exact hosted E2E `24526eb...` failed closed at `lsm`, proving that the ordinary hosted image cannot supply positive effective confinement. | Negative effective-LSM evidence obtained; positive proof pending | Hosted Ubuntu is an explicit negative LSM lane. Positive release evidence remains on the dedicated SELinux-capable runner; never reinterpret unavailable/unconfined evidence as Verified. |
+| Network isolation | Per-sandbox internal DNS-disabled network is inspected and publication must resolve only to loopback. Draft #23 exact/test-bearing `dd6f4efcc06e9cc988e1ed640c95274547e6cb48` carries a stronger RED requiring positive exact container attachment and rejection of missing/additional attachments, with cleanup bound to the exact launch identities. | Object-level evidence implemented; attachment proof pending | Execute #23 on current ancestry, then add exact attachment and real negative-egress proof. |
+| Credential isolation | P0 request has no provider/user credentials, arbitrary environment map, host device/runtime socket, or broad host mount. | Active contract | Any future secret flow requires an explicit purpose-bound broker. |
+| CPU/RAM/PID bounds | `HostConfig.Memory`, `NanoCpus`, and `PidsLimit` are inspected against the request. | Backend-applied binding only; live proof incomplete | Verify the exact sandbox's authoritative cgroup-v2 values before release claim. |
+| tmpfs / wall time | Launch applies bounded `/tmp` and `--timeout`, but current root does not deserialize/bind `HostConfig.Tmpfs` or `Config.Timeout`; inspect state alone would still not prove live enforcement. Draft #19 exact/test-bearing `a7a05159a2087243956d615a606472fc6eadd91b` preserves hostile REDs for missing/wrong hardening, contradictory/duplicate tmpfs options, widened writable mounts, timeout mismatch, exact cleanup/non-publication, and exact inspect state without live proof. | P0 RED preserved on a non-force root-adopted descendant; new root movement must be adopted before final evidence | Execute #19 after current root stabilizes; after the intended `resource_limits` RED, add only the smallest inspect-binding GREEN, then live cgroup/mount/wall-time proof. |
+| Process lifecycle | Adapter invokes Podman without a shell, creates network/container, starts, attests isolation before port/readiness, and attempts complete cleanup after partial launch/attestation failure. | Active repair | Current exact head must execute full tests; durable crash/restart orphan recovery belongs to Recovery context. |
+| Subprocess spawn pressure | Exact root `24526eb...` verify reached `cargo test` and one fake-Podman case returned `BackendInvocationFailed { operation: "rootless_probe" }` instead of the intended `InvalidPortMapping`. `BoundedCommandRunner` collapses spawn/capture failures into one application error, so the observation did not prove `WouldBlock`. The generic retry that had appeared on #6 was removed from #6 and command descendants because it lacked focused RED/errno evidence. | Unsupported workaround removed; errno-level observability gap remains | If spawn failure recurs, first add focused error-kind preservation/injection RED; only then consider the smallest causal retry policy. |
+| Ownership/idempotency | Draft #6 current `e3945a007df1d003d882f7e56c9b83f1a43141da` implements caller-scoped lease ownership/idempotency while retaining canonical root subprocess behavior. | Implemented on descendant | Preserve caller-scoped ownership separately from backend invocation identity; reacquire exact-child evidence after root integration. |
+| Runtime invocation identity | Draft #21 exact `3babf075d3291faa38e0ae7ba33514e2cea058e6`, latest test-bearing `f66a295c21934b462342c2cc892a646d252b1638`, proves independent same-request/same-second invocations must not collide in container/network names, runtime identity labels, lease receipts, or cleanup targets. | P0 RED staged; production unchanged | Execute the RED, then add one collision-resistant runtime-generated invocation identity that consistently owns names, labels, lease evidence, and cleanup. |
+| gVisor/containerd/Kubernetes | Architecture targets only. | Missing | Add independent adapters after P0 contract stabilizes; public contracts remain backend-neutral. |
+
+## Attestation evidence model
+
+Configured launch intent, backend-applied inspection, and live effective enforcement are different evidence levels. A security control may advance only to the level actually proved for the exact sandbox identity. In particular:
+
+- Podman inspect can bind requested configuration but cannot by itself prove kernel cgroup or mount enforcement or that wall-time termination actually occurred.
+- A separately inspectable internal network does not prove that the running container is attached only to that network.
+- CPU/RAM/PID effective claims require authoritative cgroup-v2 evidence where the backend exposes it.
+- `/tmp` effective claims require live mount evidence showing tmpfs, exact mount point, required restrictions, and bounded size.
+- Wall-time effective claims require behavioral/runtime-owned termination and cleanup evidence or an equivalent reviewed watchdog.
+- Host AppArmor/SELinux availability is not per-sandbox confinement. Ordinary hosted CI is a negative fail-closed lane; positive LSM evidence remains a separate release gate.
 
 ## Artifact analysis
 
 | Capability | Current evidence | Status | Required action |
 | --- | --- | --- | --- |
-| Static foundation | Immutable SHA-256 identity, bounded source context, format classification, ordered static analyzer port, deterministic evidence/failure attribution. | Parent PR | Keep under `artifact_analysis` and complete final exact-head gates. |
-| YARA-X / capa / Ghidra / LIEF | No production adapters. | Missing | Add one adapter per bounded TDD increment with tool/version/digest provenance and hostile fixtures. |
-| Linux dynamic detonation | Not integrated. | Missing | Consume `sandbox_execution` or a stronger gVisor/microVM profile; never execute hostile bytes in the host control process. |
-| Windows detonation | Not integrated. | Missing | Use a separate Windows isolation pool while preserving evidence contracts. |
-| Controlled network telemetry | Not integrated. | Missing | Add an explicit sinkhole/egress profile with no production credentials and bounded capture. |
-| Durable evidence/signing | Evidence is process-local. | Missing | Define persistence/retention owner, immutable object storage, signing, replay, and chain-of-custody evidence before GA. |
-
-## Context Fabric and Enterprise Architecture integration
-
-`ContextualWisdomLab/context-graph-contracts` is the contract-only Shared Kernel for canonical object/authority references, truth status/origin, bitemporal time, provenance, Context Assertion, CloudEvents, schema conformance, and admission. `ContextualWisdomLab/enterprise-architecture-core` owns authoritative architecture and transformation decisions. While the dedicated Context Fabric writer is active, this repository treats both as read-only dependencies.
-
-Current integration rules:
-
-- do not copy malware verdicts or artifact risk scores into authoritative architecture facts;
-- service/runtime/backend technology identity, lifecycle, ownership, risk/remediation, and transformation evidence must flow only through a released compatible `context-graph-contracts` profile with conformance evidence;
-- Context Assertion events must preserve the CloudEvent envelope identity/provenance rather than emit bare assertion data;
-- schema/profile/admission drift or missing conformance is an integration defect;
-- no cross-service application-table SQL;
-- Context Fabric owner-path PRs/issues are inventoried read-only and receive exact evidence/acceptance criteria rather than quarantine-writer source changes.
-
-Previously observed Context Fabric PR numbers and heads are historical only until refreshed by the dedicated owner. This writer does not consume their mutable branches as production dependencies. Quarantine integration remains fail-closed until a compatible shared contract is immutably published and pinned.
-
-## Consumer integrations
-
-| Consumer | Authority retained by consumer | Runtime integration state |
-| --- | --- | --- |
-| Wardnet | gateway/SOC policy, maliciousness verdict, incident, quarantine/block/review, notification, retention | Runtime contract is consumer-neutral; Wardnet owner path must consume published runtime evidence without moving verdict authority here. |
-| contextual-orchestrator | LLM/model routing, chat, Agent/task/tool policy, caller authorization, application selection, secrets, user-visible actions | Issue #991 owns the ACL integration after a protected immutable runtime release. Direct Podman/containerd calls and sibling source copies are not acceptable. |
-
-The runtime currently exposes a Rust library and loopback lease topology. It does not yet publish an authenticated network process boundary or generated Python consumer. A future transport must derive `LeaseOwnerId` from verified caller context, keep idempotency scope stable, return bounded stable wire errors, validate lease/cleanup semantics, and define co-location/network topology explicitly.
+| Static foundation | SHA-256 identity, bounded ingestion, format detection, analyzer interface, deterministic evidence, and failure attribution exist on active foundation. | Active PR | Preserve under `artifact_analysis`; complete exact-head coverage/review. |
+| Claude plugin package quarantine profile | Issue #17 defines immutable source/artifact/AppGuardrail identity, fixed probes, credential-free execution, bounded resources, deny-by-default network, cleanup/recovery, and evidence-only receipts. Draft #18 current `448ddcb1325e92df39a60f938e96f6c232f81001`, latest test-bearing `7a189f9814b78785b946bbd297eeb5401e3552fe`, contains contract-first validation/path/probe/resource REDs and remains behind its moving command parent. | RED staged, not production truth | Do not overtake root/resource/command P0 blockers; reconcile ancestry non-force before execution/implementation. |
+| YARA-X / capa / Ghidra / LIEF | No production adapters yet. | Missing | Add one evidence producer per bounded increment with exact version/digest provenance. |
+| Dynamic Linux/Windows detonation | No release-grade detonation worker exists. | Missing | Consume sandbox Core/stronger backend; never execute hostile bytes in control process. |
+| Durable evidence/signing | In-memory evidence only. | Missing | Add persistence only after owner/retention/recovery/3NF/idempotency ADR. |
 
 ## Verification and release state
 
-- Parent PR #1 exact head is `06b39670ba5a434e8e34aac6f5b7fa2b6b75fe87`, still Draft. Exact-head CI `33797817805` and associated Security/SAST/Scorecard/OSV evidence were queued at the latest read, so the head is non-passing despite earlier real rootless-Podman evidence.
-- PR #1 has no formal approving review at the latest read.
-- PR #6 was non-force restacked with merge commit `60440480ba779599a7dbe917d19ec8e0e4ff7749`; compare against parent `06b39670…` proves `behind_by=0` and exact merge-base equality. Its unique caller ownership/idempotency/cleanup-fairness files remain the only semantic delta over the parent. CI run `33798281628` is queued and therefore non-passing.
-- Active organization rules require qualifying review, resolved threads, and central required workflows. Admin/bypass capability is not merge evidence.
-- No release exists. Version/release claims remain premature until one integrated protected head passes CI, security, SAST, complete coverage/docstrings, real isolation E2E, SBOM/provenance, review, rollback/recovery and protected-merge gates together.
+- Protected/default `develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea`; PR #1 remains Draft, mergeable, and has no qualifying approval at the latest review sweep. Inline review threads are currently empty.
+- Root exact test-bearing head is `c43e5ca27acd96d085a4719fe5cb69de270aa723`. It adds issue #24's RED requiring native CI `push` coverage for the actual protected/default integration branch `develop`; `.github/workflows/ci.yml` intentionally still contains `push.branches: [main]` until that RED executes and fails for the intended cause.
+- Exact `c43e5ca...` materialized CI run `33893474181`, Security Scan `33893473726`, SAST `33893473679`, and CodeQL `33893473683`. At the 2026-09-05 fresh read all four runs were still `queued`; CI jobs had not produced executable RED evidence. Queue state is incomplete evidence, not failure proof.
+- Issue #24 is distinct from runner acquisition: `.github#712` owns runs/jobs that materialize but cannot obtain execution capacity, while the stale `main` push filter can prevent a protected-`develop` integration CI run from being created at all.
+- The earlier causal effective-attestation RED `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` executed and failed because the old runtime could return a lease without effective sandbox inspection. Its causal production repair remains on the root lineage.
+- Exact root `24526eb55cf5db48ea07079b314f7d1b676eb48d` real Podman E2E passed Podman 4.9.3/rootless checks and immutable fixture pre-pull, then failed closed at `IsolationVerificationFailed { control_name: "lsm" }`; leak rejection succeeded. This is valid negative effective-LSM evidence, not a reason to weaken the control.
+- Root commit `6ad2b1c9d8f616be68dc28b35d017206f26c0787` split ordinary Ubuntu 24.04 into the explicit negative effective-LSM lane and the dedicated `[self-hosted, linux, cwl-hostile-workload, selinux]` positive lane without weakening production verification.
+- Current main command/release descendants remain Draft and non-destructively preserve valid deltas: #6 `e3945a007df1d003d882f7e56c9b83f1a43141da`, #9 `cb4bf353783fb13c137ca708918cca373e558a02`, #10 `e5f19b4aae2a8667be6c081232b0e8bbdcac586b`, #13 `fdbea49486c2e443f86d5263941da50c44ee07a6`, and #14 `32758ff65d49d5175c331cdfe18187f3ff70b439`.
+- Current RED-only/security descendants retain valid deltas without destructive restack while root is non-GREEN: #18, #19, #21, and #23. They must adopt protected/current ancestry non-force at the appropriate dependency point and reacquire exact-head evidence.
+- GitHub Releases remains empty at the latest fresh read. No immutable runtime release exists for Wardnet, contextual-orchestrator, Noema, or other consumers to pin.
+
+## Protected integration and release authority
+
+PR-head GREEN is necessary but not sufficient for release authority. A normal merge can produce a different protected integration SHA, so the first release requires native CI/security/runtime evidence on the exact protected `develop` head created by integration. Issue #24 therefore treats a missing post-integration CI run as a release-evidence failure, not as equivalent to a successful PR check.
+
+The release-evidence child #10 separately retains the protected-source RED: release preflight must resolve repository authority and prove the release source is the protected/default branch rather than hard-code stale `main` assumptions. Native CI trigger repair and release-source validation are related but distinct gates.
+
+## Consumer and release contract
+
+Wardnet remains SOC/gateway/verdict authority; contextual-orchestrator remains LLM/Agent orchestration authority; Noema remains capability/admission authority. Consumers may use only a future immutable released runtime artifact and versioned contract/ACL. Direct Podman/containerd calls, sibling source imports, mutable PR heads, and cross-service SQL are not integration mechanisms.
+
+The first release remains blocked until one exact integrated protected candidate carries complete owned statement/branch/edge coverage and public rustdoc, realistic rootless isolation E2E, positive effective LSM/seccomp/capability/resource/network/cleanup evidence, required review/security/SAST gates, package smoke, SPDX SBOM, provenance, checksum/signature as supported, reproducibility, upgrade/rollback evidence, and an immutable artifact identity.
 
 ## Next bounded slices
 
-1. Obtain exact-head GREEN for PR #6 cleanup fairness, caller-scoped lease ownership, and inherited image-transport rejection without changing a clean head merely to retrigger queued jobs.
-2. Drain parent PR #1 gate/review findings and merge only through protected policy; then revalidate the stacked lease-ownership slice against the protected parent.
-3. Implement one authenticated versioned consumer transport/binding with stable wire errors and caller identity mapping.
-4. Add durable restart/orphan reclamation, lease journal, admission/resource reservation, and crash-recovery evidence.
-5. Publish immutable runtime artifacts with SBOM/provenance and bind verified build/backend identity into attestation.
-6. Integrate Wardnet and contextual-orchestrator only through their owner paths and published contracts.
-7. Through the Context Fabric owner path, add the released quarantine runtime as a distinct EA projection preserving canonical/source references, truth status, effective/system time and provenance; never project malware verdicts as authoritative EA facts.
-8. Add stronger gVisor/containerd/Kubernetes isolation adapters and then resume dynamic artifact-analysis profiles.
+1. Execute root exact `c43e5ca...` CI/security. The issue #24 contract must first fail for stale `push.branches: [main]`; only then change the native CI push trigger to `develop` and reacquire exact-head GREEN.
+2. If `rootless_probe` spawn failure recurs, preserve/inject the concrete `io::ErrorKind` in a focused RED before any retry behavior. Keep the unsupported generic `WouldBlock` workaround removed.
+3. After root stabilizes, non-force adopt it into Draft #19 and execute the preserved resource-attestation RED; then add only the smallest inspect-binding GREEN before live cgroup/mount/wall-time proof.
+4. Execute Draft #23's effective network-binding RED on current ancestry; after reproduced failure, require positive exact attachment to the runtime-owned deny-by-default network and real negative-egress proof.
+5. Execute Draft #21's runtime-identity collision RED, then introduce one testable collision-resistant invocation identity below consumer correlation/idempotency semantics.
+6. Reconcile #6/#9/#10/#13/#14 dependency-first without force. Overlapping foundation/CI deltas must be adopted rather than copied or reintroduced.
+7. Reconcile #18 only after higher-stack P0 blockers and parent ancestry are current; keep artifact-analysis receipts as risk evidence, not admission/verdict authority.
+8. Publish the first immutable runtime release only from one exact integrated protected head, then hand off released version/digest pinning to consumer owner paths.
