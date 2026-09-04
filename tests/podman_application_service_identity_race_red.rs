@@ -102,6 +102,18 @@ fn command_targets<'a>(calls: &'a str, prefix: &str, target_index: usize) -> Vec
         .collect()
 }
 
+fn runtime_identity_labels(calls: &str) -> Vec<&str> {
+    calls
+        .lines()
+        .filter(|line| line.starts_with("create --name "))
+        .filter_map(|line| {
+            line.split_whitespace().find_map(|token| {
+                token.strip_prefix("org.contextualwisdomlab.sandbox.identity=")
+            })
+        })
+        .collect()
+}
+
 #[test]
 fn independent_same_request_launches_use_distinct_runtime_owned_resource_identities() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
@@ -202,6 +214,31 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
         network_names.iter().copied().collect::<HashSet<_>>(),
         lease_network_ids,
         "lease network identities must name the exact created networks"
+    );
+
+    let identity_labels = runtime_identity_labels(&calls);
+    assert_eq!(
+        identity_labels.len(),
+        2,
+        "both created containers must carry the runtime-owned identity label"
+    );
+    assert_eq!(
+        identity_labels.iter().copied().collect::<HashSet<_>>().len(),
+        2,
+        "runtime identity labels must be distinct across independent launches"
+    );
+    let expected_identity_labels = lease_sandbox_ids
+        .iter()
+        .map(|sandbox_id| {
+            sandbox_id
+                .strip_prefix("qsr-app-")
+                .expect("application sandbox identity must retain the qsr-app prefix")
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        identity_labels.iter().copied().collect::<HashSet<_>>(),
+        expected_identity_labels,
+        "runtime identity labels must bind the same invocation identity as lease-owned containers"
     );
 
     let stopped_sandboxes = command_targets(&calls, "stop --time ", 3)
