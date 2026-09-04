@@ -9,6 +9,7 @@
 #![cfg(target_os = "linux")]
 
 use std::{
+    collections::HashSet,
     fs,
     net::TcpListener,
     os::unix::fs::PermissionsExt,
@@ -93,6 +94,14 @@ fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
     (program, log)
 }
 
+fn command_targets<'a>(calls: &'a str, prefix: &str, target_index: usize) -> Vec<&'a str> {
+    calls
+        .lines()
+        .filter(|line| line.starts_with(prefix))
+        .filter_map(|line| line.split_whitespace().nth(target_index))
+        .collect()
+}
+
 #[test]
 fn independent_same_request_launches_use_distinct_runtime_owned_resource_identities() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
@@ -150,11 +159,71 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
         "independent launches must never share a cleanup-owning network identity"
     );
 
+    let cleanup_adapter = RootlessPodmanAdapter::new(program.clone());
+    cleanup_adapter
+        .terminate_at(&first_lease, started_at_epoch_seconds + 1)
+        .expect("first lease cleanup must target only its own resources");
+    cleanup_adapter
+        .terminate_at(&second_lease, started_at_epoch_seconds + 2)
+        .expect("second lease cleanup must target only its own resources");
+
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    let container_names = command_targets(&calls, "create --name ", 2);
+    let network_names = command_targets(&calls, "network create ", 4);
     assert_eq!(
-        calls.lines().filter(|line| line.starts_with("create --name ")).count(),
+        container_names.len(),
         2,
-        "both independent launches must reach distinct container creation attempts"
+        "both independent launches must reach container creation"
+    );
+    assert_eq!(
+        network_names.len(),
+        2,
+        "both independent launches must reach network creation"
+    );
+    assert_eq!(
+        container_names.iter().copied().collect::<HashSet<_>>().len(),
+        2,
+        "actual Podman container names must be distinct, not only lease metadata"
+    );
+    assert_eq!(
+        network_names.iter().copied().collect::<HashSet<_>>().len(),
+        2,
+        "actual Podman network names must be distinct, not only lease metadata"
+    );
+
+    let lease_sandbox_ids = HashSet::from([first_lease.sandbox_id(), second_lease.sandbox_id()]);
+    let lease_network_ids = HashSet::from([first_lease.network_id(), second_lease.network_id()]);
+    assert_eq!(
+        container_names.iter().copied().collect::<HashSet<_>>(),
+        lease_sandbox_ids,
+        "lease sandbox identities must name the exact created containers"
+    );
+    assert_eq!(
+        network_names.iter().copied().collect::<HashSet<_>>(),
+        lease_network_ids,
+        "lease network identities must name the exact created networks"
+    );
+
+    let stopped_sandboxes = command_targets(&calls, "stop --time ", 3)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let removed_sandboxes = command_targets(&calls, "rm --force ", 2)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let removed_networks = command_targets(&calls, "network rm --force ", 3)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        stopped_sandboxes, lease_sandbox_ids,
+        "termination must stop exactly the lease-owned containers"
+    );
+    assert_eq!(
+        removed_sandboxes, lease_sandbox_ids,
+        "termination must remove exactly the lease-owned containers"
+    );
+    assert_eq!(
+        removed_networks, lease_network_ids,
+        "termination must remove exactly the lease-owned networks"
     );
 
     let _ = fs::remove_file(program);
