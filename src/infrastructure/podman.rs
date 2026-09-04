@@ -332,13 +332,14 @@ impl RootlessPodmanAdapter {
         validate_backend_security(&info)?;
 
         self.checked_output("network_create", plan.network_create_args())?;
-        let create_output = match self.checked_output("container_create", plan.container_create_args()) {
-            Ok(output) => output,
-            Err(error) => {
-                self.cleanup_network(&plan)?;
-                return Err(error);
-            }
-        };
+        let create_output =
+            match self.checked_output("container_create", plan.container_create_args()) {
+                Ok(output) => output,
+                Err(error) => {
+                    self.cleanup_network(&plan)?;
+                    return Err(error);
+                }
+            };
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
@@ -355,19 +356,14 @@ impl RootlessPodmanAdapter {
             return Err(error);
         }
 
-        let host_port = match self.verify_effective_isolation(
-            &plan,
-            request,
-            policy,
-            &info,
-            &container_id,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
-                return Err(error);
-            }
-        };
+        let host_port =
+            match self.verify_effective_isolation(&plan, request, policy, &info, &container_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+                    return Err(error);
+                }
+            };
 
         if wait_for_readiness(host_port, policy).is_err() {
             self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
@@ -496,7 +492,10 @@ impl RootlessPodmanAdapter {
             !security_options
                 .iter()
                 .any(|option| option == "seccomp=unconfined")
-                && matches!(process.seccomp.to_ascii_lowercase().as_str(), "filter" | "strict"),
+                && matches!(
+                    process.seccomp.to_ascii_lowercase().as_str(),
+                    "filter" | "strict"
+                ),
         )?;
         require_control(
             "isolated_user_namespace",
@@ -554,22 +553,22 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output = self
-            .command_runner()
-            .run(&self.program, args)
-            .map_err(|error| match error {
-                BoundedCommandError::Timeout => {
-                    ApplicationServiceError::BackendCommandTimedOut { operation }
-                }
-                BoundedCommandError::OutputLimit => {
-                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                }
-                BoundedCommandError::Spawn
-                | BoundedCommandError::Wait
-                | BoundedCommandError::Capture => {
-                    ApplicationServiceError::BackendInvocationFailed { operation }
-                }
-            })?;
+        let output =
+            self.command_runner()
+                .run(&self.program, args)
+                .map_err(|error| match error {
+                    BoundedCommandError::Timeout => {
+                        ApplicationServiceError::BackendCommandTimedOut { operation }
+                    }
+                    BoundedCommandError::OutputLimit => {
+                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                    }
+                    BoundedCommandError::Spawn
+                    | BoundedCommandError::Wait
+                    | BoundedCommandError::Capture => {
+                        ApplicationServiceError::BackendInvocationFailed { operation }
+                    }
+                })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }

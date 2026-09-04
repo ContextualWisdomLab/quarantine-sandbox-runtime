@@ -157,7 +157,6 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
         "--http-proxy=false",
         "--image-volume=ignore",
         "--no-hosts",
-        "--no-hostname",
         "--systemd=false",
         "--sdnotify=ignore",
         "--cap-drop=all",
@@ -173,6 +172,10 @@ fn podman_plan_is_rootless_fail_closed_and_loopback_only() {
             "missing {required}"
         );
     }
+    assert!(
+        !create.iter().any(|argument| argument == "--no-hostname"),
+        "Podman 4.9 does not support --no-hostname"
+    );
     assert!(create.windows(2).any(|pair| pair == ["--timeout", "300"]));
     assert!(create.windows(2).any(|pair| {
         pair == [
