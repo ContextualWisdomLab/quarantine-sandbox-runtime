@@ -10,10 +10,11 @@
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
+use tempfile::TempDir;
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,
@@ -22,21 +23,46 @@ use quarantine_sandbox_runtime::{
 };
 use sha2::{Digest, Sha256};
 
-static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-cmdexec-{name}-{}-{nanos}-{unique_id}",
-        std::process::id()
-    ))
+#[derive(Clone)]
+struct FixturePath {
+    _directory: Arc<TempDir>,
+    path: PathBuf,
 }
 
-fn write_executable(name: &str, script: &str) -> PathBuf {
+impl AsRef<Path> for FixturePath {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for FixturePath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl From<FixturePath> for PathBuf {
+    fn from(value: FixturePath) -> Self {
+        value.path.clone()
+    }
+}
+
+fn temporary_path(name: &str) -> FixturePath {
+    let directory = Arc::new(
+        tempfile::Builder::new()
+            .prefix("qsr-cmdexec-test-")
+            .tempdir()
+            .expect("isolated fixture directory"),
+    );
+    FixturePath {
+        path: directory.path().join(name),
+        _directory: directory,
+    }
+}
+
+fn write_executable(name: &str, script: &str) -> FixturePath {
     let program = temporary_path(name);
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -115,7 +141,8 @@ fn container_inspect_json_with_source(id: &str) -> String {
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
          \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
-         \"Mounts\":[{{\"Destination\":\"/workspace\",\"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
+         \"Mounts\":[{{\"Source\":\"SOURCE_PATH\",\"Destination\":\"/workspace\",\"Type\":\"bind\",\
+         \"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
     )
 }
 
@@ -205,12 +232,13 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
     fs::set_permissions(source.join("check.py"), fs::Permissions::from_mode(0o755))
         .expect("executable source fixture");
     let create_log = temporary_path("pr-source-create-args");
+    let mount_source_log = temporary_path("pr-source-mount-source");
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf '%s\\n' \"$@\" > '{}'; printf 'fake-command-container-id\\n' ;;\n  \
+         create:--name) printf '%s\\n' \"$@\" > '{}'; for arg in \"$@\"; do case \"$arg\" in *:/workspace:*) printf '%s' \"${{arg%%:/workspace:*}}\" > '{}' ;; esac; done; printf 'fake-command-container-id\\n' ;;\n  \
          start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         container:inspect) source_path=$(cat '{}'); printf '%s\\n' '{}' | sed \"s|SOURCE_PATH|$source_path|\" ;;\n  \
          top:*) printf '%s' '{}' ;;\n  \
          wait:*) printf '0\\n' ;;\n  \
          logs:*) : ;;\n  \
@@ -218,6 +246,8 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
          *) exit 91 ;;\nesac\n",
         security_info_json(),
         create_log.display(),
+        mount_source_log.display(),
+        mount_source_log.display(),
         container_inspect_json_with_source("fake-command-container-id"),
         top_line_apparmor_confined(),
     );
@@ -225,7 +255,7 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
     let adapter = RootlessPodmanAdapter::new(program.clone());
     let mut command_request = request(20);
     command_request.source_artifact = Some(PrSourceArtifactInput {
-        host_path: source.clone(),
+        host_path: source.to_path_buf(),
         revision_sha: "d".repeat(40),
         expected_tree_sha256: single_file_tree_digest("check.py", source_bytes),
     });
@@ -244,8 +274,34 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
     assert!(receipt.mounted_read_only());
     assert!(receipt.mounted_noexec());
 
+    let wrong_source_inspection = container_inspect_json_with_source("wrong-source-container")
+        .replace("SOURCE_PATH", "/tmp/not-this-invocation");
+    let wrong_source_script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'wrong-source-container\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         stop:*|rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        wrong_source_inspection,
+    );
+    let wrong_source_program = write_executable("pr-source-wrong-bind", &wrong_source_script);
+    let wrong_source_adapter = RootlessPodmanAdapter::new(wrong_source_program.clone());
+    assert_eq!(
+        wrong_source_adapter.run_command_at(&command_request, &policy(), 1_780_000_001),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "source_artifact_bind_source",
+            },
+        ))
+    );
+
     let _ = fs::remove_file(program);
+    let _ = fs::remove_file(wrong_source_program);
     let _ = fs::remove_file(create_log);
+    let _ = fs::remove_file(mount_source_log);
     let _ = fs::remove_dir_all(source);
 }
 

@@ -80,17 +80,57 @@ fn strip_trailing_test_module(source: &str) -> &str {
     let lines: Vec<&str> = source.lines().collect();
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("#[cfg(") && trimmed.contains("test") {
+        let test_only_cfg = trimmed == "#[cfg(test)]"
+            || (trimmed.starts_with("#[cfg(all(test,") && trimmed.ends_with("))]"));
+        if test_only_cfg {
             let starts_test_module = lines
                 .get(index + 1)
                 .is_some_and(|next| next.trim_start().starts_with("mod tests"));
             if starts_test_module {
                 let prefix_len: usize = lines[..index].iter().map(|line| line.len() + 1).sum();
-                return &source[..prefix_len.min(source.len())];
+                let module_start = prefix_len
+                    + line.len()
+                    + 1
+                    + lines[index + 1]
+                        .find('{')
+                        .expect("test module declaration must open a block");
+                let mut depth = 0_i32;
+                for (offset, byte) in source[module_start..].bytes().enumerate() {
+                    match byte {
+                        b'{' => depth += 1,
+                        b'}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                let after_module = module_start + offset + 1;
+                                if source[after_module..].trim().is_empty() {
+                                    return &source[..prefix_len.min(source.len())];
+                                }
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
     source
+}
+
+#[test]
+fn test_module_stripping_never_hides_conditionally_production_or_trailing_items() {
+    let conditional = "#[cfg(any(test, feature = \"unsafe-shortcut\"))]\nmod tests { fn helper() { panic!(); } }\n";
+    assert_eq!(strip_trailing_test_module(conditional), conditional);
+
+    let trailing =
+        "#[cfg(test)]\nmod tests { fn helper() { panic!(); } }\nfn production() { panic!(); }\n";
+    assert_eq!(strip_trailing_test_module(trailing), trailing);
+
+    let test_only = "fn production() {}\n#[cfg(test)]\nmod tests { fn helper() { panic!(); } }\n";
+    assert_eq!(
+        strip_trailing_test_module(test_only),
+        "fn production() {}\n"
+    );
 }
 
 fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {

@@ -9,15 +9,14 @@
 
 use std::{
     fs,
-    net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
+    RootlessPodmanAdapter, ServiceProtocol,
 };
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -67,16 +66,10 @@ fn request() -> ApplicationServiceRequest {
 
 #[test]
 fn configured_flags_without_effective_runtime_evidence_fail_closed() {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
-    let ready_port = listener
-        .local_addr()
-        .expect("listener must expose an address")
-        .port();
-
     let program = fixture_path("fake-podman");
     let log = fixture_path("calls");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  network:rm) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) exit 91 ;;\n  stop:*|rm:*) : ;;\n  *) exit 92 ;;\nesac\n",
         log.display()
     );
     fs::write(&program, script).expect("fake Podman must be writable");
@@ -89,17 +82,19 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
 
-    assert!(
-        result.is_err(),
-        "configured launch flags and rootless host mode are not positive proof of effective seccomp/LSM/capability/resource/network isolation"
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::BackendCommandFailed {
+            operation: "process_security_top",
+        })
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     assert!(calls.contains("info --format"));
     assert!(calls.contains("create --name"));
     assert!(calls.contains("start "));
+    assert!(calls.contains("top "));
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
-    drop(listener);
 }

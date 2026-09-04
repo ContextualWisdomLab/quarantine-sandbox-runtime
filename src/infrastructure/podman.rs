@@ -2,7 +2,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Output,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -80,6 +80,10 @@ struct ContainerInspection {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct ContainerMount {
+    #[serde(rename = "Source")]
+    source: PathBuf,
+    #[serde(rename = "Type")]
+    mount_type: String,
     #[serde(rename = "Destination")]
     destination: String,
     #[serde(default, rename = "Options")]
@@ -623,9 +627,14 @@ impl RootlessPodmanAdapter {
             return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
-        if let Err(error) =
-            self.verify_command_isolation(&sandbox_name, request, policy, &info, &container_id)
-        {
+        if let Err(error) = self.verify_command_isolation(
+            &sandbox_name,
+            request,
+            policy,
+            &info,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
             return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
@@ -799,6 +808,7 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         info: &PodmanInfo,
         container_id: &str,
+        staged_source_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container_args = [
             "container".to_owned(),
@@ -865,6 +875,13 @@ impl RootlessPodmanAdapter {
             require_control(
                 "source_artifact_read_only",
                 source_mount.is_some_and(|mount| !mount.read_write),
+            )?;
+            require_control(
+                "source_artifact_bind_source",
+                source_mount.is_some_and(|mount| {
+                    mount.mount_type == "bind"
+                        && staged_source_path.is_some_and(|expected| mount.source == expected)
+                }),
             )?;
             for required_option in ["noexec", "nosuid", "nodev"] {
                 require_control(

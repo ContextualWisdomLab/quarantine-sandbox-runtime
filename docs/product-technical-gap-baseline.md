@@ -98,7 +98,7 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 - #10 non-force restack head `30a2c2080bc1d2e8d6d049b70477721dccb4d8dc` preserves release evidence on the current isolation head.
 - #13 non-force restack head `3a26a5c27e81fc315c98a88005b8154d2ca95b7f` preserves the bounded command contract on the current release head.
 - #14 source/restack merge `e38537507773a005a74f693fc150004263cf9b49` preserves its command backend/CLI/test delta on current #13 while keeping parent security fixes. A following ledger/restack commit carries the corrected ADR/consumer/baseline resolution; predecessor review/check evidence does not transfer.
-- Issue #16 remains the P0 command sandbox-identity defect. Its checked-in Rust RED must actually execute before production identity repair.
+- Issue #16's command sandbox-identity defect is repaired on PR #14: repeated consumer correlation within the same start second receives distinct runtime resource identities, with cleanup ownership covered by the executable regression test. Protected exact-head integration remains pending.
 - `.github#712/#1796` own organization queue/admission and duplicate queue-hygiene repair. Leaf source is not churned solely to manufacture runner assignment. Positive LSM capacity remains a separate reviewed infrastructure capability.
 - Organization ruleset `18156473` is active on the default branch and requires one approving review, thread resolution and central required workflows. Legacy branch-protection output alone is not the authority; bypass capability is not merge evidence.
 - No immutable release exists.
@@ -106,7 +106,7 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 ## Next bounded slices
 
 1. Execute #1 effective-attestation RED and repair the canonical parent/successor boundary only after the old behavior demonstrably fails.
-2. Execute issue #16's command-identity race RED, then introduce a collision-resistant runtime execution-instance identity below consumer correlation metadata and prove separate-process cleanup ownership.
+2. Preserve issue #16's collision-resistant runtime execution-instance identity and cleanup-ownership regression through protected integration.
 3. Drain exact-head product/security/coverage/review gates dependency-root first; normal merge only, followed by immediate non-force descendant restack.
 4. Obtain positive effective LSM/seccomp/capability/resource/cleanup evidence on the reviewed security runner profile without weakening P0 for generic hosted capacity.
 5. Publish `0.1.0` only from one exact integrated protected head with dated CHANGELOG, immutable release assets, SBOM/provenance/reproducibility and rollback evidence.
