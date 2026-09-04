@@ -12,12 +12,6 @@ fn command_result_schema() -> Value {
 }
 
 fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
-    if receipt_schema.get("type").and_then(Value::as_str) == Some("object") {
-        return receipt_schema
-            .as_object()
-            .expect("an object schema must be represented as a JSON object");
-    }
-
     if let Some(types) = receipt_schema.get("type").and_then(Value::as_array) {
         let admitted: BTreeSet<_> = types.iter().filter_map(Value::as_str).collect();
         assert_eq!(
@@ -34,6 +28,11 @@ fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
         .get("oneOf")
         .and_then(Value::as_array)
         .expect("source_artifact_receipt must admit null and object via type or oneOf");
+    assert_eq!(
+        variants.len(),
+        2,
+        "source_artifact_receipt must admit exactly two JSON types"
+    );
     let null_variants = variants
         .iter()
         .filter(|variant| variant.get("type").and_then(Value::as_str) == Some("null"))
@@ -43,7 +42,7 @@ fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
         .iter()
         .find(|variant| variant.get("type").and_then(Value::as_str) == Some("object"))
         .and_then(Value::as_object)
-        .expect("receipt schema must admit an object variant")
+        .expect("receipt schema must admit exactly one object variant")
 }
 
 #[test]
