@@ -18,6 +18,10 @@ Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/fi
 
 Freed, N., Klensin, J., & Hansen, T. (2013). *Media type specifications and registration procedures (RFC 6838).* RFC Editor. https://doi.org/10.17487/RFC6838
 
+Git Project. (n.d.). *git-config documentation*. https://git-scm.com/docs/git-config
+
+Git Project. (n.d.). *git-show documentation*. https://git-scm.com/docs/git-show
+
 gVisor Authors. (2026). *What is gVisor?* https://gvisor.dev/docs/
 
 gVisor Authors. (2026). *OCI quick start*. https://gvisor.dev/docs/user_guide/quick_start/oci/
