@@ -302,7 +302,6 @@ impl RootlessPodmanAdapter {
             "--http-proxy=false".to_owned(),
             "--image-volume=ignore".to_owned(),
             "--no-hosts".to_owned(),
-            "--no-hostname".to_owned(),
             "--systemd=false".to_owned(),
             "--sdnotify=ignore".to_owned(),
             "--cap-drop=all".to_owned(),
