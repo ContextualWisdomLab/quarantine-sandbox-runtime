@@ -1,9 +1,8 @@
-//! RED regression: configured Podman argv is not effective isolation evidence.
+//! Regression: configured Podman argv is not effective isolation evidence.
 //!
-//! A backend that proves only rootless mode and accepts the requested launch
-//! flags must not receive an all-positive application-service attestation. The
-//! runtime has to obtain positive effective evidence from the running sandbox
-//! before returning a lease.
+//! A backend that proves rootless host/security capability and accepts the
+//! requested launch flags must still fail closed when it cannot provide
+//! effective evidence from the running sandbox.
 
 #![cfg(target_os = "linux")]
 
@@ -16,8 +15,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
+    RootlessPodmanAdapter, ServiceProtocol,
 };
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -26,7 +25,7 @@ fn fixture_path(name: &str) -> PathBuf {
         .expect("test clock must be after the Unix epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "qsr-effective-attestation-red-{name}-{}-{nanos}",
+        "qsr-effective-attestation-{name}-{}-{nanos}",
         std::process::id()
     ))
 }
@@ -75,9 +74,11 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
 
     let program = fixture_path("fake-podman");
     let log = fixture_path("calls");
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display()
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) exit 91 ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  *) exit 92 ;;\nesac\n",
+        log.display(),
+        info,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -87,17 +88,31 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
     fs::set_permissions(&program, permissions).expect("fake Podman must be executable");
 
     let adapter = RootlessPodmanAdapter::new(program.clone());
-    let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
-
-    assert!(
-        result.is_err(),
-        "configured launch flags and rootless host mode are not positive proof of effective seccomp/LSM/capability/resource/network isolation"
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(ApplicationServiceError::BackendCommandFailed {
+            operation: "container_inspect",
+        })
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
-    assert!(calls.contains("info --format"));
-    assert!(calls.contains("create --name"));
-    assert!(calls.contains("start "));
+    for expected in [
+        "info --format {{.Host.Security.Rootless}}",
+        "info --format json",
+        "network create",
+        "create --name",
+        "start ",
+        "container inspect --format json",
+        "stop --time 1",
+        "rm --force",
+        "network rm --force",
+    ] {
+        assert!(calls.contains(expected), "missing call {expected}: {calls}");
+    }
+    assert!(
+        !calls.contains("port "),
+        "readiness/publication must not be trusted after missing effective evidence: {calls}"
+    );
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);

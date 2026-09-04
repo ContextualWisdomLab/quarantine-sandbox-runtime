@@ -15,11 +15,7 @@ fn concrete_child_success_preserves_bounded_output() {
 
     assert_eq!(
         result,
-        Ok((
-            true,
-            b"safe-stdout".to_vec(),
-            b"safe-stderr".to_vec(),
-        ))
+        Ok((true, b"safe-stdout".to_vec(), b"safe-stderr".to_vec(),))
     );
 }
 
