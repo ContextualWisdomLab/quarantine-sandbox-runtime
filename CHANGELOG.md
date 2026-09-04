@@ -8,6 +8,12 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Added
 
+- Bounded command-execution contract (`CommandExecutionRequest`/`CommandExecutionResult`/
+  `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
+  consumer that needs to run one command to completion and receive a structured exit status plus
+  bounded output rather than a readiness-gated network endpoint. Ships as a validated contract, a
+  coordinator function, and a `#[cfg(test)]`-only fake backend; no production backend or CLI/HTTP
+  entrypoint yet (see ADR-0007).
 - Source-agnostic analysis request and evidence contracts.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
