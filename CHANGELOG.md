@@ -11,19 +11,9 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Bounded command-execution contract (`CommandExecutionRequest`/`CommandExecutionResult`/
   `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
   consumer that needs to run one command to completion and receive a structured exit status plus
-  bounded output rather than a readiness-gated network endpoint (see ADR-0007).
-- Production `CommandExecutionBackend`: `RootlessPodmanAdapter::run_command_at`
-  (`src/infrastructure/podman.rs`), reusing the P0 isolation profile and `BoundedCommandRunner` process
-  supervisor. Proven against a real rootless Podman installation via
-  `tests/podman_command_execution_e2e.rs` (see ADR-0008).
-- First `[[bin]]` transport, `quarantine-sandbox-runtime run` (`src/main.rs`): a synchronous CLI that
-  validates a command-execution request against a hardcoded operator policy ceiling, runs it through the
-  Podman backend, and prints the result as JSON on stdout while exiting with the sandboxed command's own
-  exit code (see ADR-0008).
-- `BoundedCommandRunner::run_to_completion` (`src/infrastructure/bounded_command.rs`): reports a
-  wall-clock timeout or retained-output overflow on a supervised *workload* as terminal facts
-  (`timed_out`/`stdout_truncated`/`stderr_truncated`) instead of discarding partial output as a hard
-  error, alongside the existing `run` used for administrative Podman CLI calls.
+  bounded output rather than a readiness-gated network endpoint. Ships as a validated contract, a
+  coordinator function, and a `#[cfg(test)]`-only fake backend; no production backend or CLI/HTTP
+  entrypoint yet (see ADR-0007).
 - Source-agnostic analysis request and evidence contracts.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
@@ -63,22 +53,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Required free-form source metadata was replaced by a closed typed context capped at 1,024 serialized UTF-8 bytes.
 - Source timestamp and media-type validation trace to RFC 3339 and BCP 13 (RFC 6838 as updated by RFC 9694).
 - Architecture now separates Core `sandbox_execution` from Supporting `artifact_analysis` and `application_service` and treats Podman/gVisor/containerd/Kubernetes mechanisms as infrastructure adapters.
-- Repository CI covers both live `develop` integration and stable `main`; publication remains restricted to a version tag on the exact protected `main` tip.
+- Repository authority is the protected/default `develop` branch. Native CI still has a stale `main`-only push trigger; issue #24 carries the focused RED requiring exact post-integration `develop` evidence before release authority. The release preflight likewise remains Draft behind its protected-default-source RED and must not treat `main` as authoritative while the repository default is `develop`.
 - Production consumers are required to pin a released package checksum and provenance/SBOM evidence rather than a transient pull-request head or branch artifact.
-
-### Fixed
-
-- `production_source_has_no_panic_shortcuts` (`tests/ddd_architecture.rs`) now excludes each source
-  file's own `#[cfg(test)] mod tests` block before scanning for `.unwrap(`/`.expect(`/`panic!(`; it
-  previously scanned the raw file text unconditionally and could fail on legitimate test-only code.
-- Three real Podman cross-version deserialization/comparison gaps, found by testing
-  `src/infrastructure/podman.rs` against a real rootless Podman 6.1.0 installation rather than assumed
-  from documentation: `ContainerInspection.{effective_caps,bounding_caps}` deserialization now tolerates
-  an explicit JSON `null` (previously handled only a missing key); `isolated_user_namespace_verified`
-  also accepts the `io.podman.annotations.userns` annotation (previously only `HostConfig.UsernsMode`);
-  `parse_process_security_top` strips a trailing NUL byte Podman can pass through from
-  `/proc/<pid>/attr/current` into the LSM-label column. All three affect the existing service-lease
-  verification path equally, not only the new command-execution path that surfaced them.
 
 ### Security
 
