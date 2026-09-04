@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
@@ -19,6 +20,93 @@ use crate::{
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct PodmanInfo {
+    host: PodmanHost,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct PodmanHost {
+    security: PodmanSecurity,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct PodmanSecurity {
+    rootless: bool,
+    #[serde(rename = "seccompEnabled")]
+    seccomp_enabled: bool,
+    #[serde(rename = "seccompProfilePath")]
+    seccomp_profile_path: String,
+    #[serde(default, rename = "apparmorEnabled")]
+    apparmor_enabled: bool,
+    #[serde(default, rename = "selinuxEnabled")]
+    selinux_enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerInspection {
+    #[serde(rename = "Id")]
+    id: String,
+    #[serde(default, rename = "AppArmorProfile")]
+    apparmor_profile: String,
+    #[serde(default, rename = "ProcessLabel")]
+    process_label: String,
+    #[serde(default, rename = "EffectiveCaps")]
+    effective_caps: Vec<String>,
+    #[serde(default, rename = "BoundingCaps")]
+    bounding_caps: Vec<String>,
+    #[serde(rename = "Config")]
+    config: ContainerConfig,
+    #[serde(rename = "HostConfig")]
+    host_config: ContainerHostConfig,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerConfig {
+    #[serde(rename = "User")]
+    user: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerHostConfig {
+    #[serde(rename = "ReadonlyRootfs")]
+    readonly_rootfs: bool,
+    #[serde(rename = "Privileged")]
+    privileged: bool,
+    #[serde(default, rename = "SecurityOpt")]
+    security_opt: Option<Vec<String>>,
+    #[serde(rename = "UsernsMode")]
+    userns_mode: String,
+    #[serde(rename = "PidMode")]
+    pid_mode: String,
+    #[serde(rename = "IpcMode")]
+    ipc_mode: String,
+    #[serde(rename = "Memory")]
+    memory: u64,
+    #[serde(rename = "NanoCpus")]
+    nano_cpus: u64,
+    #[serde(rename = "PidsLimit")]
+    pids_limit: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct NetworkInspection {
+    internal: bool,
+    #[serde(default)]
+    dns_enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProcessSecurityEvidence {
+    seccomp: String,
+    effective_caps: String,
+    bounding_caps: String,
+    inheritable_caps: String,
+    permitted_caps: String,
+    ambient_caps: String,
+    lsm_label: String,
+}
 
 /// Deterministic, auditable rootless Podman command plan.
 ///
@@ -164,7 +252,6 @@ impl RootlessPodmanAdapter {
             "--http-proxy=false".to_owned(),
             "--image-volume=ignore".to_owned(),
             "--no-hosts".to_owned(),
-            "--no-hostname".to_owned(),
             "--systemd=false".to_owned(),
             "--sdnotify=ignore".to_owned(),
             "--cap-drop=all".to_owned(),
@@ -225,9 +312,9 @@ impl RootlessPodmanAdapter {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError`] when Podman is unavailable, is not
-    /// rootless, exceeds a command/output budget, rejects an isolation operation,
-    /// returns a non-loopback port, readiness times out, or required cleanup fails.
+    /// Returns [`ApplicationServiceError`] when Podman cannot prove every P0
+    /// isolation invariant, launch or inspection fails, readiness times out, or
+    /// cleanup after a partial launch cannot be proven complete.
     pub fn launch_at(
         &self,
         request: &ApplicationServiceRequest,
@@ -239,12 +326,28 @@ impl RootlessPodmanAdapter {
         if String::from_utf8_lossy(&rootless.stdout).trim() != "true" {
             return Err(ApplicationServiceError::BackendNotRootless);
         }
+        let info_args = ["info".to_owned(), "--format".to_owned(), "json".to_owned()];
+        let info_output = self.checked_output("backend_security_info", &info_args)?;
+        let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
+        validate_backend_security(&info)?;
 
         self.checked_output("network_create", plan.network_create_args())?;
-        if let Err(error) = self.checked_output("container_create", plan.container_create_args()) {
-            self.cleanup_network(&plan)?;
-            return Err(error);
-        }
+        let create_output = match self.checked_output("container_create", plan.container_create_args()) {
+            Ok(output) => output,
+            Err(error) => {
+                self.cleanup_network(&plan)?;
+                return Err(error);
+            }
+        };
+        let container_id = match parse_backend_identifier(&create_output.stdout) {
+            Some(identifier) => identifier,
+            None => {
+                self.cleanup_created_container(&plan)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "container_create",
+                });
+            }
+        };
 
         let start_args = ["start".to_owned(), plan.sandbox_name().to_owned()];
         if let Err(error) = self.checked_output("container_start", &start_args) {
@@ -252,25 +355,20 @@ impl RootlessPodmanAdapter {
             return Err(error);
         }
 
-        let port_args = [
-            "port".to_owned(),
-            plan.sandbox_name().to_owned(),
-            format!("{}/tcp", request.container_port),
-        ];
-        let port_output = match self.checked_output("port_query", &port_args) {
-            Ok(output) => output,
+        let host_port = match self.verify_effective_isolation(
+            &plan,
+            request,
+            policy,
+            &info,
+            &container_id,
+        ) {
+            Ok(value) => value,
             Err(error) => {
                 self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
                 return Err(error);
             }
         };
-        let host_port = match parse_loopback_port(&port_output.stdout) {
-            Some(port) => port,
-            None => {
-                self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
-                return Err(ApplicationServiceError::InvalidPortMapping);
-            }
-        };
+
         if wait_for_readiness(host_port, policy).is_err() {
             self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
             return Err(ApplicationServiceError::ReadinessTimeout);
@@ -332,6 +430,121 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
+    fn verify_effective_isolation(
+        &self,
+        plan: &PodmanLaunchPlan,
+        request: &ApplicationServiceRequest,
+        policy: &IsolationPolicy,
+        info: &PodmanInfo,
+        container_id: &str,
+    ) -> Result<u16, ApplicationServiceError> {
+        let container_args = [
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            plan.sandbox_name().to_owned(),
+        ];
+        let container_output = self.checked_output("container_inspect", &container_args)?;
+        let container: ContainerInspection =
+            parse_single_inspection("container_inspect", &container_output.stdout)?;
+        if container.id != container_id {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_inspect",
+            });
+        }
+
+        let process_args = [
+            "top".to_owned(),
+            plan.sandbox_name().to_owned(),
+            "pid".to_owned(),
+            "seccomp".to_owned(),
+            "capeff".to_owned(),
+            "capbnd".to_owned(),
+            "capinh".to_owned(),
+            "capprm".to_owned(),
+            "capamb".to_owned(),
+            "label".to_owned(),
+        ];
+        let process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&process_output.stdout)?;
+
+        require_control(
+            "read_only_root_filesystem",
+            container.host_config.readonly_rootfs,
+        )?;
+        require_control("unprivileged_container", !container.host_config.privileged)?;
+        require_control(
+            "all_capabilities_dropped",
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
+        )?;
+        let security_options = container
+            .host_config
+            .security_opt
+            .as_deref()
+            .unwrap_or_default();
+        require_control(
+            "no_new_privileges",
+            security_options
+                .iter()
+                .any(|option| option == "no-new-privileges" || option == "no-new-privileges=true"),
+        )?;
+        require_control(
+            "seccomp",
+            !security_options
+                .iter()
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(process.seccomp.to_ascii_lowercase().as_str(), "filter" | "strict"),
+        )?;
+        require_control(
+            "isolated_user_namespace",
+            container.host_config.userns_mode == "auto",
+        )?;
+        require_control(
+            "isolated_pid_namespace",
+            container.host_config.pid_mode == "private",
+        )?;
+        require_control(
+            "isolated_ipc_namespace",
+            container.host_config.ipc_mode == "none",
+        )?;
+        require_control(
+            "non_root_identity",
+            container.config.user
+                == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+        )?;
+        require_control(
+            "resource_limits",
+            resource_limits_match(&container.host_config, request),
+        )?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
+
+        let network_args = [
+            "network".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            plan.network_name().to_owned(),
+        ];
+        let network_output = self.checked_output("network_inspect", &network_args)?;
+        let network: NetworkInspection =
+            parse_single_inspection("network_inspect", &network_output.stdout)?;
+        require_control(
+            "external_egress_denied",
+            network.internal && !network.dns_enabled,
+        )?;
+
+        let port_args = [
+            "port".to_owned(),
+            plan.sandbox_name().to_owned(),
+            format!("{}/tcp", request.container_port),
+        ];
+        let port_output = self.checked_output("port_query", &port_args)?;
+        parse_loopback_port(&port_output.stdout).ok_or(ApplicationServiceError::InvalidPortMapping)
+    }
+
     fn command_runner(&self) -> BoundedCommandRunner {
         BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes)
     }
@@ -341,22 +554,22 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output =
-            self.command_runner()
-                .run(&self.program, args)
-                .map_err(|error| match error {
-                    BoundedCommandError::Timeout => {
-                        ApplicationServiceError::BackendCommandTimedOut { operation }
-                    }
-                    BoundedCommandError::OutputLimit => {
-                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                    }
-                    BoundedCommandError::Spawn
-                    | BoundedCommandError::Wait
-                    | BoundedCommandError::Capture => {
-                        ApplicationServiceError::BackendInvocationFailed { operation }
-                    }
-                })?;
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| match error {
+                BoundedCommandError::Timeout => {
+                    ApplicationServiceError::BackendCommandTimedOut { operation }
+                }
+                BoundedCommandError::OutputLimit => {
+                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                }
+                BoundedCommandError::Spawn
+                | BoundedCommandError::Wait
+                | BoundedCommandError::Capture => {
+                    ApplicationServiceError::BackendInvocationFailed { operation }
+                }
+            })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -434,6 +647,184 @@ impl Default for RootlessPodmanAdapter {
     }
 }
 
+fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationServiceError> {
+    if !info.host.security.rootless {
+        return Err(ApplicationServiceError::BackendNotRootless);
+    }
+    require_control(
+        "seccomp",
+        info.host.security.seccomp_enabled && !info.host.security.seccomp_profile_path.is_empty(),
+    )?;
+    require_control(
+        "lsm",
+        info.host.security.apparmor_enabled || info.host.security.selinux_enabled,
+    )
+}
+
+fn effective_lsm_verified(
+    info: &PodmanInfo,
+    container: &ContainerInspection,
+    process: &ProcessSecurityEvidence,
+) -> bool {
+    let runtime_label = process.lsm_label.trim();
+    if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
+        return false;
+    }
+
+    if info.host.security.selinux_enabled {
+        let inspect_label = container.process_label.trim();
+        return !inspect_label.is_empty()
+            && !inspect_label.eq_ignore_ascii_case("unconfined")
+            && inspect_label == runtime_label;
+    }
+
+    if info.host.security.apparmor_enabled {
+        let inspect_profile = container.apparmor_profile.trim();
+        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+            return false;
+        };
+        return !inspect_profile.is_empty()
+            && !inspect_profile.eq_ignore_ascii_case("unconfined")
+            && inspect_profile == runtime_profile;
+    }
+
+    false
+}
+
+fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
+    let normalized = runtime_label.trim();
+    if normalized.is_empty() || normalized.eq_ignore_ascii_case("unconfined") {
+        return None;
+    }
+
+    let (profile, mode_with_suffix) = normalized.rsplit_once(" (")?;
+    let mode = mode_with_suffix.strip_suffix(')')?;
+    let profile = profile.trim();
+    (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
+}
+
+fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
+    [
+        process.effective_caps.as_str(),
+        process.bounding_caps.as_str(),
+        process.inheritable_caps.as_str(),
+        process.permitted_caps.as_str(),
+        process.ambient_caps.as_str(),
+    ]
+    .into_iter()
+    .all(capability_set_is_empty)
+}
+
+fn capability_set_is_empty(value: &str) -> bool {
+    let normalized = value.trim();
+    if normalized.is_empty()
+        || normalized == "-"
+        || normalized.eq_ignore_ascii_case("none")
+        || normalized == "0"
+        || normalized.eq_ignore_ascii_case("0x0")
+    {
+        return true;
+    }
+    let hexadecimal = normalized.strip_prefix("0x").unwrap_or(normalized);
+    !hexadecimal.is_empty() && hexadecimal.chars().all(|character| character == '0')
+}
+
+fn parse_process_security_top(
+    bytes: &[u8],
+) -> Result<ProcessSecurityEvidence, ApplicationServiceError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: "process_security_top",
+        }
+    })?;
+    let mut matched = None;
+    for line in text.lines().skip(1).filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.first().copied() != Some("1") {
+            continue;
+        }
+        if fields.len() < 8 || matched.is_some() {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "process_security_top",
+            });
+        }
+        matched = Some(ProcessSecurityEvidence {
+            seccomp: fields[1].to_owned(),
+            effective_caps: fields[2].to_owned(),
+            bounding_caps: fields[3].to_owned(),
+            inheritable_caps: fields[4].to_owned(),
+            permitted_caps: fields[5].to_owned(),
+            ambient_caps: fields[6].to_owned(),
+            lsm_label: fields[7..].join(" "),
+        });
+    }
+    matched.ok_or(ApplicationServiceError::MalformedIsolationInspection {
+        operation: "process_security_top",
+    })
+}
+
+fn resource_limits_match(
+    effective: &ContainerHostConfig,
+    request: &ApplicationServiceRequest,
+) -> bool {
+    let requested_nano_cpus = u64::from(request.resources.cpu_millicores) * 1_000_000;
+    effective.memory > 0
+        && effective.memory <= request.resources.memory_bytes
+        && effective.nano_cpus > 0
+        && effective.nano_cpus <= requested_nano_cpus
+        && effective.pids_limit > 0
+        && u64::try_from(effective.pids_limit)
+            .is_ok_and(|value| value <= u64::from(request.resources.maximum_processes))
+}
+
+fn require_control(
+    control_name: &'static str,
+    verified: bool,
+) -> Result<(), ApplicationServiceError> {
+    if verified {
+        Ok(())
+    } else {
+        Err(ApplicationServiceError::IsolationVerificationFailed { control_name })
+    }
+}
+
+fn parse_json<T>(operation: &'static str, bytes: &[u8]) -> Result<T, ApplicationServiceError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_slice(bytes)
+        .map_err(|_| ApplicationServiceError::MalformedIsolationInspection { operation })
+}
+
+fn parse_single_inspection<T>(
+    operation: &'static str,
+    bytes: &[u8],
+) -> Result<T, ApplicationServiceError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let mut values: Vec<T> = parse_json(operation, bytes)?;
+    if values.len() != 1 {
+        return Err(ApplicationServiceError::MalformedIsolationInspection { operation });
+    }
+    values
+        .pop()
+        .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
+}
+
+fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
+    let identifier = std::str::from_utf8(bytes).ok()?.trim();
+    if identifier.is_empty()
+        || identifier.len() > 128
+        || identifier
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return None;
+    }
+    Some(identifier.to_owned())
+}
+
 fn sandbox_identity(
     request: &ApplicationServiceRequest,
     policy: &IsolationPolicy,
@@ -479,6 +870,10 @@ fn wait_for_readiness(
         if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
             return Ok(());
         }
-        thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
+        let after_probe = Instant::now();
+        if after_probe >= deadline {
+            return Err(ApplicationServiceError::ReadinessTimeout);
+        }
+        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
     }
 }
