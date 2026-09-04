@@ -3,13 +3,16 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [develop, main]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: quarantine-ci-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ${{ github.workflow }}-${{ github.repository }}-${{
+      github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id
+    }}
   cancel-in-progress: true
 
 jobs:
@@ -140,7 +143,7 @@ jobs:
       - name: Capture hosted negative LSM capability evidence
         run: |
           # The current ubuntu-24.04 image exposes distribution Podman 4.9.3.
-          # Version identity is distinct from effective LSM evidence below.
+          # Version identity is recorded separately from effective LSM proof below.
           test "$(podman --version)" = "podman version 4.9.3"
           podman info --format json > podman-info.json
           python3 - <<'PY'

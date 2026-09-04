@@ -233,9 +233,11 @@ jobs:
           cmp "source-a/target/package/${package_file}" "source-b/target/package/${package_file}"
           mkdir dist
           cp "source-a/target/package/${package_file}" dist/
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
-          echo "package_dir=$package_dir" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "package_file=$package_file"
+            echo "package_dir=$package_dir"
+          } >> "$GITHUB_OUTPUT"
       - name: Generate SPDX 3 JSON SBOM from the packaged source tree
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:

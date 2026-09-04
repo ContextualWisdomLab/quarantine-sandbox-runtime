@@ -69,6 +69,7 @@ fn request() -> CommandExecutionRequest {
         request_id: "same-consumer-correlation-id".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "c".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,
@@ -83,7 +84,7 @@ fn request() -> CommandExecutionRequest {
 fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resources() {
     let call_log = temporary_path("calls");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-command-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-command-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         call_log.display(),
     );
     let program = write_executable("fake-podman", &script);
@@ -140,8 +141,14 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
 
     assert_eq!(create_names.len(), 2);
     assert_eq!(remove_names.len(), 2);
-    assert_eq!(create_names.iter().cloned().collect::<BTreeSet<_>>().len(), 2);
-    assert_eq!(remove_names.iter().cloned().collect::<BTreeSet<_>>().len(), 2);
+    assert_eq!(
+        create_names.iter().cloned().collect::<BTreeSet<_>>().len(),
+        2
+    );
+    assert_eq!(
+        remove_names.iter().cloned().collect::<BTreeSet<_>>().len(),
+        2
+    );
     assert_eq!(
         create_names.iter().cloned().collect::<BTreeSet<_>>(),
         remove_names.iter().cloned().collect::<BTreeSet<_>>(),

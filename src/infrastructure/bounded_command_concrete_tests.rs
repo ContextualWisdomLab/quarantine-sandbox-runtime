@@ -15,11 +15,34 @@ fn concrete_child_success_preserves_bounded_output() {
 
     assert_eq!(
         result,
-        Ok((
-            true,
-            b"safe-stdout".to_vec(),
-            b"safe-stderr".to_vec(),
-        ))
+        Ok((true, b"safe-stdout".to_vec(), b"safe-stderr".to_vec(),))
+    );
+}
+
+#[test]
+fn concrete_child_completion_tracks_each_truncated_stream() {
+    let outcome = BoundedCommandRunner::new(Duration::from_secs(1), 4)
+        .run_to_completion(
+            Path::new("/bin/sh"),
+            &[
+                "-c".to_owned(),
+                "printf 12345; while :; do :; done".to_owned(),
+            ],
+        )
+        .map(|outcome| {
+            (
+                outcome.status.is_some_and(|status| status.success()),
+                outcome.timed_out,
+                outcome.stdout,
+                outcome.stdout_truncated,
+                outcome.stderr,
+                outcome.stderr_truncated,
+            )
+        });
+
+    assert_eq!(
+        outcome,
+        Ok((false, false, b"1234".to_vec(), true, vec![], false))
     );
 }
 

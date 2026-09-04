@@ -68,6 +68,7 @@ fn request() -> CommandExecutionRequest {
         request_id: "command-cleanup-red-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,
@@ -83,7 +84,7 @@ fn security_info_json() -> &'static str {
 }
 
 fn container_inspect_json() -> &'static str {
-    r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#
+    r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#
 }
 
 fn top_output() -> &'static str {
@@ -242,7 +243,7 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
 #[test]
 fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
     let call_log = temporary_path("isolation-and-cleanup-fail-call-log");
-    let invalid_container = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":false,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
+    let invalid_container = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":false,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
@@ -267,7 +268,11 @@ fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
         CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    assert!(calls.lines().any(|line| line.starts_with("container inspect ")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("container inspect "))
+    );
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
 
     let _ = fs::remove_file(program);

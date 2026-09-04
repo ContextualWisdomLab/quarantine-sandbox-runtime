@@ -49,6 +49,12 @@ fn validate_request(request: Value) -> Result<(), String> {
     parsed.validate().map_err(|error| error.to_string())
 }
 
+fn validate_request_json(request_json: &str) -> Result<(), String> {
+    let parsed = serde_json::from_str::<AnalysisRequest>(request_json)
+        .map_err(|error| error.to_string())?;
+    parsed.validate().map_err(|error| error.to_string())
+}
+
 #[test]
 fn immutable_claude_plugin_package_request_is_admitted_and_strictly_validated() {
     let result = validate_request(valid_request());
@@ -63,6 +69,7 @@ fn immutable_claude_plugin_package_request_is_admitted_and_strictly_validated() 
 fn claude_plugin_package_request_rejects_mutable_or_malformed_identity() {
     for (field, invalid_value) in [
         ("catalog_commit_sha", serde_json::json!("main")),
+        ("marketplace_blob_sha", serde_json::json!("not-a-git-object-sha")),
         ("source_commit_sha", serde_json::json!("release/latest")),
         ("marketplace_entry_sha256", serde_json::json!("abc123")),
         ("artifact_sha256", serde_json::json!("ABCDEF")),
@@ -75,6 +82,26 @@ fn claude_plugin_package_request_rejects_mutable_or_malformed_identity() {
             "{field} must be immutable and canonical before execution"
         );
     }
+}
+
+#[test]
+fn claude_plugin_package_request_rejects_duplicate_json_members_before_semantic_validation() {
+    let serialized = serde_json::to_string(&valid_request()).expect("valid fixture serializes");
+    let wall_time_member = "\"maximum_wall_time\":60";
+    assert!(
+        serialized.contains(wall_time_member),
+        "fixture must contain the member replaced by this raw-wire regression"
+    );
+    let duplicated = serialized.replacen(
+        wall_time_member,
+        "\"maximum_wall_time\":60,\"maximum_wall_time\":61",
+        1,
+    );
+
+    assert!(
+        validate_request_json(&duplicated).is_err(),
+        "duplicate JSON member names must be rejected at the wire boundary instead of depending on parser last-wins behavior"
+    );
 }
 
 #[test]
@@ -134,6 +161,28 @@ fn claude_plugin_package_request_rejects_zero_or_effectively_unbounded_resources
 }
 
 #[test]
+fn claude_plugin_package_request_rejects_empty_required_execution_metadata() {
+    for field in [
+        "catalog_repository",
+        "plugin_name",
+        "plugin_version",
+        "source_repository",
+        "source_path",
+        "appguardrail_scan_receipt_reference",
+        "analysis_profile_id",
+        "network_policy_reference",
+        "filesystem_policy_reference",
+    ] {
+        let mut request = valid_request();
+        request[field] = serde_json::json!("");
+        assert!(
+            validate_request(request).is_err(),
+            "{field} is required execution metadata and must not collapse to an empty value"
+        );
+    }
+}
+
+#[test]
 fn claude_plugin_package_request_rejects_control_text_in_execution_relevant_fields() {
     for field in [
         "catalog_repository",
@@ -156,12 +205,16 @@ fn claude_plugin_package_request_rejects_control_text_in_execution_relevant_fiel
 }
 
 #[test]
-fn claude_plugin_package_request_rejects_repository_path_escape() {
+fn claude_plugin_package_request_rejects_repository_path_escape_or_noncanonical_form() {
     for invalid_path in [
         "../outside",
         "/host/absolute/path",
         "tests/fixtures/../../outside",
         "tests\\fixtures\\..\\..\\outside",
+        "C:\\host\\absolute\\path",
+        "\\\\server\\share\\artifact",
+        "./tests/fixtures/claude-plugin-safe",
+        "tests//fixtures/claude-plugin-safe",
     ] {
         let mut request = valid_request();
         request["source_path"] = serde_json::json!(invalid_path);

@@ -10,31 +10,59 @@
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
+use tempfile::TempDir;
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
+    RootlessPodmanAdapter,
 };
+use sha2::{Digest, Sha256};
 
-static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-cmdexec-{name}-{}-{nanos}-{unique_id}",
-        std::process::id()
-    ))
+#[derive(Clone)]
+struct FixturePath {
+    _directory: Arc<TempDir>,
+    path: PathBuf,
 }
 
-fn write_executable(name: &str, script: &str) -> PathBuf {
+impl AsRef<Path> for FixturePath {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for FixturePath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl From<FixturePath> for PathBuf {
+    fn from(value: FixturePath) -> Self {
+        value.path.clone()
+    }
+}
+
+fn temporary_path(name: &str) -> FixturePath {
+    let directory = Arc::new(
+        tempfile::Builder::new()
+            .prefix("qsr-cmdexec-test-")
+            .tempdir()
+            .expect("isolated fixture directory"),
+    );
+    FixturePath {
+        path: directory.path().join(name),
+        _directory: directory,
+    }
+}
+
+fn write_executable(name: &str, script: &str) -> FixturePath {
     let program = temporary_path(name);
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -67,6 +95,7 @@ fn request(lease_seconds: u32) -> CommandExecutionRequest {
         request_id: "cmdexec-fake-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
+        source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,
@@ -75,6 +104,15 @@ fn request(lease_seconds: u32) -> CommandExecutionRequest {
             tmpfs_bytes: 16 * 1024 * 1024,
         },
     }
+}
+
+fn single_file_tree_digest(path: &str, bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update((path.len() as u64).to_be_bytes());
+    hasher.update(path.as_bytes());
+    hasher.update((bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
 
 /// `UsernsMode` empty, `auto` only recorded as the Podman 6.1.0-style annotation.
@@ -89,8 +127,22 @@ fn container_inspect_json(id: &str) -> String {
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
-         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]"
+    )
+}
+
+fn container_inspect_json_with_source(id: &str) -> String {
+    format!(
+        "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
+         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\"}},\
+         \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
+         \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
+         \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
+         \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
+         \"Mounts\":[{{\"Source\":\"SOURCE_PATH\",\"Destination\":\"/workspace\",\"Type\":\"bind\",\
+         \"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
     )
 }
 
@@ -142,6 +194,118 @@ fn run_command_at_returns_a_successful_result_against_a_well_behaved_fake_backen
 }
 
 #[test]
+fn run_command_at_rejects_an_invalid_policy_before_invoking_podman() {
+    let invocation_log = temporary_path("invalid-policy-invocations");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf 'invoked\\n' >> '{}'\nexit 91\n",
+        invocation_log.display()
+    );
+    let program = write_executable("invalid-policy", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let mut invalid_policy = policy();
+    invalid_policy.run_as_user_id = 0;
+
+    let result = adapter.run_command_at(&request(20), &invalid_policy, 1_780_000_000);
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::InvalidPolicy {
+                field_name: "run_as_user_id",
+            },
+        ))
+    );
+    assert!(
+        !invocation_log.exists(),
+        "invalid direct-adapter requests must not invoke Podman"
+    );
+
+    let _ = fs::remove_file(program);
+}
+
+#[test]
+fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_receipt() {
+    let source = temporary_path("pr-source");
+    fs::create_dir_all(&source).expect("source directory");
+    let source_bytes = b"print('isolated')\n";
+    fs::write(source.join("check.py"), source_bytes).expect("source file");
+    fs::set_permissions(source.join("check.py"), fs::Permissions::from_mode(0o755))
+        .expect("executable source fixture");
+    let create_log = temporary_path("pr-source-create-args");
+    let mount_source_log = temporary_path("pr-source-mount-source");
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf '%s\\n' \"$@\" > '{}'; for arg in \"$@\"; do case \"$arg\" in *:/workspace:*) printf '%s' \"${{arg%%:/workspace:*}}\" > '{}' ;; esac; done; printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) source_path=$(cat '{}'); printf '%s\\n' '{}' | sed \"s|SOURCE_PATH|$source_path|\" ;;\n  \
+         top:*) printf '%s' '{}' ;;\n  \
+         wait:*) printf '0\\n' ;;\n  \
+         logs:*) : ;;\n  \
+         rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        create_log.display(),
+        mount_source_log.display(),
+        mount_source_log.display(),
+        container_inspect_json_with_source("fake-command-container-id"),
+        top_line_apparmor_confined(),
+    );
+    let program = write_executable("pr-source", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let mut command_request = request(20);
+    command_request.source_artifact = Some(PrSourceArtifactInput {
+        host_path: source.to_path_buf(),
+        revision_sha: "d".repeat(40),
+        expected_tree_sha256: single_file_tree_digest("check.py", source_bytes),
+    });
+
+    let result = adapter
+        .run_command_at(&command_request, &policy(), 1_780_000_000)
+        .expect("verified staged source should execute");
+
+    let create_args = fs::read_to_string(&create_log).expect("create args should be recorded");
+    assert!(create_args.contains(":/workspace:ro,noexec,nosuid,nodev,Z"));
+    assert!(create_args.contains("--workdir\n/workspace"));
+    assert!(!create_args.contains(&source.display().to_string()));
+    let receipt = result.source_artifact_receipt().expect("source receipt");
+    assert_eq!(receipt.revision_sha(), "d".repeat(40));
+    assert_eq!(receipt.executable_files_stripped(), 1);
+    assert!(receipt.mounted_read_only());
+    assert!(receipt.mounted_noexec());
+
+    let wrong_source_inspection = container_inspect_json_with_source("wrong-source-container")
+        .replace("SOURCE_PATH", "/tmp/not-this-invocation");
+    let wrong_source_script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'wrong-source-container\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         stop:*|rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        wrong_source_inspection,
+    );
+    let wrong_source_program = write_executable("pr-source-wrong-bind", &wrong_source_script);
+    let wrong_source_adapter = RootlessPodmanAdapter::new(wrong_source_program.clone());
+    assert_eq!(
+        wrong_source_adapter.run_command_at(&command_request, &policy(), 1_780_000_001),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "source_artifact_bind_source",
+            },
+        ))
+    );
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(wrong_source_program);
+    let _ = fs::remove_file(create_log);
+    let _ = fs::remove_file(mount_source_log);
+    let _ = fs::remove_dir_all(source);
+}
+
+#[test]
 fn run_command_at_reports_a_nonzero_exit_status_as_a_successful_call() {
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
@@ -187,6 +351,37 @@ fn run_command_at_rejects_a_backend_that_is_not_rootless() {
     assert_eq!(
         error,
         CommandExecutionError::Backend(ApplicationServiceError::BackendNotRootless)
+    );
+    let _ = fs::remove_file(program);
+}
+
+#[test]
+fn run_command_at_rejects_a_command_container_attached_to_a_network() {
+    let inspect = container_inspect_json("fake-command-container-id")
+        .replace("\"NetworkMode\":\"none\"", "\"NetworkMode\":\"bridge\"");
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        inspect,
+    );
+    let program = write_executable("network-attached", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let result = adapter.run_command_at(&request(20), &policy(), 1_780_000_000);
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "external_egress_denied",
+            },
+        ))
     );
     let _ = fs::remove_file(program);
 }

@@ -2,7 +2,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Output,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -17,6 +17,7 @@ use crate::{
     CommandExecutionError, CommandExecutionRequest, CommandExecutionResult, IsolationControlStatus,
     IsolationPolicy, ResourceRequest, ServiceEndpoint, VerifiedIsolationState,
     application_service::CommandExecutionOutcome, sandbox_execution::RuntimeLeaseMetadata,
+    stage_pr_source_artifact,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -73,6 +74,22 @@ struct ContainerInspection {
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
     host_config: ContainerHostConfig,
+    #[serde(default, rename = "Mounts")]
+    mounts: Vec<ContainerMount>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerMount {
+    #[serde(rename = "Source")]
+    source: PathBuf,
+    #[serde(rename = "Type")]
+    mount_type: String,
+    #[serde(rename = "Destination")]
+    destination: String,
+    #[serde(default, rename = "Options")]
+    options: Vec<String>,
+    #[serde(rename = "RW")]
+    read_write: bool,
 }
 
 /// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
@@ -116,6 +133,8 @@ struct ContainerHostConfig {
     pid_mode: String,
     #[serde(rename = "IpcMode")]
     ipc_mode: String,
+    #[serde(default, rename = "NetworkMode")]
+    network_mode: String,
     #[serde(rename = "Memory")]
     memory: u64,
     #[serde(rename = "NanoCpus")]
@@ -287,7 +306,6 @@ impl RootlessPodmanAdapter {
             "--http-proxy=false".to_owned(),
             "--image-volume=ignore".to_owned(),
             "--no-hosts".to_owned(),
-            "--no-hostname".to_owned(),
             "--systemd=false".to_owned(),
             "--sdnotify=ignore".to_owned(),
             "--cap-drop=all".to_owned(),
@@ -493,6 +511,12 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
     ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        request.validate(policy)?;
+        let staged_source = request
+            .source_artifact
+            .as_ref()
+            .map(stage_pr_source_artifact)
+            .transpose()?;
         let info_output = self.checked_output(
             "backend_security_info",
             &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
@@ -500,12 +524,12 @@ impl RootlessPodmanAdapter {
         let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
         validate_backend_security(&info)?;
 
-        let identity = sandbox_identity(
+        let identity = command_sandbox_identity(
             &request.request_id,
             &request.image_reference,
             &policy.policy_id,
             started_at_epoch_seconds,
-        );
+        )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
 
         let mut create_args = vec![
@@ -518,7 +542,6 @@ impl RootlessPodmanAdapter {
             "--http-proxy=false".to_owned(),
             "--image-volume=ignore".to_owned(),
             "--no-hosts".to_owned(),
-            "--no-hostname".to_owned(),
             "--systemd=false".to_owned(),
             "--sdnotify=ignore".to_owned(),
             "--cap-drop=all".to_owned(),
@@ -562,8 +585,17 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy_sha256={}",
                 policy.effective_policy_sha256()
             ),
-            request.image_reference.clone(),
         ];
+        if let Some(staged) = &staged_source {
+            create_args.push("--volume".to_owned());
+            create_args.push(format!(
+                "{}:/workspace:ro,noexec,nosuid,nodev,Z",
+                staged.path().display()
+            ));
+            create_args.push("--workdir".to_owned());
+            create_args.push("/workspace".to_owned());
+        }
+        create_args.push(request.image_reference.clone());
         create_args.extend(request.command.iter().cloned());
 
         let create_output = match self.checked_output("container_create", &create_args) {
@@ -595,9 +627,14 @@ impl RootlessPodmanAdapter {
             return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
-        if let Err(error) =
-            self.verify_command_isolation(&sandbox_name, request, policy, &info, &container_id)
-        {
+        if let Err(error) = self.verify_command_isolation(
+            &sandbox_name,
+            request,
+            policy,
+            &info,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
             return Err(self.cleanup_or_report(&sandbox_name, error.into()));
         }
 
@@ -608,10 +645,9 @@ impl RootlessPodmanAdapter {
 
         let logs_runner =
             BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
-        let logs_outcome = match logs_runner.run_to_completion(
-            &self.program,
-            &["logs".to_owned(), sandbox_name.clone()],
-        ) {
+        let logs_outcome = match logs_runner
+            .run_to_completion(&self.program, &["logs".to_owned(), sandbox_name.clone()])
+        {
             Ok(outcome) => outcome,
             Err(_) => {
                 return Err(self.cleanup_or_report(
@@ -676,6 +712,9 @@ impl RootlessPodmanAdapter {
                 stderr_truncated: logs_outcome.stderr_truncated,
                 started_at_epoch_seconds,
                 finished_at_epoch_seconds,
+                source_artifact_receipt: staged_source
+                    .as_ref()
+                    .map(|staged| staged.receipt().clone()),
             },
         ))
     }
@@ -714,7 +753,10 @@ impl RootlessPodmanAdapter {
             }
             match wait_outcome.status {
                 Some(status) if status.success() => {
-                    return Ok((parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?, false));
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
                 }
                 Some(_) => {
                     return Err(CommandExecutionError::Backend(
@@ -766,6 +808,7 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         info: &PodmanInfo,
         container_id: &str,
+        staged_source_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container_args = [
             "container".to_owned(),
@@ -812,6 +855,10 @@ impl RootlessPodmanAdapter {
             container.host_config.ipc_mode == "none",
         )?;
         require_control(
+            "external_egress_denied",
+            container.host_config.network_mode == "none",
+        )?;
+        require_control(
             "non_root_identity",
             container.config.user
                 == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
@@ -820,6 +867,31 @@ impl RootlessPodmanAdapter {
             "resource_limits",
             resource_limits_match(&container.host_config, &request.resources),
         )?;
+        if request.source_artifact.is_some() {
+            let source_mount = container
+                .mounts
+                .iter()
+                .find(|mount| mount.destination == "/workspace");
+            require_control(
+                "source_artifact_read_only",
+                source_mount.is_some_and(|mount| !mount.read_write),
+            )?;
+            require_control(
+                "source_artifact_bind_source",
+                source_mount.is_some_and(|mount| {
+                    mount.mount_type == "bind"
+                        && staged_source_path.is_some_and(|expected| mount.source == expected)
+                }),
+            )?;
+            for required_option in ["noexec", "nosuid", "nodev"] {
+                require_control(
+                    "source_artifact_mount_options",
+                    source_mount.is_some_and(|mount| {
+                        mount.options.iter().any(|option| option == required_option)
+                    }),
+                )?;
+            }
+        }
 
         let process_args = [
             "top".to_owned(),
@@ -1355,6 +1427,30 @@ fn sandbox_identity(
     hasher.update(started_at_epoch_seconds.to_be_bytes());
     let digest = format!("{:x}", hasher.finalize());
     digest[..16].to_owned()
+}
+
+fn command_sandbox_identity(
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
+    started_at_epoch_seconds: u64,
+) -> Result<String, CommandExecutionError> {
+    let mut execution_nonce = [0_u8; 16];
+    getrandom::fill(&mut execution_nonce).map_err(|_| {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "execution_identity",
+        })
+    })?;
+
+    let mut hasher = Sha256::new();
+    for component in [request_id, image_reference, policy_id] {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update(started_at_epoch_seconds.to_be_bytes());
+    hasher.update(execution_nonce);
+    let digest = format!("{:x}", hasher.finalize());
+    Ok(digest[..16].to_owned())
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {

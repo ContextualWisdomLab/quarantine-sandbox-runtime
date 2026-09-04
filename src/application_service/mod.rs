@@ -474,10 +474,7 @@ fn registry_repository_is_safe(repository: &str) -> bool {
         return false;
     }
     components.all(|component| {
-        !component.is_empty()
-            && component != "."
-            && component != ".."
-            && !component.contains(':')
+        !component.is_empty() && component != "." && component != ".." && !component.contains(':')
     })
 }
 
