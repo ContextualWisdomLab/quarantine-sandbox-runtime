@@ -500,12 +500,12 @@ impl RootlessPodmanAdapter {
         let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
         validate_backend_security(&info)?;
 
-        let identity = sandbox_identity(
+        let identity = command_sandbox_identity(
             &request.request_id,
             &request.image_reference,
             &policy.policy_id,
             started_at_epoch_seconds,
-        );
+        )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
 
         let mut create_args = vec![
@@ -518,7 +518,6 @@ impl RootlessPodmanAdapter {
             "--http-proxy=false".to_owned(),
             "--image-volume=ignore".to_owned(),
             "--no-hosts".to_owned(),
-            "--no-hostname".to_owned(),
             "--systemd=false".to_owned(),
             "--sdnotify=ignore".to_owned(),
             "--cap-drop=all".to_owned(),
@@ -608,10 +607,9 @@ impl RootlessPodmanAdapter {
 
         let logs_runner =
             BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
-        let logs_outcome = match logs_runner.run_to_completion(
-            &self.program,
-            &["logs".to_owned(), sandbox_name.clone()],
-        ) {
+        let logs_outcome = match logs_runner
+            .run_to_completion(&self.program, &["logs".to_owned(), sandbox_name.clone()])
+        {
             Ok(outcome) => outcome,
             Err(_) => {
                 return Err(self.cleanup_or_report(
@@ -714,7 +712,10 @@ impl RootlessPodmanAdapter {
             }
             match wait_outcome.status {
                 Some(status) if status.success() => {
-                    return Ok((parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?, false));
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
                 }
                 Some(_) => {
                     return Err(CommandExecutionError::Backend(
@@ -1355,6 +1356,30 @@ fn sandbox_identity(
     hasher.update(started_at_epoch_seconds.to_be_bytes());
     let digest = format!("{:x}", hasher.finalize());
     digest[..16].to_owned()
+}
+
+fn command_sandbox_identity(
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
+    started_at_epoch_seconds: u64,
+) -> Result<String, CommandExecutionError> {
+    let mut execution_nonce = [0_u8; 16];
+    getrandom::fill(&mut execution_nonce).map_err(|_| {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "execution_identity",
+        })
+    })?;
+
+    let mut hasher = Sha256::new();
+    for component in [request_id, image_reference, policy_id] {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update(started_at_epoch_seconds.to_be_bytes());
+    hasher.update(execution_nonce);
+    let digest = format!("{:x}", hasher.finalize());
+    Ok(digest[..16].to_owned())
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {

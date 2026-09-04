@@ -267,7 +267,11 @@ fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
         CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    assert!(calls.lines().any(|line| line.starts_with("container inspect ")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("container inspect "))
+    );
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
 
     let _ = fs::remove_file(program);

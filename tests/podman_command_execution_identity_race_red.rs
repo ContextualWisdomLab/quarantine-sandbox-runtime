@@ -140,8 +140,14 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
 
     assert_eq!(create_names.len(), 2);
     assert_eq!(remove_names.len(), 2);
-    assert_eq!(create_names.iter().cloned().collect::<BTreeSet<_>>().len(), 2);
-    assert_eq!(remove_names.iter().cloned().collect::<BTreeSet<_>>().len(), 2);
+    assert_eq!(
+        create_names.iter().cloned().collect::<BTreeSet<_>>().len(),
+        2
+    );
+    assert_eq!(
+        remove_names.iter().cloned().collect::<BTreeSet<_>>().len(),
+        2
+    );
     assert_eq!(
         create_names.iter().cloned().collect::<BTreeSet<_>>(),
         remove_names.iter().cloned().collect::<BTreeSet<_>>(),

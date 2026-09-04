@@ -76,7 +76,7 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
     let program = fixture_path("fake-podman");
     let log = fixture_path("calls");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display()
     );
     fs::write(&program, script).expect("fake Podman must be writable");

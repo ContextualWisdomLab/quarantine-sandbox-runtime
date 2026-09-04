@@ -17,8 +17,16 @@ fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     let body_start = start + marker.len();
     let remainder = &workflow[body_start..];
     let end = remainder
-        .find("\n  ")
-        .map_or(workflow.len(), |offset| body_start + offset);
+        .lines()
+        .scan(body_start, |offset, line| {
+            let line_start = *offset;
+            *offset += line.len() + 1;
+            Some((line_start, line))
+        })
+        .find(|(_, line)| {
+            line.starts_with("  ") && !line.starts_with("    ") && line.trim_end().ends_with(':')
+        })
+        .map_or(workflow.len(), |(offset, _)| offset);
     &workflow[start..end]
 }
 

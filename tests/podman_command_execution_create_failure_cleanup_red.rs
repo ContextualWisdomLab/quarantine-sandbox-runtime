@@ -87,7 +87,8 @@ fn failed_create_process_still_gets_idempotent_cleanup() {
     let call_log = temporary_path("call-log");
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n'; exit 42 ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(), security_info_json(),
+        call_log.display(),
+        security_info_json(),
     );
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -104,7 +105,11 @@ fn failed_create_process_still_gets_idempotent_cleanup() {
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("create --name ")));
-    assert!(calls.lines().any(|line| line.starts_with("rm --force --ignore ")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("rm --force --ignore "))
+    );
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
     let _ = fs::remove_file(program);
@@ -116,7 +121,8 @@ fn cleanup_failure_after_failed_create_surfaces_leak_risk() {
     let call_log = temporary_path("cleanup-fail-call-log");
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n'; exit 42 ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(), security_info_json(),
+        call_log.display(),
+        security_info_json(),
     );
     let program = write_executable("fake-podman-cleanup-fail", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -131,7 +137,11 @@ fn cleanup_failure_after_failed_create_surfaces_leak_risk() {
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("create --name ")));
-    assert!(calls.lines().any(|line| line.starts_with("rm --force --ignore ")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("rm --force --ignore "))
+    );
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
     let _ = fs::remove_file(program);
