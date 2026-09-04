@@ -3,7 +3,7 @@
 //! Application-service readiness may be trusted only after the running container is
 //! proven to be attached exclusively to the runtime-owned deny-by-default network.
 //! A separately inspectable internal network must not satisfy that control when the
-//! container reports an effective default/external network mode.
+//! container reports a different network mode or an unexpected additional attachment.
 
 #![cfg(target_os = "linux")]
 
@@ -19,6 +19,8 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_000_000;
 
 fn fixture_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -65,8 +67,13 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-#[test]
-fn container_on_unexpected_network_fails_closed_before_readiness() {
+fn container_inspection(network_mode: &str, networks: &str) -> String {
+    format!(
+        r#"[{{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"{network_mode}"}},"NetworkSettings":{{"Networks":{networks}}}}}]"#
+    )
+}
+
+fn assert_network_binding_rejected(container: &str) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
     let ready_port = listener
         .local_addr()
@@ -76,7 +83,6 @@ fn container_on_unexpected_network_fails_closed_before_readiness() {
     let program = fixture_path("fake-podman");
     let log = fixture_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"bridge"}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
@@ -94,18 +100,17 @@ fn container_on_unexpected_network_fails_closed_before_readiness() {
 
     let adapter = RootlessPodmanAdapter::new(program.clone());
     assert_eq!(
-        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS),
         Err(ApplicationServiceError::IsolationVerificationFailed {
             control_name: "sandbox_network_binding",
         }),
-        "an internal network object must not prove that the running container is attached to it"
+        "network object configuration must not substitute for exact container attachment proof"
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     for expected in [
         "network create --internal --disable-dns qsr-net-",
         "container inspect --format json qsr-app-",
-        "network inspect --format json qsr-net-",
         "stop --time 1 qsr-app-",
         "rm --force qsr-app-",
         "network rm --force qsr-net-",
@@ -120,4 +125,22 @@ fn container_on_unexpected_network_fails_closed_before_readiness() {
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     drop(listener);
+}
+
+#[test]
+fn container_on_different_network_fails_closed_before_readiness() {
+    let container = container_inspection("bridge", r#"{"podman":{}}"#);
+    assert_network_binding_rejected(&container);
+}
+
+#[test]
+fn container_with_additional_egress_network_fails_closed_before_readiness() {
+    let request = request();
+    let policy = policy();
+    let plan = RootlessPodmanAdapter::plan_at(&request, &policy, STARTED_AT_EPOCH_SECONDS)
+        .expect("valid request and policy must yield a launch plan");
+    let expected_network = plan.network_name();
+    let networks = format!(r#"{{"{expected_network}":{{}},"podman":{{}}}}"#);
+    let container = container_inspection(expected_network, &networks);
+    assert_network_binding_rejected(&container);
 }
