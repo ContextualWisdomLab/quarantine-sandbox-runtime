@@ -101,7 +101,7 @@ fn container_inspect_json(id: &str) -> String {
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
-         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]"
     )
 }
@@ -113,7 +113,7 @@ fn container_inspect_json_with_source(id: &str) -> String {
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
-         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
          \"Mounts\":[{{\"Destination\":\"/workspace\",\"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
     )
@@ -295,6 +295,37 @@ fn run_command_at_rejects_a_backend_that_is_not_rootless() {
     assert_eq!(
         error,
         CommandExecutionError::Backend(ApplicationServiceError::BackendNotRootless)
+    );
+    let _ = fs::remove_file(program);
+}
+
+#[test]
+fn run_command_at_rejects_a_command_container_attached_to_a_network() {
+    let inspect = container_inspect_json("fake-command-container-id")
+        .replace("\"NetworkMode\":\"none\"", "\"NetworkMode\":\"bridge\"");
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
+         info:--format) printf '%s\\n' '{}' ;;\n  \
+         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
+         start:*) : ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
+         rm:--force) : ;;\n  \
+         *) exit 91 ;;\nesac\n",
+        security_info_json(),
+        inspect,
+    );
+    let program = write_executable("network-attached", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let result = adapter.run_command_at(&request(20), &policy(), 1_780_000_000);
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "external_egress_denied",
+            },
+        ))
     );
     let _ = fs::remove_file(program);
 }
