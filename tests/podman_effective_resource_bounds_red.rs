@@ -168,6 +168,50 @@ fn missing_tmpfs_hardening_option_fails_before_publication_and_cleans_up() {
 }
 
 #[test]
+fn missing_tmpfs_nosuid_fails_before_publication_and_cleans_up() {
+    let container_with_suid_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nodev,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(container_with_suid_tmpfs, "nosuid tmpfs hardening");
+}
+
+#[test]
+fn missing_tmpfs_nodev_fails_before_publication_and_cleans_up() {
+    let container_with_device_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(container_with_device_tmpfs, "nodev tmpfs hardening");
+}
+
+#[test]
+fn contradictory_tmpfs_execution_flags_fail_before_publication_and_clean_up() {
+    let container_with_contradictory_execution_flags = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,exec,noexec,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_contradictory_execution_flags,
+        "non-contradictory tmpfs execution flags",
+    );
+}
+
+#[test]
+fn conflicting_tmpfs_sizes_fail_before_publication_and_clean_up() {
+    let container_with_conflicting_sizes = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216,size=33554432"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_conflicting_sizes,
+        "single request-bound tmpfs size",
+    );
+}
+
+#[test]
+fn unexpected_writable_tmpfs_mount_fails_before_publication_and_cleans_up() {
+    let container_with_extra_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216","/run":"rw,noexec,nosuid,nodev,size=1048576"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_extra_tmpfs,
+        "exact allowed writable tmpfs mount set",
+    );
+}
+
+#[test]
 fn unbounded_effective_wall_time_fails_before_publication_and_cleans_up() {
     let container_with_unbounded_timeout = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":0},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
 
