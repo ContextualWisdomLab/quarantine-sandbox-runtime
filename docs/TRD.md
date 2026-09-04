@@ -20,12 +20,15 @@ src/
 ├── application_service/      Supporting bounded context
 │   └── mod.rs
 ├── sandbox_execution/        Core bounded context
+│   └── mod.rs
+├── infrastructure/           Runtime/process adapters
+│   ├── bounded_command.rs
 │   ├── mod.rs
-│   └── podman.rs             Infrastructure adapter, temporary colocated module
+│   └── podman.rs
 └── lib.rs                    Public facade only
 ```
 
-The Podman implementation is a Core infrastructure adapter, not a domain object. If additional backends are added, extract a backend port/adapter package structure without changing the consumer request/lease semantics unnecessarily.
+Podman and bounded subprocess execution are infrastructure adapters, not domain objects. Core and Supporting contexts expose backend-neutral contracts; additional backends belong under the infrastructure boundary without changing consumer request/lease semantics merely because the runtime technology changes.
 
 ## Application-service contracts
 
@@ -79,7 +82,7 @@ Successful receipt exists only when both container and network removal succeeded
 
 ### Planning
 
-`RootlessPodmanAdapter::plan_at` validates request/policy and produces deterministic command argv. Sandbox/network names are derived from SHA-256 over request ID, immutable image, policy ID, and start time; raw caller strings are not used as container/network names.
+`RootlessPodmanAdapter::plan_at` validates request/policy and produces deterministic command argv. Sandbox/network names are currently derived from SHA-256 over request ID, immutable image, policy ID, and start time; raw caller strings are not used as container/network names. Draft #21 carries the RED proving that this deterministic identity is not sufficient to distinguish independent same-request/same-second runtime invocations.
 
 ### Backend verification
 
@@ -89,17 +92,17 @@ Before creating isolation resources:
 podman info --format {{.Host.Security.Rootless}}
 ```
 
-must produce `true` after trimming. Any other value fails closed.
+must produce `true` after trimming. Backend security information is then inspected and required P0 seccomp/LSM host capability must be present; host capability by itself does not prove per-sandbox confinement.
 
 ### Network
 
-Each service creates a unique bridge network using:
+Each service creates a runtime-named internal network using:
 
 ```text
-podman network create --internal --disable-dns --ignore <network>
+podman network create --internal --disable-dns <network>
 ```
 
-P0 does not add another network. This is a default-deny egress profile rather than a general network sandbox API.
+The network object is inspected for the internal/DNS-disabled policy. P0 does not intentionally add another network. Draft #23 separately requires positive proof that the running container is attached exclusively to the exact runtime-owned network before egress isolation can be treated as verified.
 
 ### Container creation
 
@@ -109,6 +112,11 @@ Required controls include:
 --pull=never
 --read-only
 --read-only-tmpfs=false
+--http-proxy=false
+--image-volume=ignore
+--no-hosts
+--systemd=false
+--sdnotify=ignore
 --cap-drop=all
 --security-opt=no-new-privileges
 --userns=auto
@@ -128,17 +136,19 @@ Required controls include:
 --publish 127.0.0.1::<container-port>/tcp
 ```
 
-The immutable image reference is appended before application argv, so application arguments cannot be interpreted as Podman options. No shell is involved.
+The immutable image reference is appended before application argv, so application arguments cannot be interpreted as Podman options. No shell is involved. Applied argv or inspect configuration is not equivalent to live resource-enforcement evidence; Draft #19 carries the P0 resource-attestation RED for tmpfs/wall-time and subsequent live cgroup/mount/termination proof.
 
-### Start, readiness, and lease
+### Start, effective verification, readiness, and lease
 
-1. Create network.
-2. Create container.
-3. Start container.
-4. Query the requested port mapping.
-5. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
-6. Poll bounded TCP readiness using operator timeout/poll policy.
-7. Return a lease only after readiness.
+1. Create the internal network.
+2. Create the container.
+3. Start the container.
+4. Inspect the runtime-owned network and exact container identity/configuration.
+5. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
+6. Query the requested port mapping only after isolation verification succeeds.
+7. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
+8. Poll bounded TCP readiness using operator timeout/poll policy.
+9. Return a lease only after effective-isolation checks and readiness succeed.
 
 P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplied health path is accepted yet. A future typed HTTP health contract may refine this without accepting arbitrary URLs.
 
@@ -147,11 +157,11 @@ P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplie
 - Network-create failure: no resources assumed.
 - Container-create failure: remove network.
 - Start failure: remove container and network.
-- Port/readiness failure: stop/remove container and remove network.
+- Isolation/port/readiness failure: stop/remove container and remove network.
 - Explicit termination: stop with lease shutdown grace, remove container, remove network.
 - If cleanup cannot be proven, return `CleanupFailed` rather than the original error as though cleanup succeeded.
 
-The container timeout limits application process lifetime even if the runtime process disappears, but stale container/network object reclamation still requires a durable reaper before GA.
+`--timeout` expresses an intended container lifetime bound, but configuration alone is not release-grade proof that wall-time termination occurred. Durable crash/restart orphan reclamation also requires the Recovery context/reaper before GA.
 
 ## Artifact-analysis technical contract
 
