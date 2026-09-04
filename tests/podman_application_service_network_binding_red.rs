@@ -3,7 +3,8 @@
 //! Application-service readiness may be trusted only after the running container is
 //! proven to be attached exclusively to the runtime-owned deny-by-default network.
 //! A separately inspectable internal network must not satisfy that control when the
-//! container reports a different network mode or an unexpected additional attachment.
+//! container reports a different network mode, omits the expected attachment, or
+//! reports an unexpected additional attachment.
 
 #![cfg(target_os = "linux")]
 
@@ -130,6 +131,17 @@ fn assert_network_binding_rejected(container: &str) {
 #[test]
 fn container_on_different_network_fails_closed_before_readiness() {
     let container = container_inspection("bridge", r#"{"podman":{}}"#);
+    assert_network_binding_rejected(&container);
+}
+
+#[test]
+fn container_with_expected_mode_but_missing_attachment_fails_closed_before_readiness() {
+    let request = request();
+    let policy = policy();
+    let plan = RootlessPodmanAdapter::plan_at(&request, &policy, STARTED_AT_EPOCH_SECONDS)
+        .expect("valid request and policy must yield a launch plan");
+    let expected_network = plan.network_name();
+    let container = container_inspection(expected_network, r#"{}"#);
     assert_network_binding_rejected(&container);
 }
 
