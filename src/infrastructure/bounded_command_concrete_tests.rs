@@ -20,11 +20,11 @@ fn concrete_child_success_preserves_bounded_output() {
 }
 
 #[test]
-fn concrete_child_completion_preserves_terminal_facts() {
-    let outcome = BoundedCommandRunner::new(Duration::from_secs(1), 64)
+fn concrete_child_completion_tracks_each_truncated_stream() {
+    let outcome = BoundedCommandRunner::new(Duration::from_secs(1), 4)
         .run_to_completion(
             Path::new("/bin/sh"),
-            &["-c".to_owned(), "printf done".to_owned()],
+            &["-c".to_owned(), "printf 12345".to_owned()],
         )
         .map(|outcome| {
             (
@@ -39,7 +39,7 @@ fn concrete_child_completion_preserves_terminal_facts() {
 
     assert_eq!(
         outcome,
-        Ok((true, false, b"done".to_vec(), false, vec![], false))
+        Ok((false, false, b"1234".to_vec(), true, vec![], false))
     );
 }
 
