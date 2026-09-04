@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack is `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14@0c8921e45e1686bd94ef1fc367d0d2a6aea06c33 → #18@f5a1a6541a27423f86c0957bbff3cfdf41b90b32`. #18 remains a RED-only contract lane; its current exact head strengthens the test contract without changing production behavior. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
+Last reviewed on 2026-09-04 against the live dependency stack. Protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` remains shipped authority. The active Draft stack through the product-bearing command path is `#1@3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3 → #6@89103472cea8f27661614e4f4740e68d2f4a153b → #9@64b1ba4f202843288e9a9c4b104e0f93aad76f43 → #10@30a2c2080bc1d2e8d6d049b70477721dccb4d8dc → #13@3a26a5c27e81fc315c98a88005b8154d2ca95b7f → #14@0c8921e45e1686bd94ef1fc367d0d2a6aea06c33`, followed by RED-only contract lane #18. The latest #18 test-bearing head is `7a189f9814b78785b946bbd297eeb5401e3552fe`; documentation-only commits on that branch are not test evidence and the live exact head/check state must be read from GitHub before any claim or merge. Queued, skipped, cancelled, stale, predecessor-head, or pre-checkout results are non-passing evidence.
 
 ## Product responsibility and Context Map
 
@@ -45,7 +45,7 @@ The #14 restack deliberately keeps the current full ADR-0007 from #13 rather tha
 | --- | --- | --- | --- |
 | Static foundation | Immutable SHA-256 identity, bounded source context, deterministic format classification, ordered analyzer port and attributable failures. | Implemented on #1 | Integrate and retain exact release evidence. |
 | Verdict boundary | Evidence/disposition remain risk/analysis evidence and require a consumer verdict. | Implemented | Never promote analyzer output into foreign authoritative truth. |
-| Credential-free Claude plugin package quarantine profile | Issue #17 defines exact catalog/source/artifact identity, an AppGuardrail receipt reference, fixed probe codes, bounded resource budgets, deny-by-default networking/filesystem policy and bounded isolation receipts. Draft #18 exact `f5a1a654…` now requires the candidate request to deserialize and pass `AnalysisRequest::validate()`, and predefines fail-closed cases for mutable/malformed commit or digest identity, duplicate probes, zero execution budgets and control text. Production remains unchanged until the exact positive RED actually executes and fails. | RED queued; candidate only | After actual RED execution, add the smallest strict profile-specific request/validation contract, then extend hostile fixtures for producer/artifact/policy mismatch, oversized/deep input, Unicode ambiguity and archive/path hazards. Do not consume mutable CGC/AppGuardrail/Noema branches or claim admission/activation authority. |
+| Credential-free Claude plugin package quarantine profile | Issue #17 defines exact catalog/source/artifact identity, an AppGuardrail receipt reference, fixed probe codes, bounded resource budgets, deny-by-default networking/filesystem policy and bounded isolation receipts. Draft #18 latest test-bearing `7a189f98…` requires the candidate request to deserialize and pass `AnalysisRequest::validate()`, and predefines fail-closed cases for mutable/malformed commit or digest identity, duplicate/empty/unknown probes, zero or effectively unbounded execution budgets, control text in repository/profile/execution fields, and repository-path escape. Production remains unchanged until the checked-in positive RED actually executes and fails. | RED queued; candidate only | After actual RED execution, add the smallest strict profile-specific request/validation contract, then extend producer/artifact/policy mismatch, oversized/deep input, Unicode ambiguity and archive/symlink/special-file hostile fixtures before runtime probes. Do not consume mutable CGC/AppGuardrail/Noema branches or claim admission/activation authority. |
 | YARA-X / capa / Ghidra / LIEF | No production adapters. | Missing | Add one bounded adapter per TDD slice with tool/version/digest provenance. |
 | Linux dynamic detonation | No general artifact detonation vertical yet. | Missing | Reuse the verified sandbox boundary or stronger gVisor/microVM profile; never execute hostile bytes in the host control process. |
 | Windows detonation | No production pool. | Missing | Separate Windows isolation boundary while preserving common evidence contracts. |
@@ -60,10 +60,10 @@ The absence of an immutable release remains an implementation gap. PR #10 contai
 
 | Item | Current state |
 | --- | --- |
-| Package version | `0.1.0` development metadata; not a released identity |
+| Package version | `0.2b03.0` development metadata; not a released identity |
 | GitHub Releases | none, freshly verified 2026-09-04 |
 | Stable release source | no integrated protected product release head yet |
-| Application-service lease contract | `1.2.0` candidate |
+| work-client lease contract | `1.2.0` candidate |
 | Artifact-analysis request/evidence | `1.0.0` candidate; Claude-plugin profile is RED-only on #18 |
 | Command request/result | `1.0.0` candidate |
 | Release evidence contract | `1.0.0` candidate on #10 |
@@ -96,13 +96,13 @@ After compatible immutable releases exist, runtime/backend identity, technology/
 
 ## Verification and governance state
 
-- #1 exact `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` is Draft. CI `33800321670`, Security Scan `33800321674`, SAST `33800321679`, Scorecard `33800321680` and OSV `33800322168` are materialized but queued; the effective-attestation RED has not executed.
+- #1 exact `3fa5c5493fcbfbfb1c28b075e3bad30c03ea29b3` is Draft. CI `33800321670`, Security Scan `33800321674`, SAST `33800321679`, Scorecard `33800321680` and OSV `33800322168` remain queued; the effective-attestation RED has not executed.
 - #6 non-force restack head `89103472cea8f27661614e4f4740e68d2f4a153b` inherits the moved parent while preserving caller ownership/idempotency/cleanup-fairness delta.
 - #9 non-force restack head `64b1ba4f202843288e9a9c4b104e0f93aad76f43` preserves strict effective-isolation/LSM logic on the current #6 parent. Its dedicated positive-LSM job `100798523349` remains queued without an eligible runner.
 - #10 non-force restack head `30a2c2080bc1d2e8d6d049b70477721dccb4d8dc` preserves release evidence on the current isolation head.
 - #13 non-force restack head `3a26a5c27e81fc315c98a88005b8154d2ca95b7f` preserves the bounded command contract on the current release head.
 - #14 exact `0c8921e45e1686bd94ef1fc367d0d2a6aea06c33` preserves its command backend/CLI/cleanup/security-test delta on current #13; issue #16's checked-in identity-race RED remains unexecuted and production identity code remains unchanged.
-- #18 exact `f5a1a6541a27423f86c0957bbff3cfdf41b90b32` is stacked exactly on #14. It strengthens the Claude-plugin package-analysis RED so future GREEN must satisfy public validation rather than merely deserialize new fields. CI `33835626261` materialized verify/coverage/branch-coverage/negative-AppArmor and positive-LSM jobs; all were queued/non-passing at the fresh observation.
+- #18 remains stacked on #14. Latest test-bearing head `7a189f9814b78785b946bbd297eeb5401e3552fe` strengthens the Claude-plugin package-analysis RED so future GREEN must satisfy public validation, a closed fixed-probe set, actual resource ceilings, control-text rejection and canonical repository-relative paths rather than merely deserialize new fields. Exact branch head and exact-head workflow status must be read live because documentation-only commits can move the PR without adding test evidence.
 - Issue #16 remains the P0 command sandbox-identity defect. Its checked-in Rust RED must actually execute before production identity repair.
 - Issue #17 is a lower-stack artifact-analysis expansion; it must not overtake dependency-root P0 repairs or consume mutable foreign contracts.
 - `.github#712/#1796` own organization queue/admission and duplicate queue-hygiene repair. Leaf source is not churned solely to manufacture runner assignment. `.github#1590` owns the separate positive LSM-capable security-runner requirement.
