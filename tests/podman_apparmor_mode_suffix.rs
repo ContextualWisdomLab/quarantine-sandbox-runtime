@@ -6,25 +6,13 @@ use std::{
     fs,
     net::TcpListener,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
 };
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
-        std::process::id()
-    ))
-}
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -60,8 +48,8 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(ready_port: u16, runtime_label: &str) -> PathBuf {
-    let program = temporary_path("apparmor-mode-suffix-podman");
+fn write_fake_podman(fixture_directory: &Path, ready_port: u16, runtime_label: &str) -> PathBuf {
+    let program = fixture_directory.join("apparmor-mode-suffix-podman");
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"5.8.4\"}}}}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":67108864,\"NanoCpus\":500000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - {runtime_label}\\n' ;;\n  network:inspect) printf '%s\\n' '[{{\"internal\":true,\"dns_enabled\":false}}]' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n"
     );
@@ -76,12 +64,13 @@ fn write_fake_podman(ready_port: u16, runtime_label: &str) -> PathBuf {
 
 #[test]
 fn confined_apparmor_mode_suffix_is_the_same_effective_profile() {
+    let fixture = tempfile::tempdir().expect("isolated AppArmor fixture directory");
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
         .expect("listener address should resolve")
         .port();
-    let program = write_fake_podman(ready_port, "containers-default (enforce)");
+    let program = write_fake_podman(fixture.path(), ready_port, "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
@@ -96,12 +85,13 @@ fn confined_apparmor_mode_suffix_is_the_same_effective_profile() {
 
 #[test]
 fn apparmor_complain_mode_never_counts_as_effective_confinement() {
+    let fixture = tempfile::tempdir().expect("isolated AppArmor fixture directory");
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
         .expect("listener address should resolve")
         .port();
-    let program = write_fake_podman(ready_port, "containers-default (complain)");
+    let program = write_fake_podman(fixture.path(), ready_port, "containers-default (complain)");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
@@ -119,12 +109,13 @@ fn apparmor_complain_mode_never_counts_as_effective_confinement() {
 
 #[test]
 fn bare_apparmor_profile_without_effective_mode_is_not_positive_proof() {
+    let fixture = tempfile::tempdir().expect("isolated AppArmor fixture directory");
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
         .expect("listener address should resolve")
         .port();
-    let program = write_fake_podman(ready_port, "containers-default");
+    let program = write_fake_podman(fixture.path(), ready_port, "containers-default");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
