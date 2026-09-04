@@ -21,6 +21,7 @@ use quarantine_sandbox_runtime::{
     RootlessPodmanAdapter, ServiceProtocol,
 };
 
+const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_000_000;
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -92,7 +93,14 @@ fn write_fake_podman(container_json: &str, ready_port: u16) -> (PathBuf, PathBuf
 
 fn run_effective_resource_case(
     container_json: &str,
-) -> (Result<(), ApplicationServiceError>, String) {
+) -> (Result<(), ApplicationServiceError>, String, String, String) {
+    let request = request();
+    let policy = policy();
+    let plan = RootlessPodmanAdapter::plan_at(&request, &policy, STARTED_AT_EPOCH_SECONDS)
+        .expect("valid request and policy must yield a launch plan");
+    let expected_sandbox = plan.sandbox_name().to_owned();
+    let expected_network = plan.network_name().to_owned();
+
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
     let ready_port = listener
         .local_addr()
@@ -102,18 +110,19 @@ fn run_effective_resource_case(
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter
-        .launch_at(&request(), &policy(), 1_780_000_000)
+        .launch_at(&request, &policy, STARTED_AT_EPOCH_SECONDS)
         .map(|_| ());
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     drop(listener);
-    (result, calls)
+    (result, calls, expected_sandbox, expected_network)
 }
 
 fn assert_resource_attestation_failure(container_json: &str, evidence_name: &str) {
-    let (result, calls) = run_effective_resource_case(container_json);
+    let (result, calls, expected_sandbox, expected_network) =
+        run_effective_resource_case(container_json);
 
     assert_eq!(
         result,
@@ -122,20 +131,21 @@ fn assert_resource_attestation_failure(container_json: &str, evidence_name: &str
         }),
         "{evidence_name} must fail the resource attestation"
     );
+    for expected in [
+        format!("network create --internal --disable-dns {expected_network}"),
+        format!("network inspect --format json {expected_network}"),
+        format!("container inspect --format json {expected_sandbox}"),
+        format!("stop --time 1 {expected_sandbox}"),
+        format!("rm --force {expected_sandbox}"),
+        format!("network rm --force {expected_network}"),
+    ] {
+        assert!(
+            calls.lines().any(|line| line == expected),
+            "missing exact runtime-owned operation {expected} for {evidence_name}: {calls}"
+        );
+    }
     assert!(
-        calls.contains("stop --time 1"),
-        "attestation failure must stop the sandbox for {evidence_name}: {calls}"
-    );
-    assert!(
-        calls.contains("rm --force"),
-        "attestation failure must remove the sandbox for {evidence_name}: {calls}"
-    );
-    assert!(
-        calls.contains("network rm --force"),
-        "attestation failure must remove the network for {evidence_name}: {calls}"
-    );
-    assert!(
-        !calls.contains("port "),
+        !calls.lines().any(|line| line.starts_with("port ")),
         "publication must not be trusted before {evidence_name} is verified: {calls}"
     );
 }
