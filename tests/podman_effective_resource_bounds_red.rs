@@ -90,7 +90,7 @@ fn write_fake_podman(container_json: &str, ready_port: u16) -> (PathBuf, PathBuf
     (program, log)
 }
 
-fn run_missing_effective_resource_case(
+fn run_effective_resource_case(
     container_json: &str,
 ) -> (Result<(), ApplicationServiceError>, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
@@ -112,60 +112,89 @@ fn run_missing_effective_resource_case(
     (result, calls)
 }
 
-#[test]
-fn missing_effective_tmpfs_limit_fails_before_publication_and_cleans_up() {
-    let container_without_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
-    let (result, calls) = run_missing_effective_resource_case(container_without_tmpfs);
+fn assert_resource_attestation_failure(container_json: &str, evidence_name: &str) {
+    let (result, calls) = run_effective_resource_case(container_json);
 
     assert_eq!(
         result,
         Err(ApplicationServiceError::IsolationVerificationFailed {
             control_name: "resource_limits",
-        })
+        }),
+        "{evidence_name} must fail the resource attestation"
     );
     assert!(
         calls.contains("stop --time 1"),
-        "attestation failure must stop the sandbox: {calls}"
+        "attestation failure must stop the sandbox for {evidence_name}: {calls}"
     );
     assert!(
         calls.contains("rm --force"),
-        "attestation failure must remove the sandbox: {calls}"
+        "attestation failure must remove the sandbox for {evidence_name}: {calls}"
     );
     assert!(
         calls.contains("network rm --force"),
-        "attestation failure must remove the network: {calls}"
+        "attestation failure must remove the network for {evidence_name}: {calls}"
     );
     assert!(
         !calls.contains("port "),
-        "publication must not be trusted before effective tmpfs proof: {calls}"
+        "publication must not be trusted before {evidence_name} is verified: {calls}"
     );
 }
 
 #[test]
-fn wrong_effective_wall_time_fails_before_publication_and_cleans_up() {
-    let container_with_unbounded_timeout = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":0},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
-    let (result, calls) = run_missing_effective_resource_case(container_with_unbounded_timeout);
+fn missing_effective_tmpfs_limit_fails_before_publication_and_cleans_up() {
+    let container_without_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
 
-    assert_eq!(
-        result,
-        Err(ApplicationServiceError::IsolationVerificationFailed {
-            control_name: "resource_limits",
-        })
+    assert_resource_attestation_failure(container_without_tmpfs, "effective tmpfs evidence");
+}
+
+#[test]
+fn mismatched_effective_tmpfs_size_fails_before_publication_and_cleans_up() {
+    let container_with_wrong_tmpfs_size = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=33554432"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_wrong_tmpfs_size,
+        "request-bound tmpfs size",
     );
-    assert!(
-        calls.contains("stop --time 1"),
-        "attestation failure must stop the sandbox: {calls}"
+}
+
+#[test]
+fn missing_tmpfs_hardening_option_fails_before_publication_and_cleans_up() {
+    let container_with_executable_tmpfs = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_executable_tmpfs,
+        "non-executable hardened tmpfs options",
     );
-    assert!(
-        calls.contains("rm --force"),
-        "attestation failure must remove the sandbox: {calls}"
+}
+
+#[test]
+fn unbounded_effective_wall_time_fails_before_publication_and_cleans_up() {
+    let container_with_unbounded_timeout = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":0},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_unbounded_timeout,
+        "bounded effective wall time",
     );
-    assert!(
-        calls.contains("network rm --force"),
-        "attestation failure must remove the network: {calls}"
+}
+
+#[test]
+fn mismatched_positive_wall_time_fails_before_publication_and_cleans_up() {
+    let container_with_wrong_timeout = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":31},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_attestation_failure(
+        container_with_wrong_timeout,
+        "request-bound effective wall time",
     );
+}
+
+#[test]
+fn exact_resource_evidence_accepts_order_independent_tmpfs_options() {
+    let container_with_exact_resource_evidence = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"Tmpfs":{"/tmp":"size=16777216,nodev,rw,nosuid,noexec"}}}]"#;
+    let (result, calls) = run_effective_resource_case(container_with_exact_resource_evidence);
+
+    assert_eq!(result, Ok(()));
     assert!(
-        !calls.contains("port "),
-        "publication must not be trusted before effective wall-time proof: {calls}"
+        calls.contains("port "),
+        "exact effective resource evidence must allow publication to proceed: {calls}"
     );
 }
