@@ -6,6 +6,8 @@ AppArmor Project. (2026). *Verify AppArmor coverage and audit profiles.* https:/
 
 Containers/Image Authors. (2026). *containers-transports — description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
 
+Davis, K., Peabody, B., & Leach, P. (2024). *Universally unique IDentifiers (UUIDs) (RFC 9562).* RFC Editor. https://doi.org/10.17487/RFC9562
+
 Dürst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
 
 Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md
