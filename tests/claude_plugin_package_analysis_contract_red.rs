@@ -78,7 +78,7 @@ fn claude_plugin_package_request_rejects_mutable_or_malformed_identity() {
 }
 
 #[test]
-fn claude_plugin_package_request_rejects_duplicate_probes_and_unbounded_resources() {
+fn claude_plugin_package_request_rejects_duplicate_empty_or_unknown_probes() {
     let mut duplicate_probe = valid_request();
     duplicate_probe["requested_probe_codes"] = serde_json::json!([
         "package_inventory",
@@ -89,6 +89,26 @@ fn claude_plugin_package_request_rejects_duplicate_probes_and_unbounded_resource
         "probe codes are a bounded set, not a caller-controlled repeated command list"
     );
 
+    let mut empty_probe = valid_request();
+    empty_probe["requested_probe_codes"] = serde_json::json!([]);
+    assert!(
+        validate_request(empty_probe).is_err(),
+        "at least one fixed runtime probe must be selected"
+    );
+
+    let mut unknown_probe = valid_request();
+    unknown_probe["requested_probe_codes"] = serde_json::json!([
+        "package_inventory",
+        "arbitrary_shell"
+    ]);
+    assert!(
+        validate_request(unknown_probe).is_err(),
+        "callers must not add or redefine executable probe surfaces"
+    );
+}
+
+#[test]
+fn claude_plugin_package_request_rejects_zero_or_effectively_unbounded_resources() {
     for field in [
         "maximum_cpu_milliseconds",
         "maximum_memory_bytes",
@@ -97,11 +117,18 @@ fn claude_plugin_package_request_rejects_duplicate_probes_and_unbounded_resource
         "maximum_output_bytes",
         "maximum_wall_time",
     ] {
-        let mut request = valid_request();
-        request[field] = serde_json::json!(0);
+        let mut zero = valid_request();
+        zero[field] = serde_json::json!(0);
         assert!(
-            validate_request(request).is_err(),
-            "{field} must carry a positive finite execution budget"
+            validate_request(zero).is_err(),
+            "{field} must carry a positive execution budget"
+        );
+
+        let mut unbounded = valid_request();
+        unbounded[field] = serde_json::json!(u64::MAX);
+        assert!(
+            validate_request(unbounded).is_err(),
+            "{field} must enforce a profile ceiling rather than accepting an effectively unbounded budget"
         );
     }
 }
@@ -109,10 +136,13 @@ fn claude_plugin_package_request_rejects_duplicate_probes_and_unbounded_resource
 #[test]
 fn claude_plugin_package_request_rejects_control_text_in_execution_relevant_fields() {
     for field in [
+        "catalog_repository",
         "plugin_name",
         "plugin_version",
+        "source_repository",
         "source_path",
         "appguardrail_scan_receipt_reference",
+        "analysis_profile_id",
         "network_policy_reference",
         "filesystem_policy_reference",
     ] {
@@ -121,6 +151,23 @@ fn claude_plugin_package_request_rejects_control_text_in_execution_relevant_fiel
         assert!(
             validate_request(request).is_err(),
             "{field} must reject control characters before reaching runtime logic"
+        );
+    }
+}
+
+#[test]
+fn claude_plugin_package_request_rejects_repository_path_escape() {
+    for invalid_path in [
+        "../outside",
+        "/host/absolute/path",
+        "tests/fixtures/../../outside",
+        "tests\\fixtures\\..\\..\\outside",
+    ] {
+        let mut request = valid_request();
+        request["source_path"] = serde_json::json!(invalid_path);
+        assert!(
+            validate_request(request).is_err(),
+            "source_path must remain a canonical repository-relative path: {invalid_path}"
         );
     }
 }
