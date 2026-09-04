@@ -90,7 +90,9 @@ fn write_fake_podman(container_json: &str, ready_port: u16) -> (PathBuf, PathBuf
     (program, log)
 }
 
-fn run_missing_effective_resource_case(container_json: &str) -> (Result<(), ApplicationServiceError>, String) {
+fn run_missing_effective_resource_case(
+    container_json: &str,
+) -> (Result<(), ApplicationServiceError>, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
     let ready_port = listener
         .local_addr()
@@ -121,9 +123,18 @@ fn missing_effective_tmpfs_limit_fails_before_publication_and_cleans_up() {
             control_name: "resource_limits",
         })
     );
-    assert!(calls.contains("stop --time 1"), "attestation failure must stop the sandbox: {calls}");
-    assert!(calls.contains("rm --force"), "attestation failure must remove the sandbox: {calls}");
-    assert!(calls.contains("network rm --force"), "attestation failure must remove the network: {calls}");
+    assert!(
+        calls.contains("stop --time 1"),
+        "attestation failure must stop the sandbox: {calls}"
+    );
+    assert!(
+        calls.contains("rm --force"),
+        "attestation failure must remove the sandbox: {calls}"
+    );
+    assert!(
+        calls.contains("network rm --force"),
+        "attestation failure must remove the network: {calls}"
+    );
     assert!(
         !calls.contains("port "),
         "publication must not be trusted before effective tmpfs proof: {calls}"
@@ -141,9 +152,18 @@ fn wrong_effective_wall_time_fails_before_publication_and_cleans_up() {
             control_name: "resource_limits",
         })
     );
-    assert!(calls.contains("stop --time 1"), "attestation failure must stop the sandbox: {calls}");
-    assert!(calls.contains("rm --force"), "attestation failure must remove the sandbox: {calls}");
-    assert!(calls.contains("network rm --force"), "attestation failure must remove the network: {calls}");
+    assert!(
+        calls.contains("stop --time 1"),
+        "attestation failure must stop the sandbox: {calls}"
+    );
+    assert!(
+        calls.contains("rm --force"),
+        "attestation failure must remove the sandbox: {calls}"
+    );
+    assert!(
+        calls.contains("network rm --force"),
+        "attestation failure must remove the network: {calls}"
+    );
     assert!(
         !calls.contains("port "),
         "publication must not be trusted before effective wall-time proof: {calls}"
