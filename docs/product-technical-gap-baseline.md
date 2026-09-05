@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-05 KST against dependency-root PR #1 latest test-bearing head `cefb80634bd62e775839345bd23d823d154482be`, active command-runtime PR #14 test-bearing head `387bee4ecf61de9be1915f78c2cd43b73d7379cb`, and protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, backend-applied configuration, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
+Last reviewed on 2026-09-05 KST against dependency-root PR #1 latest test-bearing head `cefb80634bd62e775839345bd23d823d154482be`, active command-runtime PR #14 latest test-bearing head `eac6b8afe998cc34171869717b882bba4002b618`, and protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, backend-applied configuration, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
 
 ## Product responsibility and DDD
 
@@ -26,7 +26,7 @@ The active foundation keeps SHA-256 artifact identity, bounded ingestion, determ
 
 ## Command-execution isolation
 
-Draft #14 is a separate one-shot application-service contract. Production remains unchanged for issues #25–#38 until each focused RED executes for its intended cause.
+Draft #14 is a separate one-shot application-service contract. Production remains unchanged for issues #25–#39 until each focused RED executes for its intended cause.
 
 - #25 pre-attestation execution — current `run_command_at` binds the consumer command as the OCI process and starts it before live seccomp/LSM/capability attestation. RED `585f3d955bddfb95f28e5918cfcadcac632589df` requires no hostile payload side effect before positive proof. GREEN needs a trusted hold/attest/release phase or equivalent; static inspect reordering is insufficient.
 - #26 Linux pathname identity — RED `6a3c9f4a3c886057e1de3a2f05154f81188b58aa` requires literal `a\\b` and nested `a/b` to remain distinct through staging/digest/receipt. Production still performs a lossy backslash rewrite.
@@ -42,14 +42,15 @@ Draft #14 is a separate one-shot application-service contract. Production remain
 - #36 post-create lifecycle ownership — RED `09e4b1577d7e8df78f8d88f18226d442cd70d1e0` requires `start`/inspect/top/wait/kill/logs/remove to use the acquired long container ID rather than mutable `qsr-cmd-*` name authority after successful create.
 - #37 applied immutable image identity — RED `e23bfb0e6982169b437ae13d2f1cee29c2c59754` requires exact equality between the request digest and Podman `container inspect .ImageDigest` before command output becomes trusted evidence. `.Image`/`.ImageName` are not substitutes.
 - #38 direct argv versus image ENTRYPOINT — RED `387bee4ecf61de9be1915f78c2cd43b73d7379cb` requires the complete validated requested argv, including argument boundaries containing spaces, to override image-defined ENTRYPOINT semantics rather than become arguments to an unrelated image executable. `docs/doctoring/COMMAND_ENTRYPOINT_TRACEABILITY.md` records the Podman/NIST evidence chain. Production currently appends `request.command` after the image reference without an entrypoint override.
+- #39 applied UTS/cgroup namespace modes — RED `eac6b8afe998cc34171869717b882bba4002b618` independently reports `HostConfig.UTSMode=host` and `HostConfig.CgroupMode=host` while all currently checked isolation evidence remains positive. Each case must fail closed before logs are trusted and clean up the invocation-owned container. Production requests `--uts=private --cgroupns=private` but does not deserialize or bind the applied inspect fields. `docs/doctoring/COMMAND_NAMESPACE_TRACEABILITY.md` records the Podman/Linux/NIST evidence chain; real namespace-handle proof remains an E2E release gate beyond inspect configuration.
 
-The command profile must ultimately combine #25's pre-payload proof with #32/#35/#37 applied-state bindings, #33/#36 ownership, #28 collision resistance, #30 host confidentiality, #31 storage bounds, #34 evidence encoding, #38 exact process argv, and real rootless-Podman E2E. No single inspect field or launch flag substitutes for that integrated proof.
+The command profile must ultimately combine #25's pre-payload proof with #32/#35/#37/#39 applied-state bindings, #33/#36 ownership, #28 collision resistance, #30 host confidentiality, #31 storage bounds, #34 evidence encoding, #38 exact process argv, and real rootless-Podman E2E. No single inspect field or launch flag substitutes for that integrated proof.
 
 ## Verification and release state
 
 Protected/default `develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea`. Issue #24 owns native CI evidence on the actual protected/default branch: its RED requires `push.branches: [develop]`, rejects stale `main`, and forbids event-specific `paths`/`paths-ignore` filters that could suppress exact integrated-head evidence. Latest test-only root authority is `cefb80634bd62e775839345bd23d823d154482be`; workflow behavior is intentionally unchanged until that RED executes.
 
-The main command/release ancestry is `#1 → #6 → #9 → #10 → #13 → #14`, with #18 downstream of #14 through non-force adoption. RED-only #19/#21/#23 remain direct root descendants. Every moved head reacquires checks; queued, cancelled, predecessor, self-review, or static-only evidence is not release authority. Current #14 moved again for #38 and its exact-head CI must materialize and execute before any #25–#38 production GREEN is authorized. #18 must non-force adopt the moved #14 parent before its own evidence is current.
+The main command/release ancestry is `#1 → #6 → #9 → #10 → #13 → #14`, with #18 downstream of #14 through non-force adoption. RED-only #19/#21/#23 remain direct root descendants. Every moved head reacquires checks; queued, cancelled, predecessor, self-review, or static-only evidence is not release authority. Current #14 moved again for #39 and its exact-head CI must materialize and execute before any #25–#39 production GREEN is authorized. #18 must non-force adopt the moved #14 parent before its own evidence is current.
 
 The first immutable release remains blocked until one unchanged integrated protected candidate has exact native CI, 100% owned production statement/function/region/branch and edge-case coverage where tooling exposes it, public rustdoc, real rootless isolation E2E, positive LSM/seccomp/capability/resource/network/cleanup evidence, required review/security/SAST/dependency gates, package smoke, SPDX SBOM, provenance, checksum/signature where supported, reproducibility, recovery/rollback proof, and release automation sourced from protected `develop`. GitHub Releases remain absent; mutable PR heads are not consumer authority.
 
@@ -57,6 +58,6 @@ The first immutable release remains blocked until one unchanged integrated prote
 
 1. Execute root issue #24's current exact RED and repair the stale native `main` push trigger only after the intended failure is observed.
 2. Execute #19, #23, and #21 on current root ancestry; add only their smallest causal GREENs before live resource/network proofs.
-3. Execute #14 issues #25–#38 in causal order where dependencies require it; do not let a later launch-intent fix bypass #25's pre-payload proof or #33/#36 ownership.
+3. Execute #14 issues #25–#39 in causal order where dependencies require it; do not let a later launch-intent or applied-state fix bypass #25's pre-payload proof or #33/#36 ownership.
 4. Reconcile #6/#9/#10/#13/#14 dependency-first without force, then non-force adopt the final #14 tree into #18 while preserving only #18's artifact-analysis-owned delta.
 5. Merge only after one unchanged exact candidate satisfies review, security, coverage, real runtime, and protected integration gates; then publish the first immutable runtime release and hand released version/digest pinning to consumer owner paths.
