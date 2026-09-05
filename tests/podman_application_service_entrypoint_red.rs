@@ -78,9 +78,8 @@ fn non_empty_direct_argv_replaces_image_entrypoint_without_a_second_command_laye
         separate_entrypoint || inline_entrypoint,
         "non-empty direct argv must replace the image ENTRYPOINT as one exact JSON array: {args:?}"
     );
-    assert_eq!(
-        &args[image_index + 1..],
-        &[] as &[String],
+    assert!(
+        args[image_index + 1..].is_empty(),
         "the same consumer argv must not also be appended after the image as COMMAND arguments: {args:?}"
     );
 }
