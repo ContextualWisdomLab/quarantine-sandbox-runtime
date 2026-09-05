@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.repository }}-${{
+      github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id
+    }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Validate repository policy
+        run: python3 scripts/validate_repository.py
+      - name: Test coverage evidence parser
+        run: python3 -m unittest scripts/test_check_coverage.py
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Test
+        run: cargo test --locked --workspace --all-targets
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: llvm-tools-preview
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Install pinned coverage tool
+        run: cargo install cargo-llvm-cov --locked --version 0.8.6
+      - name: Generate production coverage evidence
+        run: >-
+          cargo llvm-cov
+          --workspace
+          --lib
+          --tests
+          --json
+          --output-path coverage.json
+      - name: Upload production coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-json-${{ github.event.pull_request.head.sha || github.sha }}
+          path: coverage.json
+          if-no-files-found: error
+      - name: Explain and enforce complete production coverage
+        run: python3 scripts/check_coverage.py coverage.json
+
+  branch-coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: nightly-2026-07-01
+          components: llvm-tools-preview
+      - name: Verify dependency lock
+        run: cargo +nightly-2026-07-01 metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Install pinned coverage tool
+        run: cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6
+      - name: Generate branch coverage evidence
+        run: >-
+          cargo +nightly-2026-07-01 llvm-cov
+          --branch
+          --workspace
+          --lib
+          --tests
+          --json
+          --output-path branch-coverage.json
+      - name: Print missing branch coverage lines
+        run: >-
+          cargo +nightly-2026-07-01 llvm-cov report
+          --branch
+          --show-missing-lines
+      - name: Upload branch coverage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: branch-coverage-json-${{ github.event.pull_request.head.sha || github.sha }}
+          path: branch-coverage.json
+          if-no-files-found: error
+      - name: Enforce complete production branch coverage
+        run: python3 scripts/check_coverage.py --require-branches branch-coverage.json
+
+  podman-e2e-negative-rootless-apparmor:
+    runs-on: ubuntu-24.04
+    env:
+      # Immutable Docker Official Image index used only as the isolated E2E fixture.
+      QSR_PODMAN_E2E_IMAGE: docker.io/library/python@sha256:94457973ea8a27a799f0b8ea1fe3e3147fcbebaed63497a8af63b28195a08108
+      QSR_HOST_SECRET_CANARY: must-not-enter-the-isolated-application
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+      - name: Capture hosted negative LSM capability evidence
+        run: |
+          # The current ubuntu-24.04 image exposes distribution Podman 4.9.3.
+          # Version identity is recorded separately from effective LSM proof below.
+          test "$(podman --version)" = "podman version 4.9.3"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert isinstance(security["apparmorEnabled"], bool)
+          assert isinstance(security["selinuxEnabled"], bool)
+          print(f"apparmorEnabled={security['apparmorEnabled']}")
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
+      - name: Pre-pull immutable fixture outside the application launch path
+        run: |
+          podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
+          podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Prove unavailable effective LSM fails closed and cleans up
+        run: >-
+          cargo test --locked
+          --test podman_rootless_e2e
+          -- --ignored --exact rootless_podman_rejects_unavailable_effective_lsm_and_cleans_up --nocapture
+      - name: Reject leaked runtime-owned resources
+        if: always()
+        run: |
+          leaked_containers="$(podman ps -a --filter label=org.contextualwisdomlab.sandbox.identity --format '{{.ID}}')"
+          test -z "$leaked_containers"
+          leaked_networks="$(podman network ls --format '{{.Name}}' | grep '^qsr-net-' || true)"
+          test -z "$leaked_networks"
+
+  podman-e2e-positive-lsm:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, cwl-hostile-workload, selinux]
+    env:
+      # The dedicated runner is a credential-free, disposable security-test host.
+      QSR_PODMAN_E2E_IMAGE: docker.io/library/python@sha256:94457973ea8a27a799f0b8ea1fe3e3147fcbebaed63497a8af63b28195a08108
+      QSR_HOST_SECRET_CANARY: must-not-enter-the-isolated-application
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+      - name: Verify dedicated positive LSM runner contract
+        run: |
+          test -n "$RUNNER_NAME"
+          test "$(podman --version)" = "podman version 5.8.4"
+          podman info --format json > podman-info.json
+          python3 - <<'PY'
+          import json
+          with open("podman-info.json", encoding="utf-8") as handle:
+              security = json.load(handle)["host"]["security"]
+          assert security["rootless"] is True
+          assert security["selinuxEnabled"] is True
+          print(f"selinuxEnabled={security['selinuxEnabled']}")
+          PY
+      - name: Pre-pull immutable fixture outside the application launch path
+        run: |
+          podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
+          podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Execute real positive LSM isolation and cleanup acceptance
+        run: >-
+          cargo test --locked
+          --test podman_rootless_e2e
+          -- --ignored --exact rootless_podman_effective_isolation_and_cleanup --nocapture
+      - name: Reject leaked runtime-owned resources
+        if: always()
+        run: |
+          leaked_containers="$(podman ps -a --filter label=org.contextualwisdomlab.sandbox.identity --format '{{.ID}}')"
+          test -z "$leaked_containers"
+          leaked_networks="$(podman network ls --format '{{.Name}}' | grep '^qsr-net-' || true)"
+          test -z "$leaked_networks"
