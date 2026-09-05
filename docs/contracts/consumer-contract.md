@@ -143,7 +143,9 @@ finished_at_epoch_seconds
 
 `exit_code` is the sandboxed workload's process exit status. A nonzero value is observed workload evidence, not a runtime error; the consumer decides how that evidence affects its own verdict. `CommandExecutionError` is reserved for request validation or runtime/backend failure, including inability to establish or verify the sandbox.
 
-This PR owns the provider-neutral command contract/coordinator only. Production rootless-Podman command execution and an external CLI/HTTP transport remain downstream and require the same effective seccomp/LSM/capability/resource evidence as application-service execution.
+`RootlessPodmanAdapter::run_command_at` is the production `CommandExecutionBackend`. Each invocation creates a fresh digest-pinned, read-only-rootfs, non-root sandbox with `--network none`, dropped capabilities, no-new-privileges, isolated namespaces, and bounded CPU/RAM/PID/tmpfs/lifetime controls. The adapter starts the container detached and requires live `podman top` evidence for effective seccomp, LSM, and capability state before accepting the sandbox. If a short-lived workload exits before live process evidence can be sampled, execution fails closed; static `container inspect` configuration is not a substitute. Supporting such workloads requires a reviewed start/hold/attest/release handshake or an equivalently stronger backend primitive.
+
+An external caller reaches the backend through `quarantine-sandbox-runtime run --image <digest> [resource flags] -- <command> [args...]`. The CLI emits `CommandExecutionResult` JSON on stdout for a completed sandboxed workload and preserves the workload's own exit status; request/policy/backend failures are typed runtime failures rather than synthetic workload results. The command contract has no network-policy field and does not permit Internet egress. There is no released package or HTTP transport yet; consumers may depend only on a future immutable publication, not this branch.
 
 ## Forbidden consumer coupling
 
