@@ -60,7 +60,7 @@ OASIS Open. (2022). *Static Analysis Results Interchange Format (SARIF) version 
 
 Open Container Initiative. (2025). *Open Container Initiative Runtime Specification version 1.3.0*. https://specs.opencontainers.org/runtime-spec/?v=v1.3.0
 
-Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
+Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
@@ -81,6 +81,8 @@ Podman Authors. (2026). *podman-port — List port mappings or a specific mappin
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
 
 Rust Project. (2026). *String in std::string (Rust 1.98.0): `String::from_utf8` and UTF-8 invariants*. https://doc.rust-lang.org/stable/std/string/struct.String.html
+
+Rust Project Developers. (2026). *std::process—Module process (Rust 1.98.1).* https://doc.rust-lang.org/std/process/
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
