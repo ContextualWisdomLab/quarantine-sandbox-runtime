@@ -4,6 +4,10 @@ AppArmor Project. (2026). *AppArmor (5.0).* https://www.apparmor.net/man/5.0/app
 
 AppArmor Project. (2026). *Verify AppArmor coverage and audit profiles.* https://www.apparmor.net/getting-started/verify-and-audit/
 
+Bray, T. (2015). *The I-JSON message format (RFC 7493).* RFC Editor. https://doi.org/10.17487/RFC7493
+
+Bray, T. (2017). *The JavaScript Object Notation (JSON) data interchange format (RFC 8259).* RFC Editor. https://doi.org/10.17487/RFC8259
+
 Containers/Image Authors. (2026). *containers-transports — description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
 
 Davis, K., Peabody, B., & Leach, P. (2024). *Universally unique IDentifiers (UUIDs) (RFC 9562).* RFC Editor. https://doi.org/10.17487/RFC9562
