@@ -40,6 +40,8 @@ Nelson, A., Rekhi, S., Souppaya, M., & Scarfone, K. (2025). *Incident response r
 
 OASIS Open. (2022). *Static Analysis Results Interchange Format (SARIF) version 2.1.0*. https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 
+Open Container Initiative. (2025). *Open Container Initiative Image Specification — Image configuration*. https://specs.opencontainers.org/image-spec/config/
+
 Open Container Initiative. (2025). *Open Container Initiative Runtime Specification version 1.3.0*. https://specs.opencontainers.org/runtime-spec/?v=v1.3.0
 
 Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
