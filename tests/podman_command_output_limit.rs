@@ -86,7 +86,7 @@ fn oversized_backend_output_is_bounded_killed_reaped_and_reported() {
     assert_eq!(
         adapter.launch_at(&request(), &policy(), 1_780_000_000),
         Err(ApplicationServiceError::BackendOutputLimitExceeded {
-            operation: "rootless_probe",
+            operation: "backend_security_info",
         })
     );
 

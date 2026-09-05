@@ -74,7 +74,7 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
 
     let program = fixture_path("fake-podman");
     let log = fixture_path("calls");
-    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.8.4"}}"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) exit 91 ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  *) exit 92 ;;\nesac\n",
         log.display(),
@@ -97,7 +97,6 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     for expected in [
-        "info --format {{.Host.Security.Rootless}}",
         "info --format json",
         "network create",
         "create --name",
