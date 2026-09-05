@@ -1,6 +1,6 @@
 # Application-service direct-argv / image ENTRYPOINT traceability
 
-Reviewed 2026-09-06 KST against Draft PR #19 and issue #47. Latest focused test-bearing authority is `7020c4f8ef12679ba552493f46f46d52cb125e1d`. Production behavior is intentionally unchanged until that RED executes for the intended entrypoint-inheritance cause.
+Reviewed 2026-09-06 KST against Draft PR #19 and issue #47. Latest focused test-bearing authority is `115945244d3e7fd2e6a2b04090c16935233a011e`. Production behavior is intentionally unchanged until that RED executes for the intended entrypoint-inheritance cause.
 
 ## Problem
 
