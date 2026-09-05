@@ -64,6 +64,8 @@ Podman Authors. (2026). *podman-port — List port mappings or a specific mappin
 
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
 
+Rust Project. (2026). *String in std::string (Rust 1.98.0): `String::from_utf8` and UTF-8 invariants*. https://doc.rust-lang.org/stable/std/string/struct.String.html
+
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
 SPDX Workgroup. (2024). *SPDX specification, version 3.0.1*. https://spdx.github.io/spdx-spec/v3.0.1/
