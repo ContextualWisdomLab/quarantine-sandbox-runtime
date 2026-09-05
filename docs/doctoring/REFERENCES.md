@@ -62,7 +62,11 @@ Podman Authors. (2026). *podman-create — Create a new container*. https://docs
 
 Podman Authors. (2026). *podman-container-inspect — Display a container’s configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
 
+Podman Authors. (2026). *podman-kill — Kill the main process in one or more containers*. https://docs.podman.io/en/latest/markdown/podman-kill.1.html
+
 Podman Authors. (2026). *podman-start — Start one or more containers*. https://docs.podman.io/en/stable/markdown/podman-start.1.html
+
+Podman Authors. (2026). *podman-wait — Wait on one or more containers to stop and print their exit codes*. https://docs.podman.io/en/latest/markdown/podman-wait.1.html
 
 Podman Authors. (2026). *podman-run — Run a command in a new container*. https://docs.podman.io/en/stable/markdown/podman-run.1.html
 
