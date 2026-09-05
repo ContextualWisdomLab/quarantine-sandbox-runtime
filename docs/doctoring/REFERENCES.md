@@ -14,6 +14,10 @@ gVisor Authors. (2026). *OCI quick start*. https://gvisor.dev/docs/user_guide/qu
 
 International Organization for Standardization. (2012). *Information technology—Security techniques—Guidelines for identification, collection, acquisition and preservation of digital evidence (ISO/IEC 27037:2012).* https://www.iso.org/standard/44381.html
 
+Joint Task Force. (2020, updated 2026). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53 Rev. 5). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-53r5
+
+Joint Task Force. (2022, Release 5.2.0 updated 2025). *Assessing security and privacy controls in information systems and organizations* (NIST Special Publication 800-53A Rev. 5). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-53Ar5
+
 Kent, K., Chevalier, S., Grance, T., & Dang, H. (2006). *Guide to integrating forensic techniques into incident response* (NIST Special Publication 800-86). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-86
 
 Klyne, G., & Newman, C. (2002). *Date and time on the Internet: Timestamps (RFC 3339).* RFC Editor. https://doi.org/10.17487/RFC3339
@@ -32,13 +36,19 @@ Open Container Initiative. (2025). *Open Container Initiative Runtime Specificat
 
 Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
 
+Podman Authors. (2026). *podman-container-inspect — Display a container’s configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
+
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
 Podman Authors. (2026). *podman-network-create — Create a network*. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
 
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
 
+Podman Authors. (2026). *podman-run — Run a command in a new container*. https://docs.podman.io/en/stable/markdown/podman-run.1.html
+
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
+
+Serde Project. (n.d.). *Using derive*. https://serde.rs/derive.html
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
