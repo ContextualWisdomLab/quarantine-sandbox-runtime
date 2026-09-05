@@ -67,12 +67,13 @@ fn non_empty_direct_argv_replaces_image_entrypoint_without_a_second_command_laye
     let before_image = &args[..image_index];
     let expected_entrypoint_json =
         serde_json::to_string(&request.command).expect("validated argv must serialize as JSON");
+    let expected_inline_entrypoint = format!("--entrypoint={expected_entrypoint_json}");
     let separate_entrypoint = before_image.windows(2).any(|window| {
-        window[0] == "--entrypoint" && window[1] == expected_entrypoint_json
+        window[0] == "--entrypoint" && window[1].as_str() == expected_entrypoint_json
     });
     let inline_entrypoint = before_image
         .iter()
-        .any(|argument| argument == &format!("--entrypoint={expected_entrypoint_json}"));
+        .any(|argument| argument == &expected_inline_entrypoint);
 
     assert!(
         separate_entrypoint || inline_entrypoint,
