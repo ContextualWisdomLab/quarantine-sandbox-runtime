@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/release-evidence-1.0.0.schema.json",
+  "title": "Quarantine Sandbox Runtime Release Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "source_sha",
+    "source_ref",
+    "package_version",
+    "package_file",
+    "package_sha256",
+    "sbom_file",
+    "sbom_sha256",
+    "runtime_backend_id",
+    "runtime_backend_version",
+    "runtime_security_profile",
+    "workflow_run_id"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "repository": {
+      "const": "ContextualWisdomLab/quarantine-sandbox-runtime"
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_ref": {
+      "type": "string",
+      "pattern": "^refs/tags/v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "package_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "package_file": {
+      "type": "string",
+      "pattern": "^quarantine-sandbox-runtime-[0-9]+\\.[0-9]+\\.[0-9]+\\.crate$"
+    },
+    "package_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sbom_file": {
+      "const": "quarantine-sandbox-runtime.spdx.json"
+    },
+    "sbom_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "runtime_backend_id": {
+      "const": "rootless_podman"
+    },
+    "runtime_backend_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$"
+    },
+    "runtime_security_profile": {
+      "const": "rootless_podman_selinux"
+    },
+    "workflow_run_id": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
