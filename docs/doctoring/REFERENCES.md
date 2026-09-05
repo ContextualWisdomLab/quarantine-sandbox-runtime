@@ -44,7 +44,7 @@ Linux man-pages project. (2026). *pathname(7)—How pathnames are encoded and in
 
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
-National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.CSWP.29
+National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). https://doi.org/10.6028/NIST.CSWP.29
 
 National Security Agency. (2026). *Ghidra software reverse engineering framework*. GitHub. https://github.com/NationalSecurityAgency/ghidra
 
