@@ -27,7 +27,10 @@ pub use artifact_analysis::{
     RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
-pub use sandbox_execution::{IsolationPolicy, ResourceRequest, SandboxExecutionError};
+pub use sandbox_execution::{
+    IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
+    VerifiedIsolationState,
+};
 
 impl From<SandboxExecutionError> for ApplicationServiceError {
     fn from(error: SandboxExecutionError) -> Self {

@@ -14,7 +14,8 @@ use sha2::{Digest, Sha256};
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationPolicy, ServiceEndpoint, sandbox_execution::RuntimeLeaseMetadata,
+    IsolationControlStatus, IsolationPolicy, ServiceEndpoint, VerifiedIsolationState,
+    sandbox_execution::RuntimeLeaseMetadata,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -24,6 +25,7 @@ const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
     host: PodmanHost,
+    version: PodmanVersion,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -42,6 +44,12 @@ struct PodmanSecurity {
     apparmor_enabled: bool,
     #[serde(default, rename = "selinuxEnabled")]
     selinux_enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct PodmanVersion {
+    #[serde(rename = "Version", alias = "version")]
+    version: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -124,7 +132,7 @@ pub struct PodmanLaunchPlan {
 }
 
 impl PodmanLaunchPlan {
-    /// Return the exact arguments used to prove the backend is rootless.
+    /// Return the exact arguments used to inspect backend security capability.
     #[must_use]
     pub fn rootless_probe_args(&self) -> &[String] {
         &self.rootless_probe_args
@@ -230,11 +238,7 @@ impl RootlessPodmanAdapter {
         let sandbox_name = format!("qsr-app-{identity}");
         let network_name = format!("qsr-net-{identity}");
 
-        let rootless_probe_args = vec![
-            "info".to_owned(),
-            "--format".to_owned(),
-            "{{.Host.Security.Rootless}}".to_owned(),
-        ];
+        let rootless_probe_args = vec!["info".to_owned(), "--format".to_owned(), "json".to_owned()];
         let network_create_args = vec![
             "network".to_owned(),
             "create".to_owned(),
@@ -322,12 +326,8 @@ impl RootlessPodmanAdapter {
         started_at_epoch_seconds: u64,
     ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
         let plan = Self::plan_at(request, policy, started_at_epoch_seconds)?;
-        let rootless = self.checked_output("rootless_probe", plan.rootless_probe_args())?;
-        if String::from_utf8_lossy(&rootless.stdout).trim() != "true" {
-            return Err(ApplicationServiceError::BackendNotRootless);
-        }
-        let info_args = ["info".to_owned(), "--format".to_owned(), "json".to_owned()];
-        let info_output = self.checked_output("backend_security_info", &info_args)?;
+        let info_output =
+            self.checked_output("backend_security_info", plan.rootless_probe_args())?;
         let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
         validate_backend_security(&info)?;
 
@@ -356,7 +356,7 @@ impl RootlessPodmanAdapter {
             return Err(error);
         }
 
-        let host_port =
+        let verified =
             match self.verify_effective_isolation(&plan, request, policy, &info, &container_id) {
                 Ok(value) => value,
                 Err(error) => {
@@ -365,7 +365,7 @@ impl RootlessPodmanAdapter {
                 }
             };
 
-        if wait_for_readiness(host_port, policy).is_err() {
+        if wait_for_readiness(verified.host_port, policy).is_err() {
             self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
@@ -374,6 +374,7 @@ impl RootlessPodmanAdapter {
             request,
             RuntimeLeaseMetadata {
                 backend_id: PODMAN_BACKEND_ID,
+                backend_version: info.version.version,
                 sandbox_id: plan.sandbox_name().to_owned(),
                 network_id: plan.network_name().to_owned(),
                 policy_id: policy.policy_id.clone(),
@@ -381,8 +382,9 @@ impl RootlessPodmanAdapter {
                 started_at_epoch_seconds,
                 expires_at_epoch_seconds: plan.expires_at_epoch_seconds(),
                 shutdown_grace_seconds: policy.shutdown_grace_seconds,
+                isolation_state: verified.state,
             },
-            ServiceEndpoint::loopback(host_port, request.protocol),
+            ServiceEndpoint::loopback(verified.host_port, request.protocol),
         ))
     }
 
@@ -433,7 +435,7 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         info: &PodmanInfo,
         container_id: &str,
-    ) -> Result<u16, ApplicationServiceError> {
+    ) -> Result<VerifiedLaunch, ApplicationServiceError> {
         let container_args = [
             "container".to_owned(),
             "inspect".to_owned(),
@@ -541,7 +543,25 @@ impl RootlessPodmanAdapter {
             format!("{}/tcp", request.container_port),
         ];
         let port_output = self.checked_output("port_query", &port_args)?;
-        parse_loopback_port(&port_output.stdout).ok_or(ApplicationServiceError::InvalidPortMapping)
+        let host_port = parse_loopback_port(&port_output.stdout)
+            .ok_or(ApplicationServiceError::InvalidPortMapping)?;
+
+        Ok(VerifiedLaunch {
+            host_port,
+            state: VerifiedIsolationState {
+                rootless: IsolationControlStatus::Verified,
+                read_only_root_filesystem: IsolationControlStatus::Verified,
+                all_capabilities_dropped: IsolationControlStatus::Verified,
+                no_new_privileges: IsolationControlStatus::Verified,
+                isolated_user_namespace: IsolationControlStatus::Verified,
+                external_egress_denied: IsolationControlStatus::Verified,
+                loopback_only_publication: IsolationControlStatus::Verified,
+                seccomp_enforced: IsolationControlStatus::Verified,
+                lsm_enforced: IsolationControlStatus::Verified,
+                resource_limits_verified: IsolationControlStatus::Verified,
+                credentials_available: false,
+            },
+        })
     }
 
     fn command_runner(&self) -> BoundedCommandRunner {
@@ -646,6 +666,12 @@ impl Default for RootlessPodmanAdapter {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VerifiedLaunch {
+    host_port: u16,
+    state: VerifiedIsolationState,
+}
+
 fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationServiceError> {
     if !info.host.security.rootless {
         return Err(ApplicationServiceError::BackendNotRootless);
@@ -657,7 +683,16 @@ fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationService
     require_control(
         "lsm",
         info.host.security.apparmor_enabled || info.host.security.selinux_enabled,
-    )
+    )?;
+    if info.version.version.is_empty()
+        || info.version.version.len() > 128
+        || info.version.version.chars().any(char::is_control)
+    {
+        return Err(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "backend_security_info",
+        });
+    }
+    Ok(())
 }
 
 fn effective_lsm_verified(
