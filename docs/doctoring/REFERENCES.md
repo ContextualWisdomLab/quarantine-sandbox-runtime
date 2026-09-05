@@ -24,6 +24,12 @@ Linux Kernel Documentation. (2026). *The /proc filesystem: /proc/<pid>/mountinfo
 
 Linux Kernel Documentation. (2026). *Tmpfs*. https://docs.kernel.org/filesystems/tmpfs.html
 
+Linux man-pages project. (2026). *cgroup_namespaces(7)—Overview of Linux cgroup namespaces*. https://man7.org/linux/man-pages/man7/cgroup_namespaces.7.html
+
+Linux man-pages project. (2026). *namespaces(7)—Overview of Linux namespaces*. https://man7.org/linux/man-pages/man7/namespaces.7.html
+
+Linux man-pages project. (2026). *uts_namespaces(7)—Overview of Linux UTS namespaces*. https://man7.org/linux/man-pages/man7/uts_namespaces.7.html
+
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
 National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). https://doi.org/10.6028/NIST.CSWP.29
@@ -39,6 +45,8 @@ Open Container Initiative. (2025). *Open Container Initiative Runtime Specificat
 Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
+
+Podman Authors. (2026). *podman-container-inspect — Display a container’s configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
 
 Podman Authors. (n.d.). *Container inspect data definitions (Podman v4.9.3)*. GitHub. Retrieved September 4, 2026, from https://github.com/containers/podman/blob/v4.9.3/libpod/define/container_inspect.go
 
