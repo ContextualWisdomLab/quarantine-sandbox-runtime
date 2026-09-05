@@ -42,6 +42,8 @@ Podman Authors. (2026). *podman-network-rm — Remove one or more networks*. htt
 
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
 
+Podman Authors. (2026). *podman-run — Run a command in a new container*. https://docs.podman.io/en/latest/markdown/podman-run.1.html
+
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
