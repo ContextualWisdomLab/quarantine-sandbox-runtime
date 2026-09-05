@@ -93,7 +93,15 @@ fn source_request(source: PathBuf) -> CommandExecutionRequest {
     }
 }
 
-fn run_with_effective_mounts(name: &str, unexpected_mount_json: &str) -> (Result<quarantine_sandbox_runtime::CommandExecutionResult, CommandExecutionError>, String, PathBuf, PathBuf) {
+fn run_with_effective_mounts(
+    name: &str,
+    unexpected_mount_json: &str,
+) -> (
+    Result<quarantine_sandbox_runtime::CommandExecutionResult, CommandExecutionError>,
+    String,
+    PathBuf,
+    PathBuf,
+) {
     let source = temporary_path(&format!("{name}-source"));
     fs::create_dir_all(&source).expect("source directory should be creatable");
     let request = source_request(source.clone());
@@ -114,13 +122,12 @@ fn run_with_effective_mounts(name: &str, unexpected_mount_json: &str) -> (Result
     let adapter = RootlessPodmanAdapter::new(program.clone());
     let result = adapter.run_command_at(&request, &policy(), 1_780_000_033);
     let recorded_calls = fs::read_to_string(&calls).expect("backend calls should be recorded");
+    let _ = fs::remove_file(calls);
+    let _ = fs::remove_file(volume_record);
     (result, recorded_calls, program, source)
 }
 
-fn assert_mount_set_rejected(
-    name: &str,
-    unexpected_mount_json: &str,
-) {
+fn assert_mount_set_rejected(name: &str, unexpected_mount_json: &str) {
     let (result, recorded_calls, program, source) =
         run_with_effective_mounts(name, unexpected_mount_json);
     assert_eq!(
