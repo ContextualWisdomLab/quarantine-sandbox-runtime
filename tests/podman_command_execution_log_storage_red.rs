@@ -42,7 +42,7 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn command_container_requires_a_finite_runtime_log_file_limit() {
+fn command_container_requires_one_positive_finite_runtime_log_file_limit() {
     let fixture = tempfile::tempdir().expect("isolated fake Podman directory");
     let program = fixture.path().join("podman");
     let script = r#"#!/bin/sh
@@ -53,16 +53,32 @@ case "${1:-}:${2:-}" in
     ;;
   create:--name)
     previous=''
-    bounded_log=0
+    bounded_log=''
+    bounded_log_count=0
     for argument in "$@"; do
       if [ "$previous" = '--log-opt' ]; then
         case "$argument" in
-          max-size=*) bounded_log=1 ;;
+          max-size=*)
+            bounded_log=${argument#max-size=}
+            bounded_log_count=$((bounded_log_count + 1))
+            ;;
         esac
       fi
       previous="$argument"
     done
-    [ "$bounded_log" -eq 1 ] || exit 86
+
+    # The RED must not false-GREEN on an empty, zero, negative/unbounded,
+    # malformed, or contradictory duplicate max-size setting. Podman documents
+    # max-size as a concrete log-file size; one positive finite value is the
+    # minimum evidence required before hostile output is allowed to run.
+    [ "$bounded_log_count" -eq 1 ] || exit 86
+    case "$bounded_log" in
+      ''|0|-1) exit 86 ;;
+      *[!0-9kKmMgGbB]*) exit 86 ;;
+      *[1-9]*) : ;;
+      *) exit 86 ;;
+    esac
+
     printf 'fake-command-container-id\n'
     ;;
   start:*) : ;;
@@ -89,6 +105,6 @@ esac
     let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
 
     result.expect(
-        "k8s-file command execution must bound runtime-owned host log storage before launch",
+        "k8s-file command execution must set exactly one positive finite runtime-owned host log-storage bound before launch",
     );
 }
