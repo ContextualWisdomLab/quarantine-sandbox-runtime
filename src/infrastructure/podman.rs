@@ -2,20 +2,22 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Output,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationControlStatus, IsolationPolicy, ServiceEndpoint, VerifiedIsolationState,
-    sandbox_execution::RuntimeLeaseMetadata,
+    CommandExecutionError, CommandExecutionRequest, CommandExecutionResult, IsolationControlStatus,
+    IsolationPolicy, ResourceRequest, ServiceEndpoint, VerifiedIsolationState,
+    application_service::CommandExecutionOutcome, sandbox_execution::RuntimeLeaseMetadata,
+    stage_pr_source_artifact,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -60,14 +62,50 @@ struct ContainerInspection {
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
     process_label: String,
-    #[serde(default, rename = "EffectiveCaps")]
+    #[serde(
+        default,
+        rename = "EffectiveCaps",
+        deserialize_with = "null_as_default"
+    )]
     effective_caps: Vec<String>,
-    #[serde(default, rename = "BoundingCaps")]
+    #[serde(default, rename = "BoundingCaps", deserialize_with = "null_as_default")]
     bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
     host_config: ContainerHostConfig,
+    #[serde(default, rename = "Mounts")]
+    mounts: Vec<ContainerMount>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerMount {
+    #[serde(rename = "Source")]
+    source: PathBuf,
+    #[serde(rename = "Type")]
+    mount_type: String,
+    #[serde(rename = "Destination")]
+    destination: String,
+    #[serde(default, rename = "Options")]
+    options: Vec<String>,
+    #[serde(rename = "RW")]
+    read_write: bool,
+}
+
+/// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
+///
+/// `#[serde(default)]` alone only covers a *missing* key. Podman has been
+/// observed (6.1.0, unlike the CI-pinned 5.8.4) to emit an explicit JSON
+/// `null` for `EffectiveCaps`/`BoundingCaps` once every capability is
+/// dropped, which `#[serde(default)]` alone does not tolerate for a
+/// non-`Option` field. Both representations mean the same fact -- no
+/// capabilities -- so both must deserialize to the same empty value.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -86,10 +124,17 @@ struct ContainerHostConfig {
     security_opt: Option<Vec<String>>,
     #[serde(rename = "UsernsMode")]
     userns_mode: String,
+    // Podman 6.1.0 was observed to leave `HostConfig.UsernsMode` empty for a
+    // container created with `--userns=auto`, unlike the CI-pinned 5.8.4,
+    // recording the effective mode only as this annotation instead.
+    #[serde(default, rename = "Annotations")]
+    annotations: std::collections::BTreeMap<String, String>,
     #[serde(rename = "PidMode")]
     pid_mode: String,
     #[serde(rename = "IpcMode")]
     ipc_mode: String,
+    #[serde(default, rename = "NetworkMode")]
+    network_mode: String,
     #[serde(rename = "Memory")]
     memory: u64,
     #[serde(rename = "NanoCpus")]
@@ -234,7 +279,12 @@ impl RootlessPodmanAdapter {
         let expires_at_epoch_seconds = started_at_epoch_seconds
             .checked_add(u64::from(request.resources.lease_seconds))
             .ok_or(ApplicationServiceError::LeaseExpiryOverflow)?;
-        let identity = sandbox_identity(request, policy, started_at_epoch_seconds);
+        let identity = sandbox_identity(
+            &request.request_id,
+            &request.image_reference,
+            &policy.policy_id,
+            started_at_epoch_seconds,
+        );
         let sandbox_name = format!("qsr-app-{identity}");
         let network_name = format!("qsr-net-{identity}");
 
@@ -428,6 +478,498 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
+    /// Run one bounded command to completion inside a fresh isolated sandbox.
+    ///
+    /// Unlike [`Self::launch_at`], this does not create a per-sandbox network
+    /// or publish a port: the sandbox runs with no network namespace
+    /// attachment at all (`--network none`), which is a strictly stronger
+    /// egress denial than the service profile's internal, DNS-disabled
+    /// network and needs no separate network object to create or clean up.
+    ///
+    /// The sandbox is started detached, not attached (unlike a plain
+    /// `podman run`/`start --attach`), because `Self::verify_command_isolation`
+    /// must inspect the container's *running* process (`podman top`, which
+    /// errors on a not-yet-started container) before this method trusts it
+    /// enough to let the requested command actually execute. Completion is
+    /// observed with `podman wait` (bounded by the requested lease) and
+    /// output with `podman logs` against a `k8s-file`-backed log driver,
+    /// rather than by attaching to the workload's live pipes: a detached
+    /// `podman start --attach` on an already-running container does not
+    /// reliably mirror the container's own exit code (observed directly
+    /// against Podman 6.1.0), while `podman wait`'s stdout is the
+    /// authoritative post-exit code for both the ordinary and the
+    /// forcibly-killed-on-timeout path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandExecutionError`] when Podman cannot prove the
+    /// required P0 isolation invariants, the sandbox cannot be created, or
+    /// cleanup after the run cannot be proven complete.
+    pub fn run_command_at(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        request.validate(policy)?;
+        let staged_source = request
+            .source_artifact
+            .as_ref()
+            .map(stage_pr_source_artifact)
+            .transpose()?;
+        let info_output = self.checked_output(
+            "backend_security_info",
+            &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
+        )?;
+        let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
+        validate_backend_security(&info)?;
+
+        let identity = command_sandbox_identity(
+            &request.request_id,
+            &request.image_reference,
+            &policy.policy_id,
+            started_at_epoch_seconds,
+        )?;
+        let sandbox_name = format!("qsr-cmd-{identity}");
+
+        let mut create_args = vec![
+            "create".to_owned(),
+            "--name".to_owned(),
+            sandbox_name.clone(),
+            "--pull=never".to_owned(),
+            "--read-only".to_owned(),
+            "--read-only-tmpfs=false".to_owned(),
+            "--http-proxy=false".to_owned(),
+            "--image-volume=ignore".to_owned(),
+            "--no-hosts".to_owned(),
+            "--systemd=false".to_owned(),
+            "--sdnotify=ignore".to_owned(),
+            "--cap-drop=all".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+            "--userns=auto".to_owned(),
+            "--ipc=none".to_owned(),
+            "--pid=private".to_owned(),
+            "--uts=private".to_owned(),
+            "--cgroupns=private".to_owned(),
+            "--restart=no".to_owned(),
+            // Unlike the service profile's `--log-driver=none`: bounded
+            // command output is retrieved after the fact with `podman logs`,
+            // which needs a log driver that actually retains output.
+            "--log-driver=k8s-file".to_owned(),
+            "--network".to_owned(),
+            "none".to_owned(),
+            "--timeout".to_owned(),
+            request.resources.lease_seconds.to_string(),
+            "--user".to_owned(),
+            format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+            "--pids-limit".to_owned(),
+            request.resources.maximum_processes.to_string(),
+            "--memory".to_owned(),
+            request.resources.memory_bytes.to_string(),
+            "--cpus".to_owned(),
+            cpu_limit(request.resources.cpu_millicores),
+            "--tmpfs".to_owned(),
+            format!(
+                "/tmp:rw,noexec,nosuid,nodev,size={}",
+                request.resources.tmpfs_bytes
+            ),
+            "--label".to_owned(),
+            format!("org.contextualwisdomlab.sandbox.identity={identity}"),
+            "--label".to_owned(),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy={}",
+                policy.policy_id
+            ),
+            "--label".to_owned(),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy_sha256={}",
+                policy.effective_policy_sha256()
+            ),
+        ];
+        if let Some(staged) = &staged_source {
+            create_args.push("--volume".to_owned());
+            create_args.push(format!(
+                "{}:/workspace:ro,noexec,nosuid,nodev,Z",
+                staged.path().display()
+            ));
+            create_args.push("--workdir".to_owned());
+            create_args.push("/workspace".to_owned());
+        }
+        create_args.push(request.image_reference.clone());
+        create_args.extend(request.command.iter().cloned());
+
+        let create_output = match self.checked_output("container_create", &create_args) {
+            Ok(output) => output,
+            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error.into())),
+        };
+        let container_id = match parse_backend_identifier(&create_output.stdout) {
+            Some(identifier) => identifier,
+            None => {
+                return Err(self.cleanup_or_report(
+                    &sandbox_name,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::MalformedIsolationInspection {
+                            operation: "container_create",
+                        },
+                    ),
+                ));
+            }
+        };
+
+        // Once a command container might exist, every later failure must attempt
+        // cleanup. If cleanup cannot be proven, leak risk takes precedence over
+        // the earlier backend/isolation/log error and the call fails closed with
+        // `CleanupFailed`.
+        if let Err(error) = self.checked_output(
+            "container_start",
+            &["start".to_owned(), sandbox_name.clone()],
+        ) {
+            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
+        }
+
+        if let Err(error) = self.verify_command_isolation(
+            &sandbox_name,
+            request,
+            policy,
+            &info,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
+            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
+        }
+
+        let (exit_code, timed_out) = match self.wait_for_command(&sandbox_name, request) {
+            Ok(outcome) => outcome,
+            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error)),
+        };
+
+        let logs_runner =
+            BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
+        let logs_outcome = match logs_runner
+            .run_to_completion(&self.program, &["logs".to_owned(), sandbox_name.clone()])
+        {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return Err(self.cleanup_or_report(
+                    &sandbox_name,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "container_logs",
+                        },
+                    ),
+                ));
+            }
+        };
+        if logs_outcome.timed_out {
+            // The log driver failing to hand back already-written output
+            // promptly is an infrastructure fault, not a fact about the
+            // workload (whose own timeout is already captured above).
+            return Err(self.cleanup_or_report(
+                &sandbox_name,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
+                    operation: "container_logs",
+                }),
+            ));
+        }
+        // A `None` status only occurs on the timeout/output-budget kill
+        // paths already handled above (or by the truncation flags on
+        // success); anything else is `podman logs` itself failing (e.g. the
+        // log driver or container state is broken) and is an infrastructure
+        // fault, not empty workload output.
+        if !logs_outcome.status.is_none_or(|status| status.success()) {
+            return Err(self.cleanup_or_report(
+                &sandbox_name,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
+                    operation: "container_logs",
+                }),
+            ));
+        }
+
+        let cleanup_ok = self
+            .cleanup_created_command_container(&sandbox_name)
+            .is_ok();
+        if !cleanup_ok {
+            return Err(CommandExecutionError::Backend(
+                ApplicationServiceError::CleanupFailed,
+            ));
+        }
+
+        let finished_at_epoch_seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
+
+        Ok(CommandExecutionResult::new(
+            request,
+            CommandExecutionOutcome {
+                backend_id: PODMAN_BACKEND_ID,
+                backend_version: info.version.version,
+                sandbox_id: sandbox_name,
+                exit_code,
+                timed_out,
+                stdout: String::from_utf8_lossy(&logs_outcome.stdout).into_owned(),
+                stdout_truncated: logs_outcome.stdout_truncated,
+                stderr: String::from_utf8_lossy(&logs_outcome.stderr).into_owned(),
+                stderr_truncated: logs_outcome.stderr_truncated,
+                started_at_epoch_seconds,
+                finished_at_epoch_seconds,
+                source_artifact_receipt: staged_source
+                    .as_ref()
+                    .map(|staged| staged.receipt().clone()),
+            },
+        ))
+    }
+
+    /// Wait for the running sandbox to exit, bounded by its requested lease,
+    /// and return its authoritative `(exit_code, timed_out)`.
+    ///
+    /// On a wall-clock timeout the sandbox is force-killed and waited on
+    /// again (bounded by the adapter's ordinary short administrative
+    /// timeout) to obtain the post-kill exit code. The `podman wait` process
+    /// itself must succeed and stay within its tiny output budget before its
+    /// stdout is accepted as workload evidence; wrapper failure is a backend
+    /// failure, never a workload exit status.
+    fn wait_for_command(
+        &self,
+        sandbox_name: &str,
+        request: &CommandExecutionRequest,
+    ) -> Result<(i32, bool), CommandExecutionError> {
+        let run_timeout = Duration::from_secs(u64::from(request.resources.lease_seconds));
+        let wait_runner = BoundedCommandRunner::new(run_timeout, self.command_output_limit_bytes);
+        let wait_outcome = wait_runner
+            .run_to_completion(&self.program, &["wait".to_owned(), sandbox_name.to_owned()])
+            .map_err(|_| {
+                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_wait",
+                })
+            })?;
+
+        if !wait_outcome.timed_out {
+            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendOutputLimitExceeded {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            match wait_outcome.status {
+                Some(status) if status.success() => {
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
+                }
+                Some(_) => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                None => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+            }
+        }
+
+        // Best effort: the container may already be exiting on its own.
+        let _ = self.command_succeeded(&["kill".to_owned(), sandbox_name.to_owned()]);
+        let post_kill = self
+            .checked_output(
+                "command_wait_after_kill",
+                &["wait".to_owned(), sandbox_name.to_owned()],
+            )
+            .map_err(CommandExecutionError::Backend)?;
+        Ok((
+            parse_wait_exit_code(&post_kill.stdout, "command_wait_after_kill")?,
+            true,
+        ))
+    }
+
+    /// Verify the same P0 isolation invariants as [`Self::verify_effective_isolation`]
+    /// for a command-execution sandbox, minus the network/port controls that
+    /// do not apply to a `--network none` one-shot command.
+    ///
+    /// A bounded command may exit before `podman top` samples its live PID 1.
+    /// That race does not authorize weaker evidence: static `container inspect`
+    /// records configured/requested state, not the effective per-process
+    /// seccomp/LSM/capability state required at this security boundary. When
+    /// live process evidence is unavailable this method therefore fails closed.
+    /// Supporting extremely short-lived commands in the future requires a
+    /// reviewed start/hold/attest/release handshake (or an equivalent stronger
+    /// backend primitive), not a static-only attestation fallback.
+    fn verify_command_isolation(
+        &self,
+        sandbox_name: &str,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        info: &PodmanInfo,
+        container_id: &str,
+        staged_source_path: Option<&Path>,
+    ) -> Result<(), ApplicationServiceError> {
+        let container_args = [
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            sandbox_name.to_owned(),
+        ];
+        let container_output = self.checked_output("container_inspect", &container_args)?;
+        let container: ContainerInspection =
+            parse_single_inspection("container_inspect", &container_output.stdout)?;
+        if container.id != container_id {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_inspect",
+            });
+        }
+
+        require_control(
+            "read_only_root_filesystem",
+            container.host_config.readonly_rootfs,
+        )?;
+        require_control("unprivileged_container", !container.host_config.privileged)?;
+        let security_options = container
+            .host_config
+            .security_opt
+            .as_deref()
+            .unwrap_or_default();
+        require_control(
+            "no_new_privileges",
+            security_options
+                .iter()
+                .any(|option| option == "no-new-privileges" || option == "no-new-privileges=true"),
+        )?;
+        require_control(
+            "isolated_user_namespace",
+            isolated_user_namespace_verified(&container.host_config),
+        )?;
+        require_control(
+            "isolated_pid_namespace",
+            container.host_config.pid_mode == "private",
+        )?;
+        require_control(
+            "isolated_ipc_namespace",
+            container.host_config.ipc_mode == "none",
+        )?;
+        require_control(
+            "external_egress_denied",
+            container.host_config.network_mode == "none",
+        )?;
+        require_control(
+            "non_root_identity",
+            container.config.user
+                == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+        )?;
+        require_control(
+            "resource_limits",
+            resource_limits_match(&container.host_config, &request.resources),
+        )?;
+        if request.source_artifact.is_some() {
+            let source_mount = container
+                .mounts
+                .iter()
+                .find(|mount| mount.destination == "/workspace");
+            require_control(
+                "source_artifact_read_only",
+                source_mount.is_some_and(|mount| !mount.read_write),
+            )?;
+            require_control(
+                "source_artifact_bind_source",
+                source_mount.is_some_and(|mount| {
+                    mount.mount_type == "bind"
+                        && staged_source_path.is_some_and(|expected| mount.source == expected)
+                }),
+            )?;
+            for required_option in ["noexec", "nosuid", "nodev"] {
+                require_control(
+                    "source_artifact_mount_options",
+                    source_mount.is_some_and(|mount| {
+                        mount.options.iter().any(|option| option == required_option)
+                    }),
+                )?;
+            }
+        }
+
+        let process_args = [
+            "top".to_owned(),
+            sandbox_name.to_owned(),
+            "pid".to_owned(),
+            "seccomp".to_owned(),
+            "capeff".to_owned(),
+            "capbnd".to_owned(),
+            "capinh".to_owned(),
+            "capprm".to_owned(),
+            "capamb".to_owned(),
+            "label".to_owned(),
+        ];
+        // A one-shot command can exit before `top` samples it, unlike the
+        // long-lived service-lease path this mirrors (`verify_effective_isolation`),
+        // which never falls back either. Static `container inspect` configuration
+        // proves what was requested, not the effective per-process seccomp/LSM/
+        // capability state the release boundary requires positive proof of --
+        // fail closed instead of downgrading to it when live evidence is gone.
+        let live_process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&live_process_output.stdout)?;
+
+        require_control(
+            "all_capabilities_dropped",
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
+        )?;
+        require_control(
+            "seccomp",
+            !security_options
+                .iter()
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(
+                    process.seccomp.to_ascii_lowercase().as_str(),
+                    "filter" | "strict"
+                ),
+        )?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
+        Ok(())
+    }
+
+    fn cleanup_created_command_container(
+        &self,
+        sandbox_name: &str,
+    ) -> Result<(), ApplicationServiceError> {
+        // `--ignore` makes cleanup idempotent: a failed create may or may not
+        // have persisted the deterministic name, and absence is also a proven
+        // leak-free terminal state. Podman documents `rm --ignore` for exactly
+        // this absent-container case.
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            "--ignore".to_owned(),
+            sandbox_name.to_owned(),
+        ];
+        if self.command_succeeded(&remove_args) {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    /// Attempt cleanup for a failed command-execution attempt and return the
+    /// error to surface: a failed cleanup means a container is leaked, which
+    /// must never be hidden behind `original`, the earlier backend error
+    /// that triggered this cleanup in the first place.
+    fn cleanup_or_report(
+        &self,
+        sandbox_name: &str,
+        original: CommandExecutionError,
+    ) -> CommandExecutionError {
+        match self.cleanup_created_command_container(sandbox_name) {
+            Ok(()) => original,
+            Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
+        }
+    }
+
     fn verify_effective_isolation(
         &self,
         plan: &PodmanLaunchPlan,
@@ -501,7 +1043,7 @@ impl RootlessPodmanAdapter {
         )?;
         require_control(
             "isolated_user_namespace",
-            container.host_config.userns_mode == "auto",
+            isolated_user_namespace_verified(&container.host_config),
         )?;
         require_control(
             "isolated_pid_namespace",
@@ -518,7 +1060,7 @@ impl RootlessPodmanAdapter {
         )?;
         require_control(
             "resource_limits",
-            resource_limits_match(&container.host_config, request),
+            resource_limits_match(&container.host_config, &request.resources),
         )?;
         require_control("lsm", effective_lsm_verified(info, &container, &process))?;
 
@@ -714,27 +1256,24 @@ fn effective_lsm_verified(
 
     if info.host.security.apparmor_enabled {
         let inspect_profile = container.apparmor_profile.trim();
-        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
+        // context as `<profile> (<mode>)`. A bare profile name is not positive
+        // enforcement evidence, and complain mode audits without enforcing.
+        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
             return false;
         };
-        return !inspect_profile.is_empty()
+        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
+            return false;
+        };
+        let runtime_profile = runtime_profile.trim();
+        return mode.eq_ignore_ascii_case("enforce")
+            && !runtime_profile.is_empty()
+            && !inspect_profile.is_empty()
             && !inspect_profile.eq_ignore_ascii_case("unconfined")
             && inspect_profile == runtime_profile;
     }
 
     false
-}
-
-fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
-    let normalized = runtime_label.trim();
-    if normalized.is_empty() || normalized.eq_ignore_ascii_case("unconfined") {
-        return None;
-    }
-
-    let (profile, mode_with_suffix) = normalized.rsplit_once(" (")?;
-    let mode = mode_with_suffix.strip_suffix(')')?;
-    let profile = profile.trim();
-    (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
@@ -789,7 +1328,11 @@ fn parse_process_security_top(
             inheritable_caps: fields[4].to_owned(),
             permitted_caps: fields[5].to_owned(),
             ambient_caps: fields[6].to_owned(),
-            lsm_label: fields[7..].join(" "),
+            // Podman 6.1.0 was observed to pass through a trailing NUL byte
+            // from the underlying NUL-terminated `/proc/<pid>/attr/current`
+            // kernel interface into this column; a real LSM label never
+            // legitimately contains one, so it is always safe to strip.
+            lsm_label: fields[7..].join(" ").replace('\0', ""),
         });
     }
     matched.ok_or(ApplicationServiceError::MalformedIsolationInspection {
@@ -797,18 +1340,29 @@ fn parse_process_security_top(
     })
 }
 
-fn resource_limits_match(
-    effective: &ContainerHostConfig,
-    request: &ApplicationServiceRequest,
-) -> bool {
-    let requested_nano_cpus = u64::from(request.resources.cpu_millicores) * 1_000_000;
+/// Confirm the container was created with an isolated (non-host) user namespace.
+///
+/// Checks both representations Podman has been observed to use across
+/// versions: the CI-pinned 5.8.4 reports `HostConfig.UsernsMode == "auto"`
+/// directly, while 6.1.0 leaves that field empty and records the same fact
+/// only as the `io.podman.annotations.userns` annotation.
+fn isolated_user_namespace_verified(host_config: &ContainerHostConfig) -> bool {
+    host_config.userns_mode == "auto"
+        || host_config
+            .annotations
+            .get("io.podman.annotations.userns")
+            .is_some_and(|value| value == "auto")
+}
+
+fn resource_limits_match(effective: &ContainerHostConfig, resources: &ResourceRequest) -> bool {
+    let requested_nano_cpus = u64::from(resources.cpu_millicores) * 1_000_000;
     effective.memory > 0
-        && effective.memory <= request.resources.memory_bytes
+        && effective.memory <= resources.memory_bytes
         && effective.nano_cpus > 0
         && effective.nano_cpus <= requested_nano_cpus
         && effective.pids_limit > 0
         && u64::try_from(effective.pids_limit)
-            .is_ok_and(|value| value <= u64::from(request.resources.maximum_processes))
+            .is_ok_and(|value| value <= u64::from(resources.maximum_processes))
 }
 
 fn require_control(
@@ -860,22 +1414,43 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
 }
 
 fn sandbox_identity(
-    request: &ApplicationServiceRequest,
-    policy: &IsolationPolicy,
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
     started_at_epoch_seconds: u64,
 ) -> String {
     let mut hasher = Sha256::new();
-    for component in [
-        request.request_id.as_str(),
-        request.image_reference.as_str(),
-        policy.policy_id.as_str(),
-    ] {
+    for component in [request_id, image_reference, policy_id] {
         hasher.update(component.as_bytes());
         hasher.update([0]);
     }
     hasher.update(started_at_epoch_seconds.to_be_bytes());
     let digest = format!("{:x}", hasher.finalize());
     digest[..16].to_owned()
+}
+
+fn command_sandbox_identity(
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
+    started_at_epoch_seconds: u64,
+) -> Result<String, CommandExecutionError> {
+    let mut execution_nonce = [0_u8; 16];
+    getrandom::fill(&mut execution_nonce).map_err(|_| {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "execution_identity",
+        })
+    })?;
+
+    let mut hasher = Sha256::new();
+    for component in [request_id, image_reference, policy_id] {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update(started_at_epoch_seconds.to_be_bytes());
+    hasher.update(execution_nonce);
+    let digest = format!("{:x}", hasher.finalize());
+    Ok(digest[..16].to_owned())
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {
@@ -886,6 +1461,25 @@ fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
     let text = std::str::from_utf8(stdout).ok()?.trim();
     let port = text.strip_prefix("127.0.0.1:")?.parse::<u16>().ok()?;
     (port != 0).then_some(port)
+}
+
+/// Parse one successful `podman wait` stdout payload into the workload exit code.
+///
+/// Malformed or missing stdout is runtime evidence corruption, not a synthetic
+/// workload result. The caller supplies the exact wait operation so ordinary
+/// and post-kill failures retain distinct provenance.
+fn parse_wait_exit_code(
+    stdout: &[u8],
+    operation: &'static str,
+) -> Result<i32, CommandExecutionError> {
+    std::str::from_utf8(stdout)
+        .ok()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .and_then(|text| text.parse::<i32>().ok())
+        .ok_or(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection { operation },
+        ))
 }
 
 fn wait_for_readiness(

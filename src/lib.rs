@@ -11,6 +11,7 @@
 mod application_service;
 mod artifact_analysis;
 mod infrastructure;
+mod pr_source_artifact;
 mod sandbox_execution;
 
 pub use application_service::{
@@ -28,6 +29,10 @@ pub use artifact_analysis::{
     RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
+pub use pr_source_artifact::{
+    PrSourceArtifactError, PrSourceArtifactInput, PrSourceArtifactReceipt, StagedPrSourceArtifact,
+    stage_pr_source_artifact,
+};
 pub use sandbox_execution::{
     IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
     VerifiedIsolationState,
