@@ -10,6 +10,7 @@
 | [0006](0006-isolated-application-service.md) | Proposed | Rootless Podman is the proposed first isolated application-service adapter; acceptance requires protected integration plus current-head real-runtime evidence. |
 | [0007](0007-bounded-command-execution-contract.md) | Proposed | A bounded run-to-completion command contract is proposed alongside service leases; acceptance requires protected integration and fresh contract/security evidence. |
 | [0008](0008-podman-backed-command-execution-and-cli.md) | Proposed | A rootless-Podman command backend and synchronous CLI are proposed; static-only attestation is rejected and acceptance requires effective-runtime/cleanup/release evidence. |
+| [0009](0009-isolated-artifact-analyzer-workers.md) | Proposed | Production artifact analyzers execute through a backend-neutral capability-denying worker port; in-process analyzers cannot attest their own isolation. |
 
 An ADR whose acceptance depends on implementation or runtime evidence stays Proposed while that evidence exists only on an unmerged/Draft candidate. Promote it to Accepted only after the decision is integrated into the protected branch and the required current-head evidence is revalidated under live governance.
 
