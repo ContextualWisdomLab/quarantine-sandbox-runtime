@@ -67,17 +67,11 @@ case "${1:-}:${2:-}" in
       previous="$argument"
     done
 
-    # The RED must not false-GREEN on an empty, zero, negative/unbounded,
-    # malformed, or contradictory duplicate max-size setting. Podman documents
-    # max-size as a concrete log-file size; one positive finite value is the
-    # minimum evidence required before hostile output is allowed to run.
+    # Keep the acceptance token canonical so malformed strings cannot
+    # false-GREEN this RED. Podman documents max-size with integer values and
+    # optional b/k/m/g-style units (for example, 10mb).
     [ "$bounded_log_count" -eq 1 ] || exit 86
-    case "$bounded_log" in
-      ''|0|-1) exit 86 ;;
-      *[!0-9kKmMgGbB]*) exit 86 ;;
-      *[1-9]*) : ;;
-      *) exit 86 ;;
-    esac
+    printf '%s\n' "$bounded_log" | grep -Eq '^[1-9][0-9]*([kKmMgG]([bB])?)?$' || exit 86
 
     printf 'fake-command-container-id\n'
     ;;
