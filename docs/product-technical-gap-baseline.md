@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-05 KST against dependency-root PR #1 latest test-bearing head `cefb80634bd62e775839345bd23d823d154482be` and protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, backend-applied configuration evidence, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
+Last reviewed on 2026-09-05 KST against dependency-root PR #1 latest test-bearing head `cefb80634bd62e775839345bd23d823d154482be`, active command-runtime #14 test-bearing head `b2ac8b81898aaf3f127dffc57cbe7b59008fa256`, and protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, backend-applied configuration evidence, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
 
 ## Product responsibility
 
@@ -67,6 +67,8 @@ Issue #28 identifies a collision-resistance defect in the command resource ident
 
 Issue #29 identifies a distinct exact-source interoperability/integrity defect. `collect_regular_files` requires every relative pathname to pass `Path::to_str()`, but Git core pathnames and Unix filesystem pathnames are byte-oriented and can validly contain non-UTF-8 bytes. Test-only `2733bd46d054ff92861d5383fcbf68fd151e77ef` materializes a regular file containing pathname byte `0xff`, computes the manifest digest over the exact raw pathname bytes, and requires the staged destination and receipt to preserve that identity. Production remains unchanged until the RED executes for the intended `to_str()` rejection. Causal GREEN keeps canonical identity in `OsStr`/raw Unix bytes through collection, sorting, hashing, and destination joining while keeping human diagnostics separate; #26's `a\\b` versus `a/b` distinction must remain intact.
 
+Issue #30 identifies a host-side confidentiality defect in the same staging boundary. `stage_pr_source_artifact` starts with a private `tempfile` directory but explicitly changes the staging root to `0o755`; regular staged files are `0o444`. That makes the temporary copy traversable/readable by unrelated host users even though the sandbox mount itself is read-only/noexec. Test-only `b2ac8b81898aaf3f127dffc57cbe7b59008fa256` requires the runtime-owned staging root to retain owner-only host authority (`mode & 0o077 == 0`) while preserving digest, receipt, and lifecycle deletion. Production remains unchanged until this deterministic host-DAC RED executes. Causal GREEN must keep the host copy private and separately provide the remapped non-root sandbox legitimate read-only access through a reviewed user-namespace/idmapped or equivalent backend-owned handoff; widening host permissions is not isolation evidence.
+
 ## Verification and release state
 
 - Protected/default `develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea`; PR #1 remains Draft and no qualifying approval has been established in the current run.
@@ -78,7 +80,7 @@ Issue #29 identifies a distinct exact-source interoperability/integrity defect. 
 - Exact root `24526eb55cf5db48ea07079b314f7d1b676eb48d` real Podman E2E passed Podman 4.9.3/rootless checks and immutable fixture pre-pull, then failed closed at `IsolationVerificationFailed { control_name: "lsm" }`; leak rejection succeeded. This is valid negative effective-LSM evidence, not a reason to weaken the control.
 - Root commit `6ad2b1c9d8f616be68dc28b35d017206f26c0787` split ordinary Ubuntu 24.04 into the explicit negative effective-LSM lane and the dedicated `[self-hosted, linux, cwl-hostile-workload, selinux]` positive lane without weakening production verification.
 - Main command/release descendants remain #6 → #9 → #10 → #13 → #14, with artifact-analysis #18 downstream of #14 through non-force parent adoption. Their PR bodies, not this moving ledger, are the exact-head authority; predecessor checks never transfer.
-- Current #14 exact-head CI has materialized but remains pre-checkout queued. Issues #25/#26/#27/#28/#29 therefore remain unexecuted on current exact ancestry; #18 must non-force adopt the moved #14 parent before its own exact-head evidence is reacquired.
+- Current #14 exact-head CI must be reacquired after the #30 test/doctoring/ledger movement. Issues #25/#26/#27/#28/#29/#30 remain unexecuted on current exact ancestry; #18 must non-force adopt the moved #14 parent before its own exact-head evidence is reacquired.
 - RED-only/security descendants #19, #21, and #23 retain their valid test deltas while adopting the same root authority non-force. No production GREEN is authorized before each causal RED executes for the intended reason.
 - GitHub Releases remain absent until one exact integrated protected candidate satisfies all release gates. No mutable PR head is consumer authority.
 
@@ -106,5 +108,6 @@ The first release remains blocked until one exact integrated protected candidate
 8. Execute #14 issue #27's command-result schema RED; after the intended missing-property failure, add only the strict optional `source_artifact_receipt` schema matching existing Rust serialization and re-run null/populated/unknown-member contract cases.
 9. Execute #14 issue #28's identity-width RED; after the intended 16-hex failure, retain at least 128 bits in the runtime-owned command identity and re-run concurrency plus exact cleanup-ownership regressions.
 10. Execute #14 issue #29's non-UTF-8 pathname-byte RED; after the intended `Path::to_str()` rejection, make canonical source identity byte-faithful without weakening #26 or filesystem/special-entry bounds.
-11. Reconcile #6/#9/#10/#13/#14 dependency-first without force. Overlapping foundation/CI deltas must be adopted rather than copied or reintroduced; then reconcile #18 on its current command parent.
-12. Publish the first immutable runtime release only from one exact integrated protected head, then hand off released version/digest pinning to consumer owner paths.
+11. Execute #14 issue #30's host-DAC RED; after the intended `0o755` failure, keep the runtime-owned host staging root private while proving real rootless Podman can still read the exact staged source through a reviewed backend-owned handoff.
+12. Reconcile #6/#9/#10/#13/#14 dependency-first without force. Overlapping foundation/CI deltas must be adopted rather than copied or reintroduced; then reconcile #18 on its current command parent.
+13. Publish the first immutable runtime release only from one exact integrated protected head, then hand off released version/digest pinning to consumer owner paths.
