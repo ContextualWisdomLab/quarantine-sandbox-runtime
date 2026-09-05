@@ -44,7 +44,7 @@ Linux man-pages project. (2026). *pathname(7)—How pathnames are encoded and in
 
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
-National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). https://doi.org/10.6028/NIST.CSWP.29
+National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.CSWP.29
 
 National Security Agency. (2026). *Ghidra software reverse engineering framework*. GitHub. https://github.com/NationalSecurityAgency/ghidra
 
@@ -67,6 +67,8 @@ Podman Authors. (2026). *podman-network-create — Create a network*. https://do
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
 
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
+
+Rust Project. (2026). *String in std::string (Rust 1.98.0): `String::from_utf8` and UTF-8 invariants*. https://doc.rust-lang.org/stable/std/string/struct.String.html
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
