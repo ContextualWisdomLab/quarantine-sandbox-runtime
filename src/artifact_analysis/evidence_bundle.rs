@@ -136,9 +136,7 @@ fn receipt_identity_digest(bundle: &EvidenceBundle) -> Result<String, ContractEr
     ))
 }
 
-fn receipt_identity_digest_from_wire(
-    bundle: &WireEvidenceBundle,
-) -> Result<String, ContractError> {
+fn receipt_identity_digest_from_wire(bundle: &WireEvidenceBundle) -> Result<String, ContractError> {
     let policy_id = runtime_policy_id(&bundle.evidence)?;
     Ok(receipt_identity_digest_components(
         &bundle.analysis_job_id,
