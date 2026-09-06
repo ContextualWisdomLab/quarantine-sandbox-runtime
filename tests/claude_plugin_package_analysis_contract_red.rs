@@ -1,11 +1,10 @@
-//! RED contract for the credential-free Claude plugin package analysis profile.
+//! Contract tests for the credential-free Claude plugin package analysis profile.
 //!
-//! The generic artifact-analysis request currently supports only the foundation
-//! static/dynamic profile codes and rejects the immutable package-analysis
-//! fields below. Issue #17 requires a dedicated, bounded profile contract before
-//! any plugin bytes can reach isolated execution.
+//! The profile contract is intentionally separate from the generic foundation
+//! `AnalysisRequest`: it carries package-specific immutable identity and bounded
+//! probe budgets without silently widening the generic artifact-analysis wire.
 
-use quarantine_sandbox_runtime::AnalysisRequest;
+use quarantine_sandbox_runtime::ClaudePluginPackageAnalysisRequest;
 use serde_json::Value;
 
 fn valid_request() -> Value {
@@ -45,14 +44,14 @@ fn valid_request() -> Value {
 }
 
 fn validate_request(request: Value) -> Result<(), String> {
-    let parsed =
-        serde_json::from_value::<AnalysisRequest>(request).map_err(|error| error.to_string())?;
+    let parsed = serde_json::from_value::<ClaudePluginPackageAnalysisRequest>(request)
+        .map_err(|error| error.to_string())?;
     parsed.validate().map_err(|error| error.to_string())
 }
 
 fn validate_request_json(request_json: &str) -> Result<(), String> {
-    let parsed =
-        serde_json::from_str::<AnalysisRequest>(request_json).map_err(|error| error.to_string())?;
+    let parsed = serde_json::from_str::<ClaudePluginPackageAnalysisRequest>(request_json)
+        .map_err(|error| error.to_string())?;
     parsed.validate().map_err(|error| error.to_string())
 }
 
@@ -62,7 +61,7 @@ fn immutable_claude_plugin_package_request_is_admitted_and_strictly_validated() 
 
     assert!(
         result.is_ok(),
-        "the public request contract must admit and validate the immutable, bounded Claude plugin package profile before runtime implementation is added: {result:?}"
+        "the dedicated public package-analysis request contract must admit and validate the immutable, bounded profile before runtime implementation is added: {result:?}"
     );
 }
 
