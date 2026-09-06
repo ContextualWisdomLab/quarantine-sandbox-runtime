@@ -76,36 +76,150 @@ fn unavailable_dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
     bundle
 }
 
-fn logical_schema_binds_dynamic_completeness(value: &Value) -> bool {
-    const LOGICAL_KEYWORDS: [&str; 8] = [
-        "if",
-        "then",
-        "else",
-        "allOf",
-        "anyOf",
-        "oneOf",
-        "not",
-        "dependentSchemas",
-    ];
-
-    match value {
+/// Evaluate the Draft 2020-12 assertion/applicator vocabulary needed by this
+/// cross-field contract. Unrelated annotations and independent bounds are
+/// intentionally ignored; the representative fixtures already satisfy those
+/// constraints and this helper exists to execute the profile/execution/
+/// disposition logic instead of merely searching schema text for keywords.
+fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
+    match schema {
+        Value::Bool(accepted) => *accepted,
         Value::Object(object) => {
-            for keyword in LOGICAL_KEYWORDS {
-                if let Some(logic) = object.get(keyword) {
-                    let rendered = logic.to_string();
-                    if rendered.contains("requested_profile")
-                        && rendered.contains("dynamic_execution_performed")
-                        && rendered.contains("disposition")
+            if let Some(expected) = object.get("const")
+                && expected != instance
+            {
+                return false;
+            }
+
+            if let Some(allowed) = object.get("enum").and_then(Value::as_array)
+                && !allowed.iter().any(|candidate| candidate == instance)
+            {
+                return false;
+            }
+
+            if let Some(required) = object.get("required").and_then(Value::as_array) {
+                let Some(instance_object) = instance.as_object() else {
+                    return false;
+                };
+                if required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|property| !instance_object.contains_key(property))
+                {
+                    return false;
+                }
+            }
+
+            if let Some(properties) = object.get("properties").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, property_schema) in properties {
+                    if let Some(property_value) = instance_object.get(property)
+                        && !relevant_schema_accepts(property_schema, property_value)
                     {
-                        return true;
+                        return false;
                     }
                 }
             }
-            object
-                .values()
-                .any(logical_schema_binds_dynamic_completeness)
+
+            if let Some(item_schema) = object.get("items")
+                && let Some(items) = instance.as_array()
+                && items
+                    .iter()
+                    .any(|item| !relevant_schema_accepts(item_schema, item))
+            {
+                return false;
+            }
+
+            if let Some(contains_schema) = object.get("contains")
+                && let Some(items) = instance.as_array()
+                && !items
+                    .iter()
+                    .any(|item| relevant_schema_accepts(contains_schema, item))
+            {
+                return false;
+            }
+
+            if let Some(all_of) = object.get("allOf").and_then(Value::as_array)
+                && all_of
+                    .iter()
+                    .any(|subschema| !relevant_schema_accepts(subschema, instance))
+            {
+                return false;
+            }
+
+            if let Some(any_of) = object.get("anyOf").and_then(Value::as_array)
+                && !any_of
+                    .iter()
+                    .any(|subschema| relevant_schema_accepts(subschema, instance))
+            {
+                return false;
+            }
+
+            if let Some(one_of) = object.get("oneOf").and_then(Value::as_array)
+                && one_of
+                    .iter()
+                    .filter(|subschema| relevant_schema_accepts(subschema, instance))
+                    .count()
+                    != 1
+            {
+                return false;
+            }
+
+            if let Some(not_schema) = object.get("not")
+                && relevant_schema_accepts(not_schema, instance)
+            {
+                return false;
+            }
+
+            if let Some(if_schema) = object.get("if") {
+                let branch = if relevant_schema_accepts(if_schema, instance) {
+                    object.get("then")
+                } else {
+                    object.get("else")
+                };
+                if let Some(branch_schema) = branch
+                    && !relevant_schema_accepts(branch_schema, instance)
+                {
+                    return false;
+                }
+            }
+
+            if let Some(dependent_schemas) = object.get("dependentSchemas").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, dependent_schema) in dependent_schemas {
+                    if instance_object.contains_key(property)
+                        && !relevant_schema_accepts(dependent_schema, instance)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if let Some(dependent_required) =
+                object.get("dependentRequired").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, dependencies) in dependent_required {
+                    if !instance_object.contains_key(property) {
+                        continue;
+                    }
+                    let Some(dependencies) = dependencies.as_array() else {
+                        return false;
+                    };
+                    if dependencies
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|dependency| !instance_object.contains_key(dependency))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            true
         }
-        Value::Array(items) => items.iter().any(logical_schema_binds_dynamic_completeness),
         _ => false,
     }
 }
@@ -170,28 +284,41 @@ fn static_only_profile_still_rejects_dynamic_execution_attestation() {
 }
 
 #[test]
-fn evidence_bundle_schema_does_not_globally_forbid_dynamic_execution() {
-    let schema: Value =
-        serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
-            .expect("checked-in evidence schema must be valid JSON");
-    let dynamic_execution_schema =
-        &schema["properties"]["runtime"]["properties"]["dynamic_execution_performed"];
-
-    assert_ne!(
-        dynamic_execution_schema.get("const"),
-        Some(&Value::Bool(false)),
-        "the wire schema must not globally force dynamic_execution_performed=false when approved dynamic profiles can complete"
-    );
-}
-
-#[test]
-fn evidence_bundle_schema_cross_binds_dynamic_execution_and_completion() {
+fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
             .expect("checked-in evidence schema must be valid JSON");
 
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
+        let completed = serde_json::to_value(dynamic_bundle(profile)).expect("fixture must serialize");
+        let inconclusive = serde_json::to_value(unavailable_dynamic_bundle(profile))
+            .expect("fixture must serialize");
+        let mut false_completion = unavailable_dynamic_bundle(profile);
+        false_completion.disposition = RuntimeDisposition::Completed;
+        let false_completion =
+            serde_json::to_value(false_completion).expect("fixture must serialize");
+
+        assert!(
+            relevant_schema_accepts(&schema, &completed),
+            "the wire schema must admit truthful completed dynamic execution: profile={profile:?}"
+        );
+        assert!(
+            relevant_schema_accepts(&schema, &inconclusive),
+            "the wire schema must admit unavailable dynamic execution as Inconclusive: profile={profile:?}"
+        );
+        assert!(
+            !relevant_schema_accepts(&schema, &false_completion),
+            "the wire schema must reject execution=false + Completed: profile={profile:?}"
+        );
+    }
+
+    let static_execution = serde_json::to_value(dynamic_bundle(AnalysisProfile::StaticOnly))
+        .expect("fixture must serialize");
     assert!(
-        logical_schema_binds_dynamic_completeness(&schema),
-        "the wire schema needs a logical cross-field guard binding requested_profile, dynamic_execution_performed, and disposition"
+        !relevant_schema_accepts(&schema, &static_execution),
+        "the wire schema must reject StaticOnly + dynamic_execution_performed=true"
     );
 }
