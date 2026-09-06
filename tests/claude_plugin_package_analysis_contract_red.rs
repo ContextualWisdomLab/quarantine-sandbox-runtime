@@ -45,13 +45,14 @@ fn valid_request() -> Value {
 }
 
 fn validate_request(request: Value) -> Result<(), String> {
-    let parsed = serde_json::from_value::<AnalysisRequest>(request).map_err(|error| error.to_string())?;
+    let parsed =
+        serde_json::from_value::<AnalysisRequest>(request).map_err(|error| error.to_string())?;
     parsed.validate().map_err(|error| error.to_string())
 }
 
 fn validate_request_json(request_json: &str) -> Result<(), String> {
-    let parsed = serde_json::from_str::<AnalysisRequest>(request_json)
-        .map_err(|error| error.to_string())?;
+    let parsed =
+        serde_json::from_str::<AnalysisRequest>(request_json).map_err(|error| error.to_string())?;
     parsed.validate().map_err(|error| error.to_string())
 }
 
@@ -69,7 +70,10 @@ fn immutable_claude_plugin_package_request_is_admitted_and_strictly_validated() 
 fn claude_plugin_package_request_rejects_mutable_or_malformed_identity() {
     for (field, invalid_value) in [
         ("catalog_commit_sha", serde_json::json!("main")),
-        ("marketplace_blob_sha", serde_json::json!("not-a-git-object-sha")),
+        (
+            "marketplace_blob_sha",
+            serde_json::json!("not-a-git-object-sha"),
+        ),
         ("source_commit_sha", serde_json::json!("release/latest")),
         ("marketplace_entry_sha256", serde_json::json!("abc123")),
         ("artifact_sha256", serde_json::json!("ABCDEF")),
@@ -104,7 +108,8 @@ fn claude_plugin_package_request_rejects_duplicate_json_members_before_semantic_
 #[test]
 fn claude_plugin_package_request_rejects_duplicate_empty_or_unknown_probes() {
     let mut duplicate_probe = valid_request();
-    duplicate_probe["requested_probe_codes"] = serde_json::json!(["package_inventory", "package_inventory"]);
+    duplicate_probe["requested_probe_codes"] =
+        serde_json::json!(["package_inventory", "package_inventory"]);
     assert!(validate_request(duplicate_probe).is_err());
 
     let mut empty_probe = valid_request();
@@ -112,7 +117,8 @@ fn claude_plugin_package_request_rejects_duplicate_empty_or_unknown_probes() {
     assert!(validate_request(empty_probe).is_err());
 
     let mut unknown_probe = valid_request();
-    unknown_probe["requested_probe_codes"] = serde_json::json!(["package_inventory", "arbitrary_shell"]);
+    unknown_probe["requested_probe_codes"] =
+        serde_json::json!(["package_inventory", "arbitrary_shell"]);
     assert!(validate_request(unknown_probe).is_err());
 }
 
@@ -132,7 +138,10 @@ fn claude_plugin_package_request_rejects_zero_or_effectively_unbounded_resources
 
         let mut unbounded = valid_request();
         unbounded[field] = serde_json::json!(u64::MAX);
-        assert!(validate_request(unbounded).is_err(), "{field} must have a profile ceiling");
+        assert!(
+            validate_request(unbounded).is_err(),
+            "{field} must have a profile ceiling"
+        );
     }
 }
 
@@ -151,7 +160,10 @@ fn claude_plugin_package_request_rejects_empty_required_execution_metadata() {
     ] {
         let mut request = valid_request();
         request[field] = serde_json::json!("");
-        assert!(validate_request(request).is_err(), "{field} must not be empty");
+        assert!(
+            validate_request(request).is_err(),
+            "{field} must not be empty"
+        );
     }
 }
 
@@ -170,7 +182,10 @@ fn claude_plugin_package_request_rejects_control_text_in_execution_relevant_fiel
     ] {
         let mut request = valid_request();
         request[field] = serde_json::json!("safe\u{0000}unsafe");
-        assert!(validate_request(request).is_err(), "{field} must reject control text");
+        assert!(
+            validate_request(request).is_err(),
+            "{field} must reject control text"
+        );
     }
 }
 

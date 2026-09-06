@@ -63,7 +63,12 @@ fn fake_podman() -> (TempDir, PathBuf, PathBuf) {
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) if [ -f '{}' ]; then printf '0\\n'; else touch '{}'; sleep 5; fi ;;\n  kill:*) exit 42 ;;\n  logs:*) printf 'must-not-be-trusted\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(), info, inspect, top, wait_marker.display(), wait_marker.display()
+        calls.display(),
+        info,
+        inspect,
+        top,
+        wait_marker.display(),
+        wait_marker.display()
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)

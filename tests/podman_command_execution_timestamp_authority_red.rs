@@ -63,7 +63,10 @@ fn fake_podman() -> (TempDir, PathBuf, PathBuf) {
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(), info, inspect, top
+        calls.display(),
+        info,
+        inspect,
+        top
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -79,11 +82,7 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
     let (_directory, program, calls_path) = fake_podman();
     let adapter = RootlessPodmanAdapter::new(program).with_command_timeout(Duration::from_secs(2));
 
-    let result = adapter.run_command_at(
-        &request(),
-        &policy(),
-        CALLER_SUPPLIED_FUTURE_START,
-    );
+    let result = adapter.run_command_at(&request(), &policy(), CALLER_SUPPLIED_FUTURE_START);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
     if let Ok(result) = result {
