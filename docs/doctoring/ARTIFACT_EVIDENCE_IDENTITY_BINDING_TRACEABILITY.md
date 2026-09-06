@@ -2,7 +2,7 @@
 
 ## Authority and problem
 
-Issue #58 owns a P0 evidence-integrity defect in the `artifact_analysis` bounded context. The current parent is PR #18 exact `63260881e36bdb8b1efaf4c3dc7a3a82dd0dd2e1`; the focused test-bearing RED is `52354e070830802e4a387f68e6faf9ed01244751`.
+Issue #58 owns a P0 evidence-integrity defect in the `artifact_analysis` bounded context. The current parent is PR #18 exact `7a48b7f904ce41ce2d2f184028c2eec7a9201d55`; the focused test-bearing RED is `52354e070830802e4a387f68e6faf9ed01244751`. The parent now includes issue #49's first fail-closed host-capability repair; that prerequisite is preserved without treating worker isolation as complete.
 
 `AnalysisEngine::analyze_bytes()` derives both the top-level `ArtifactDescriptor` and the `ArtifactIdentity` evidence attributes from one ingested artifact. That production path is internally consistent when it creates a bundle. The public `EvidenceBundle::validate()` contract, however, validates those two representations independently. A reconstructed or deserialized receipt can therefore retain a valid top-level artifact SHA-256 while replacing only `ArtifactIdentity.attributes["artifact_sha256"]` with a different well-formed digest and still satisfy the current validator.
 
