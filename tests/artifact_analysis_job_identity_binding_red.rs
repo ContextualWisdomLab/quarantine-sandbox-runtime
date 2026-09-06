@@ -47,6 +47,21 @@ fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
         "changing the consistently represented artifact subject without changing analysis_job_id must invalidate the receipt"
     );
 
+    let mut policy_tampered = bundle.clone();
+    let policy_boundary = policy_tampered
+        .evidence
+        .iter_mut()
+        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
+        .expect("control bundle must contain PolicyBoundary evidence");
+    policy_boundary
+        .attributes
+        .insert("policy_id".to_owned(), "forged_policy_v2".to_owned());
+    assert_eq!(policy_tampered.analysis_job_id, original_job_id);
+    assert!(
+        policy_tampered.validate().is_err(),
+        "changing the runtime policy identity without changing analysis_job_id must invalidate the receipt"
+    );
+
     let mut revision_tampered = bundle.clone();
     revision_tampered.runtime.source_revision = "forged_source_revision".to_owned();
     assert_eq!(revision_tampered.analysis_job_id, original_job_id);
