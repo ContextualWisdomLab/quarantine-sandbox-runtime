@@ -6,7 +6,9 @@
 //! completed evidence under one identical analysis-job identity. A future
 //! implementation may reject analyzers that lack stable provenance or bind a
 //! versioned analyzer implementation/configuration identity into the job and
-//! evidence contracts.
+//! evidence contracts. Distinct provenance must not be implemented by adding
+//! process-local randomness: identical analyzer configuration and input must
+//! retain deterministic job and evidence identity across engine instances.
 
 use std::collections::BTreeMap;
 
@@ -96,6 +98,25 @@ fn materially_different_analyzers_cannot_share_one_deterministic_job_identity() 
                 .analyze_bytes(&request(), b"same hostile artifact bytes")
                 .expect("second otherwise-valid analyzer must produce evidence");
 
+            let repeated_first_engine = AnalysisEngine::new(
+                IngestionPolicy::default(),
+                "analyzer_provenance_policy_v1",
+                "artifact_provenance_red",
+                vec![Box::new(AnalyzerVersionOne)],
+            )
+            .expect("an identical analyzer configuration must be admitted deterministically");
+            let repeated_first_bundle = repeated_first_engine
+                .analyze_bytes(&request(), b"same hostile artifact bytes")
+                .expect("identical analyzer configuration must produce evidence deterministically");
+
+            assert_eq!(
+                first_bundle.analysis_job_id, repeated_first_bundle.analysis_job_id,
+                "identical analyzer provenance and input must retain deterministic job identity; process-local randomness is not provenance"
+            );
+            assert_eq!(
+                first_bundle.evidence, repeated_first_bundle.evidence,
+                "identical analyzer provenance and input must retain deterministic semantic evidence"
+            );
             assert_ne!(
                 first_bundle.evidence, second_bundle.evidence,
                 "fixture must prove the analyzer implementations are materially different"
