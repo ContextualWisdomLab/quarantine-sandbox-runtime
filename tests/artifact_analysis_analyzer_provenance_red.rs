@@ -108,105 +108,126 @@ fn materially_different_analyzers_cannot_share_one_deterministic_job_identity() 
 
     match (first_engine, second_engine) {
         (Err(_), Err(_)) => {
-            // A future contract may fail closed when stable analyzer provenance
-            // is unavailable rather than accepting an ambiguous producer ID.
+            // A future contract may reject missing stable provenance during
+            // engine construction rather than accepting an ambiguous producer.
         }
         (Ok(first_engine), Ok(second_engine)) => {
-            let first_bundle = first_engine
-                .analyze_bytes(&request(), b"same hostile artifact bytes")
-                .expect("first otherwise-valid analyzer must produce evidence");
-            let second_bundle = second_engine
-                .analyze_bytes(&request(), b"same hostile artifact bytes")
-                .expect("second otherwise-valid analyzer must produce evidence");
+            let first_result =
+                first_engine.analyze_bytes(&request(), b"same hostile artifact bytes");
+            let second_result =
+                second_engine.analyze_bytes(&request(), b"same hostile artifact bytes");
 
-            let repeated_first_engine = AnalysisEngine::new(
-                IngestionPolicy::default(),
-                "analyzer_provenance_policy_v1",
-                "artifact_provenance_red",
-                vec![Box::new(AnalyzerVersionOne)],
-            )
-            .expect("an identical analyzer configuration must be admitted deterministically");
-            let repeated_first_bundle = repeated_first_engine
-                .analyze_bytes(&request(), b"same hostile artifact bytes")
-                .expect("identical analyzer configuration must produce evidence deterministically");
+            match (first_result, second_result) {
+                (Err(_), Err(_)) => {
+                    // Fail-closed validation immediately before analyzer/worker
+                    // invocation is also valid when stable provenance is absent.
+                }
+                (Ok(first_bundle), Ok(second_bundle)) => {
+                    let repeated_first_engine = AnalysisEngine::new(
+                        IngestionPolicy::default(),
+                        "analyzer_provenance_policy_v1",
+                        "artifact_provenance_red",
+                        vec![Box::new(AnalyzerVersionOne)],
+                    )
+                    .expect(
+                        "an identical analyzer configuration must be admitted deterministically",
+                    );
+                    let repeated_first_bundle = repeated_first_engine
+                        .analyze_bytes(&request(), b"same hostile artifact bytes")
+                        .expect(
+                            "identical analyzer configuration must produce evidence deterministically",
+                        );
 
-            let same_output_different_engine = AnalysisEngine::new(
-                IngestionPolicy::default(),
-                "analyzer_provenance_policy_v1",
-                "artifact_provenance_red",
-                vec![Box::new(AnalyzerVersionThree)],
-            )
-            .expect("a distinct implementation with otherwise-valid configuration must be admitted consistently");
-            let same_output_different_bundle = same_output_different_engine
-                .analyze_bytes(&request(), b"same hostile artifact bytes")
-                .expect("distinct implementation fixture must reach provenance assertions");
+                    let same_output_different_engine = AnalysisEngine::new(
+                        IngestionPolicy::default(),
+                        "analyzer_provenance_policy_v1",
+                        "artifact_provenance_red",
+                        vec![Box::new(AnalyzerVersionThree)],
+                    )
+                    .expect(
+                        "a distinct implementation with otherwise-valid configuration must be admitted consistently",
+                    );
+                    let same_output_different_bundle = same_output_different_engine
+                        .analyze_bytes(&request(), b"same hostile artifact bytes")
+                        .expect("distinct implementation fixture must reach provenance assertions");
 
-            let analyzer_semantics = |bundle: &quarantine_sandbox_runtime::EvidenceBundle| {
-                bundle
-                    .evidence
-                    .iter()
-                    .filter(|record| record.evidence_kind == EvidenceKind::StaticCapability)
-                    .map(|record| {
-                        (
-                            record.evidence_kind,
-                            record.summary.clone(),
-                            record.attributes.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let analyzer_producer_ids = |bundle: &quarantine_sandbox_runtime::EvidenceBundle| {
-                bundle
-                    .evidence
-                    .iter()
-                    .filter(|record| record.evidence_kind == EvidenceKind::StaticCapability)
-                    .map(|record| record.producer_id.clone())
-                    .collect::<Vec<_>>()
-            };
+                    let analyzer_semantics =
+                        |bundle: &quarantine_sandbox_runtime::EvidenceBundle| {
+                            bundle
+                                .evidence
+                                .iter()
+                                .filter(|record| {
+                                    record.evidence_kind == EvidenceKind::StaticCapability
+                                })
+                                .map(|record| {
+                                    (
+                                        record.evidence_kind,
+                                        record.summary.clone(),
+                                        record.attributes.clone(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                    let analyzer_producer_ids =
+                        |bundle: &quarantine_sandbox_runtime::EvidenceBundle| {
+                            bundle
+                                .evidence
+                                .iter()
+                                .filter(|record| {
+                                    record.evidence_kind == EvidenceKind::StaticCapability
+                                })
+                                .map(|record| record.producer_id.clone())
+                                .collect::<Vec<_>>()
+                        };
 
-            assert_eq!(
-                first_bundle.analysis_job_id, repeated_first_bundle.analysis_job_id,
-                "identical analyzer provenance and input must retain deterministic job identity; process-local randomness is not provenance"
-            );
-            assert_eq!(
-                first_bundle.evidence, repeated_first_bundle.evidence,
-                "identical analyzer provenance and input must retain deterministic evidence identity"
-            );
-            assert_eq!(
-                analyzer_producer_ids(&first_bundle),
-                analyzer_producer_ids(&repeated_first_bundle),
-                "identical analyzer provenance must retain the same serialized producer identity"
-            );
+                    assert_eq!(
+                        first_bundle.analysis_job_id, repeated_first_bundle.analysis_job_id,
+                        "identical analyzer provenance and input must retain deterministic job identity; process-local randomness is not provenance"
+                    );
+                    assert_eq!(
+                        first_bundle.evidence, repeated_first_bundle.evidence,
+                        "identical analyzer provenance and input must retain deterministic evidence identity"
+                    );
+                    assert_eq!(
+                        analyzer_producer_ids(&first_bundle),
+                        analyzer_producer_ids(&repeated_first_bundle),
+                        "identical analyzer provenance must retain the same serialized producer identity"
+                    );
 
-            assert_ne!(
-                analyzer_semantics(&first_bundle),
-                analyzer_semantics(&second_bundle),
-                "fixture must prove analyzer versions one and two are semantically different"
-            );
-            assert_ne!(
-                first_bundle.analysis_job_id, second_bundle.analysis_job_id,
-                "different analyzer implementations produced different evidence under one deterministic job identity; analyzer provenance must be bound to job identity"
-            );
-            assert_ne!(
-                analyzer_producer_ids(&first_bundle),
-                analyzer_producer_ids(&second_bundle),
-                "different analyzer provenance must be distinguishable in serialized producer identity, not only in the job digest"
-            );
+                    assert_ne!(
+                        analyzer_semantics(&first_bundle),
+                        analyzer_semantics(&second_bundle),
+                        "fixture must prove analyzer versions one and two are semantically different"
+                    );
+                    assert_ne!(
+                        first_bundle.analysis_job_id, second_bundle.analysis_job_id,
+                        "different analyzer implementations produced different evidence under one deterministic job identity; analyzer provenance must be bound to job identity"
+                    );
+                    assert_ne!(
+                        analyzer_producer_ids(&first_bundle),
+                        analyzer_producer_ids(&second_bundle),
+                        "different analyzer provenance must be distinguishable in serialized producer identity, not only in the job digest"
+                    );
 
-            assert_eq!(
-                analyzer_semantics(&first_bundle),
-                analyzer_semantics(&same_output_different_bundle),
-                "fixture must prove two distinct implementations can emit identical semantic findings"
-            );
-            assert_ne!(
-                first_bundle.analysis_job_id, same_output_different_bundle.analysis_job_id,
-                "analyzer output is not provenance: distinct implementations with identical findings still require distinct deterministic job identity or fail-closed admission"
-            );
-            assert_ne!(
-                analyzer_producer_ids(&first_bundle),
-                analyzer_producer_ids(&same_output_different_bundle),
-                "analyzer output is not producer provenance: identical findings from distinct implementations must remain attributable to distinct stable producer identities"
-            );
+                    assert_eq!(
+                        analyzer_semantics(&first_bundle),
+                        analyzer_semantics(&same_output_different_bundle),
+                        "fixture must prove two distinct implementations can emit identical semantic findings"
+                    );
+                    assert_ne!(
+                        first_bundle.analysis_job_id, same_output_different_bundle.analysis_job_id,
+                        "analyzer output is not provenance: distinct implementations with identical findings still require distinct deterministic job identity or fail-closed admission"
+                    );
+                    assert_ne!(
+                        analyzer_producer_ids(&first_bundle),
+                        analyzer_producer_ids(&same_output_different_bundle),
+                        "analyzer output is not producer provenance: identical findings from distinct implementations must remain attributable to distinct stable producer identities"
+                    );
+                }
+                _ => panic!(
+                    "analyzer provenance validation must fail closed symmetrically for otherwise-equivalent configurations"
+                ),
+            }
         }
         _ => panic!(
             "analyzer provenance admission must be deterministic: identical provenance requirements cannot accept only one of two otherwise-identical configurations"
