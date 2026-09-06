@@ -31,6 +31,7 @@ fn isolation_evidence() -> AnalyzerWorkerIsolationEvidence {
         runtime_backend_id: "rootless_podman".to_owned(),
         runtime_backend_version: "5.4.2".to_owned(),
         isolation_policy_sha256: "b".repeat(64),
+        applied_budget: budget(),
         network_access_performed: false,
         credentials_available: false,
         host_filesystem_access_performed: false,
@@ -189,6 +190,45 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
             field_name: "analyzer"
         })
     ));
+
+    for field in [
+        "maximum_cpu_millis",
+        "maximum_memory_bytes",
+        "maximum_pids",
+        "maximum_wall_time_millis",
+        "maximum_scratch_bytes",
+        "maximum_output_bytes",
+    ] {
+        let mut budget_mismatch = receipt.clone();
+        match field {
+            "maximum_cpu_millis" => {
+                budget_mismatch.isolation.applied_budget.maximum_cpu_millis += 1;
+            }
+            "maximum_memory_bytes" => {
+                budget_mismatch.isolation.applied_budget.maximum_memory_bytes += 1;
+            }
+            "maximum_pids" => budget_mismatch.isolation.applied_budget.maximum_pids += 1,
+            "maximum_wall_time_millis" => {
+                budget_mismatch.isolation.applied_budget.maximum_wall_time_millis += 1;
+            }
+            "maximum_scratch_bytes" => {
+                budget_mismatch.isolation.applied_budget.maximum_scratch_bytes += 1;
+            }
+            "maximum_output_bytes" => {
+                budget_mismatch.isolation.applied_budget.maximum_output_bytes += 1;
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                budget_mismatch.validate_against(&request),
+                Err(AnalyzerWorkerContractError::ReceiptMismatch {
+                    field_name: "applied_budget"
+                })
+            ),
+            "{field} must be bound to runtime-owned applied-budget evidence"
+        );
+    }
 
     for field in [
         "network_access_performed",
