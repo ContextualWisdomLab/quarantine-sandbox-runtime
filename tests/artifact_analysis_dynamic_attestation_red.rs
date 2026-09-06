@@ -4,7 +4,7 @@
 //! ingestion (#50). The public contract already models dynamic profiles and
 //! runtime-behavior evidence, so an isolated worker must be able to attest that
 //! dynamic execution actually occurred without weakening the static-only
-//! boundary.
+//! boundary or allowing an unavailable worker to be reported as completed.
 
 use std::collections::BTreeMap;
 
@@ -67,6 +67,16 @@ fn dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
     }
 }
 
+fn unavailable_dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
+    let mut bundle = dynamic_bundle(profile);
+    bundle.runtime.dynamic_execution_performed = false;
+    bundle.disposition = RuntimeDisposition::Inconclusive;
+    bundle
+        .evidence
+        .retain(|record| record.evidence_kind != EvidenceKind::RuntimeBehavior);
+    bundle
+}
+
 #[test]
 fn approved_dynamic_profiles_can_truthfully_attest_isolated_execution() {
     for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
@@ -76,6 +86,31 @@ fn approved_dynamic_profiles_can_truthfully_attest_isolated_execution() {
                 "a completed dynamic profile must be able to attest actual isolated execution: profile={profile:?}, error={error:?}"
             )
         });
+    }
+}
+
+#[test]
+fn unavailable_dynamic_profiles_remain_valid_inconclusive_receipts() {
+    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+        let bundle = unavailable_dynamic_bundle(profile);
+        bundle.validate().unwrap_or_else(|error| {
+            panic!(
+                "an unavailable dynamic worker must remain representable as inconclusive without fabricated execution: profile={profile:?}, error={error:?}"
+            )
+        });
+    }
+}
+
+#[test]
+fn dynamic_profile_cannot_claim_completion_when_execution_did_not_occur() {
+    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+        let mut bundle = unavailable_dynamic_bundle(profile);
+        bundle.disposition = RuntimeDisposition::Completed;
+
+        assert!(
+            bundle.validate().is_err(),
+            "a dynamic receipt with execution=false must not validate as completed: profile={profile:?}"
+        );
     }
 }
 
