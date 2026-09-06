@@ -7,12 +7,17 @@
 //! container-backend details here.
 
 mod analysis_engine;
+mod claude_plugin_package;
 mod contracts;
 mod evidence_bundle;
 mod ingestion;
 mod runtime;
 
 pub use analysis_engine::AnalysisEngine;
+pub use claude_plugin_package::{
+    CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, ClaudePluginPackageAnalysisRequest,
+    ClaudePluginPackageContractError,
+};
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CONTRACT_SCHEMA_VERSION, ContractError, EvidenceKind, EvidenceRecord, RuntimeDisposition,
