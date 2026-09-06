@@ -174,11 +174,14 @@ fn receipt_identity_digest_components(
 }
 
 fn runtime_policy_id(evidence: &[EvidenceRecord]) -> Result<&str, ContractError> {
-    let mut policy_boundaries = evidence
-        .iter()
-        .filter(|record| record.evidence_kind == EvidenceKind::PolicyBoundary);
-    let policy_boundary = policy_boundaries.next().ok_or(identity_binding_error())?;
-    if policy_boundaries.next().is_some() {
+    let mut policy_identity_sources = evidence.iter().filter(|record| {
+        record.evidence_kind == EvidenceKind::PolicyBoundary
+            && record.attributes.contains_key("policy_id")
+    });
+    let policy_boundary = policy_identity_sources
+        .next()
+        .ok_or(identity_binding_error())?;
+    if policy_identity_sources.next().is_some() {
         return Err(identity_binding_error());
     }
 

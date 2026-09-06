@@ -20,6 +20,34 @@ fn control_bundle() -> quarantine_sandbox_runtime::EvidenceBundle {
         .expect("static analysis must produce a valid control bundle")
 }
 
+fn append_policy_boundary(
+    bundle: &mut quarantine_sandbox_runtime::EvidenceBundle,
+    policy_id: Option<&str>,
+) {
+    let mut additional = bundle
+        .evidence
+        .iter()
+        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
+        .expect("control bundle must contain PolicyBoundary evidence")
+        .clone();
+    match policy_id {
+        Some(value) => {
+            additional
+                .attributes
+                .insert("policy_id".to_owned(), value.to_owned());
+        }
+        None => {
+            additional.attributes.remove("policy_id");
+        }
+    }
+    additional.sequence_number = bundle.evidence.len() + 1;
+    additional.evidence_id = format!(
+        "{}:evidence:{:04}",
+        bundle.analysis_job_id, additional.sequence_number
+    );
+    bundle.evidence.push(additional);
+}
+
 #[test]
 fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
     let bundle = control_bundle();
@@ -119,30 +147,43 @@ fn analysis_job_identity_rejects_malformed_digest_and_ambiguous_policy_identity(
     policy_boundary.attributes.remove("policy_id");
     assert!(
         missing_policy_identity.validate().is_err(),
-        "job identity cannot be verified without runtime policy identity"
+        "job identity cannot be verified without a policy-identifying source"
     );
 
-    let mut duplicate_policy_identity = bundle;
-    let mut duplicate_policy_boundary = duplicate_policy_identity
+    let mut non_identifying_policy_boundary = bundle.clone();
+    append_policy_boundary(&mut non_identifying_policy_boundary, None);
+    assert_eq!(
+        non_identifying_policy_boundary.validate(),
+        Ok(()),
+        "a non-identifying PolicyBoundary must not become a second policy identity source"
+    );
+
+    let control_policy_id = bundle
         .evidence
         .iter()
         .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
-        .expect("control bundle must contain PolicyBoundary evidence")
+        .and_then(|record| record.attributes.get("policy_id"))
+        .expect("control PolicyBoundary must identify its policy")
         .clone();
-    duplicate_policy_boundary
-        .attributes
-        .insert("policy_id".to_owned(), "forged_policy_v2".to_owned());
-    duplicate_policy_boundary.sequence_number = duplicate_policy_identity.evidence.len() + 1;
-    duplicate_policy_boundary.evidence_id = format!(
-        "{}:evidence:{:04}",
-        duplicate_policy_identity.analysis_job_id, duplicate_policy_boundary.sequence_number
+
+    let mut duplicate_same_policy_identity = bundle.clone();
+    append_policy_boundary(
+        &mut duplicate_same_policy_identity,
+        Some(control_policy_id.as_str()),
     );
-    duplicate_policy_identity
-        .evidence
-        .push(duplicate_policy_boundary);
     assert!(
-        duplicate_policy_identity.validate().is_err(),
-        "job identity cannot bind an ambiguous runtime policy identity"
+        duplicate_same_policy_identity.validate().is_err(),
+        "two policy-identifying sources are ambiguous even when their policy IDs match"
+    );
+
+    let mut duplicate_different_policy_identity = bundle;
+    append_policy_boundary(
+        &mut duplicate_different_policy_identity,
+        Some("forged_policy_v2"),
+    );
+    assert!(
+        duplicate_different_policy_identity.validate().is_err(),
+        "two contradictory policy-identifying sources must fail closed"
     );
 }
 
@@ -180,9 +221,17 @@ fn evidence_bundle_schema_versioning_is_explicit_and_preserves_v1_0() {
     let current_required = current_schema["required"]
         .as_array()
         .expect("current evidence schema must declare required fields");
-    assert!(current_required.iter().any(|field| field == "analysis_job_identity_sha256"));
+    assert!(
+        current_required
+            .iter()
+            .any(|field| field.as_str() == Some("analysis_job_identity_sha256"))
+    );
     let legacy_required = legacy_schema["required"]
         .as_array()
         .expect("legacy evidence schema must declare required fields");
-    assert!(!legacy_required.iter().any(|field| field == "analysis_job_identity_sha256"));
+    assert!(
+        !legacy_required
+            .iter()
+            .any(|field| field.as_str() == Some("analysis_job_identity_sha256"))
+    );
 }
