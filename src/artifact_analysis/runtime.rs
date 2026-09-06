@@ -7,11 +7,14 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    AnalysisProfile, AnalysisRequest, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
+    AnalysisProfile, AnalysisRequest, ContractError, EvidenceKind, EvidenceRecord,
     IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
 };
 
-use super::ingestion::ingest_bytes_with_optional_name;
+use super::{
+    contracts::EvidenceBundle,
+    ingestion::ingest_bytes_with_optional_name,
+};
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
 
