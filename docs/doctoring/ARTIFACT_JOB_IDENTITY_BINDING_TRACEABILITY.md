@@ -6,56 +6,61 @@ Issue #66 is a causally executed evidence-integrity defect on artifact-analysis 
 
 Exact RED head `4b0a192c6ed6251e434819e2066807b377801356` executed on native CI run `34038409956`. Verify job `101500613351` checked out the exact head, passed formatting, repository policy and preceding tests, then failed in `tests/artifact_analysis_job_identity_binding_red.rs` at `analysis_job_id_must_bind_identity_bearing_receipt_inputs` with `changing request_id without changing analysis_job_id must invalidate the receipt`. This is the intended stale-job-identity cause. Hosted negative rootless/AppArmor passed on the same RED run; positive-LSM remains an independent capability gate.
 
-Production candidate `69f2a6f65eb9f5141ade1dbaf837ec67076c6597` introduced the semantic receipt boundary. `36aead6d6700208a0c6a3dc8962d3739a7071cf3` kept the public receipt shape explicit instead of exposing the private raw wire type. Contract-fixture repairs `5244f21523794db7f080af5c8e49f1e91fa214ea` and `51617260bb3e7ea5e15da7c1d46fddd0d4527187` moved legacy hand-built fixtures onto production-generated valid receipts.
-
-Current-head review then found that the receipt-visible digest selected the first `PolicyBoundary` record while the inherited v1 wire contract still permits duplicate foundation evidence. A reconstructed receipt could therefore retain the original policy record first, append a contradictory second `PolicyBoundary`, and keep the old job identifier. Test commit `df54494d51520b860b32b1fae78b9226e90be859` makes that ambiguity executable; minimal repair `38e6169ec6d01251ec04a4596c76dc0110dcf3b1` requires exactly one `PolicyBoundary` as the policy-identity source. This is semantic unambiguity, not trusted origin, and does not promote mutable `producer_id` to provenance. The candidate is not GREEN authority until exact-head verify, coverage, and branch coverage execute successfully.
+Production lineage `69f2a6f65eb9f5141ade1dbaf837ec67076c6597` through `a03b1b0aa72b6ecbdcc4ce672d5c2d9cefd5ddb2` established a semantic receipt boundary and then closed ambiguous duplicate `PolicyBoundary` selection. Review of that candidate found a separate compatibility defect: it changed the public meaning of `analysis_job_id` while continuing to publish the evidence contract as `1.0.0`, contrary to the live TRD and consumer-contract version rules. Commit `c53249b4ff884903800c08cc6d5aa5e999cc3b80` repairs that compatibility finding by preserving `analysis_job_id` as the existing opaque deterministic correlation identifier and introducing required `analysis_job_identity_sha256` evidence in artifact-analysis evidence schema `1.1.0`.
 
 ## Problem and contract authority
 
 The runtime's internal `deterministic_job_id()` hashes `request_id`, requested profile, artifact SHA-256, policy ID, runtime source revision, and configured analyzer IDs. The TRD requires deterministic evidence identity for the same request/configuration/bytes. Before #66, the public validator checked `analysis_job_id` only as bounded text, so a deserialized receipt could keep a stale identifier while changing receipt-visible identity fields.
 
-`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to its enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID truthful. #58/#59 binds duplicated artifact-subject representations; #62/#63 binds duplicated runtime-boundary facts; #64/#65 owns foundation-record cardinality; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics. #66 only consumes the minimum cardinality needed to make its policy hash input unambiguous; #64/#65 still owns the complete canonical foundation-set invariant for `ArtifactIdentity`, bundled `FileFormat`, and `PolicyBoundary`.
+A same-version rewrite of `analysis_job_id` into a new composite format is not an acceptable repair. The consumer contract says a field-meaning change requires a new major contract version, while a minor revision may add required security evidence for that revision. #66 therefore uses the additive minor-version route: v1.0 keeps its opaque job identifier semantics; v1.1 adds an explicit digest field that binds that identifier to receipt-visible identity inputs.
+
+`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to its enclosing job ID and sequence. Canonical record IDs do not make the enclosing job identity truthful. #58/#59 binds duplicated artifact-subject representations; #62/#63 binds duplicated runtime-boundary facts; #64/#65 owns foundation-record cardinality; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics. #66 consumes only the minimum policy-boundary uniqueness needed to make its policy hash input unambiguous; #64/#65 still owns the complete canonical foundation-set invariant for `ArtifactIdentity`, bundled `FileFormat`, and `PolicyBoundary`.
 
 ## DDD ownership
 
 `artifact_analysis` owns deterministic analysis-job identity, normalized evidence identity, artifact subject identity, runtime policy attribution inside the receipt, and receipt-integrity validation. `sandbox_execution` owns worker/runtime isolation and lifecycle evidence. Stable analyzer provenance remains #54/#55 and must not be replaced with mutable `producer_id` display strings.
 
-The repair therefore uses a public artifact-analysis anti-corruption boundary: private runtime assembly may retain its current analyzer-sensitive correlation identifier, while the public receipt publishes a semantically verifiable identity derived from receipt-visible fields.
+The public artifact-analysis boundary therefore separates the private v1.0-compatible assembly model from the published evidence revision. Request schema `1.0.0` remains unchanged. Evidence schema `1.1.0` is a deliberate consumer upgrade and carries the additional identity-binding evidence.
 
 ## Causal GREEN design
 
-For generated receipts, the public job identifier is:
+EvidenceBundle `1.1.0` preserves the existing `analysis_job_id` value and adds required field:
 
-`analysis_job_<receipt_identity_sha256>_<legacy_analyzer_sensitive_suffix>`
+`analysis_job_identity_sha256`
 
-where `receipt_identity_sha256` is the full lower-case SHA-256 of these UTF-8 components in order, with one NUL byte after every component:
+The field is the full lower-case SHA-256 of these UTF-8 components in order, with one NUL byte after every component:
 
-1. `request_id`;
-2. `runtime.requested_profile.as_str()`;
-3. `artifact.artifact_sha256`;
-4. the single unambiguous `PolicyBoundary.attributes["policy_id"]`;
-5. `runtime.source_revision`.
+1. `analysis_job_id`;
+2. `request_id`;
+3. `runtime.requested_profile.as_str()`;
+4. `artifact.artifact_sha256`;
+5. the single unambiguous `PolicyBoundary.attributes["policy_id"]`;
+6. `runtime.source_revision`.
 
-The trailing 32-hex suffix preserves the runtime's existing analyzer-sensitive deterministic correlation. It is syntax-checked but is not promoted to trusted provenance. #54/#55 remains responsible for a stable versioned analyzer identity/attestation contract.
+Including `analysis_job_id` means the companion digest detects a stale or substituted job identifier without redefining that identifier's v1.0 format. The job identifier continues to carry the runtime's analyzer-sensitive deterministic correlation, but the digest does not make the analyzer list independently verifiable. #54/#55 remains responsible for stable versioned analyzer identity/attestation.
 
-Generated `EvidenceRecord.evidence_id` values are rewritten against the published composite job ID so the public receipt remains internally referentially consistent. `EvidenceBundle::validate()` first applies the inherited `1.0.0` structural wire checks and then recomputes the receipt-visible digest. Missing or duplicated policy boundaries, missing policy identity, malformed composite job identity, or a digest contradiction fail closed.
+Generated `EvidenceRecord.evidence_id` values remain unchanged and continue to reference the legacy-format `analysis_job_id`; #60/#61 separately owns their referential validation. Public `EvidenceBundle::validate()` requires schema `1.1.0`, validates the inherited structural fields through the private v1.0 assembly contract, requires exactly one `PolicyBoundary` as the policy-identity source, validates the new digest as 64 lower-case hex, recomputes it, and fails closed on contradiction.
 
-The repair does not claim authentication. A party able to rewrite the entire receipt and recompute an unsigned digest can still construct a self-consistent receipt. Signed/attested provenance, immutable worker identity, and analyzer provenance remain separate release gates. This control closes stale-field contradiction; it does not substitute for provenance authenticity.
+The repair does not claim authentication. A party able to rewrite the entire unsigned receipt and recompute the digest can still construct a self-consistent receipt. Signed/attested provenance, immutable worker identity, and analyzer provenance remain separate release gates. This control closes stale-field contradiction; it does not substitute for provenance authenticity.
 
-The JSON Schema remains the structural `1.0.0` wire schema. Draft 2020-12 cannot recompute SHA-256 over multiple fields, so the semantic cross-field binding is enforced by the Rust public validator rather than represented as a misleading regex. The composite identifier remains within the existing 128-byte bounded string contract, preserving the schema's opaque identifier compatibility.
+JSON Schema Draft 2020-12 can require the new digest field and its canonical SHA-256 syntax but cannot recompute it across fields. `schemas/evidence-bundle.schema.json` and immutable snapshot `schemas/evidence-bundle-1.1.0.schema.json` therefore describe the v1.1 structural contract, while the Rust validator owns cross-field equivalence. The prior v1.0 schema is preserved byte-for-byte at `schemas/evidence-bundle-1.0.0.schema.json`; it is not silently rewritten into the new semantics.
 
-## RED acceptance retained
+## RED and compatibility acceptance
 
 `tests/artifact_analysis_job_identity_binding_red.rs` requires:
 
-- an untouched `StaticOnly` control receipt to remain valid;
-- changing only `request_id` while preserving the old job/evidence IDs to fail closed;
-- changing top-level artifact SHA-256 and nested `ArtifactIdentity.artifact_sha256` together to one alternate valid digest, while preserving the old job ID, to fail closed without relying on #58/#59;
-- changing runtime-owned `PolicyBoundary.attributes["policy_id"]` while preserving the old job ID to fail closed;
+- an untouched `StaticOnly` control receipt to remain valid as evidence schema `1.1.0`;
+- changing `analysis_job_id` while retaining the old companion digest to fail closed;
+- changing only `request_id` while retaining the old identity evidence to fail closed;
+- changing top-level artifact SHA-256 and nested `ArtifactIdentity.artifact_sha256` together to one alternate valid digest, while retaining the old identity evidence, to fail closed without relying on #58/#59;
+- changing runtime-owned `PolicyBoundary.attributes["policy_id"]` while retaining the old identity evidence to fail closed;
 - removing the policy identity or introducing a second contradictory `PolicyBoundary` to fail closed rather than selecting one record by order;
-- changing `RuntimeManifest.source_revision` while preserving the old job ID to fail closed.
+- changing `RuntimeManifest.source_revision` while retaining the old identity evidence to fail closed;
+- malformed `analysis_job_identity_sha256` values to fail closed;
+- the current and immutable v1.1 JSON Schemas to agree, while the archived v1.0 schema remains explicitly `1.0.0` and lacks the new required field;
+- feeding a v1.0 schema version into the v1.1 Rust evidence validator to fail explicitly as an unsupported revision rather than silently applying v1.1 semantics.
 
-Requested profile mutation remains outside this focused RED because #52/#53 owns profile/completeness semantics. Analyzer display-ID mutation remains outside because #54/#55 owns stable analyzer provenance.
+Requested-profile mutation remains outside this focused RED because #52/#53 owns profile/completeness semantics. Analyzer display-ID mutation remains outside because #54/#55 owns stable analyzer provenance.
 
 ## Evidence basis
 
@@ -71,4 +76,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Release effect
 
-No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/policy/runtime fields can contradict its published deterministic job identity, or while the policy identity used for that digest is ambiguous. Exact-head GREEN for #66 is still required. A GREEN here does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
+No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/policy/runtime fields can contradict its published job identity evidence, while the policy identity used for that digest is ambiguous, or while a consumer can mistake the v1.1 semantics for v1.0. Exact-head GREEN for #66 is still required. A GREEN here does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.

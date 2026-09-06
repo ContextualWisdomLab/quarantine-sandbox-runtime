@@ -8,7 +8,8 @@ The first release candidate carries independently versioned wire contracts rathe
 
 | Contract | Current schema |
 | --- | --- |
-| Artifact analysis request/evidence | `1.0.0` |
+| Artifact analysis request | `1.0.0` |
+| Artifact analysis evidence | `1.1.0` |
 | Application-service request | `1.0.0` |
 | Isolation policy | `1.0.0` |
 | Application-service lease | `1.2.0` |
@@ -17,7 +18,7 @@ The first release candidate carries independently versioned wire contracts rathe
 | Command-execution result | `1.0.0` |
 | Release evidence manifest | `1.0.0` |
 
-All public JSON Schemas use Draft 2020-12 and reject unknown top-level fields. A consumer therefore validates an exact schema version it explicitly supports; it must not infer compatibility from the repository package version or silently coerce an unknown contract revision. A breaking field removal, meaning change, or relaxation requires a new major contract version. A minor contract revision may add security evidence that is required for that revision, as the application-service lease `1.2.0` did for backend version and effective seccomp/LSM/resource-control state. Strict consumers upgrade deliberately rather than treating that addition as wire-compatible with `1.1.0`.
+All public JSON Schemas use Draft 2020-12 and reject unknown top-level fields. A consumer therefore validates an exact schema version it explicitly supports; it must not infer compatibility from the repository package version or silently coerce an unknown contract revision. A breaking field removal, meaning change, or relaxation requires a new major contract version. A minor contract revision may add security evidence that is required for that revision, as the application-service lease `1.2.0` did for backend version and effective seccomp/LSM/resource-control state and artifact-analysis evidence `1.1.0` does for job-identity binding evidence. Strict consumers upgrade deliberately rather than treating those additions as wire-compatible with earlier revisions.
 
 The runtime may preserve multiple schema readers/writers in a future transport, but version negotiation must be explicit and bounded. Unsupported versions fail closed with stable transport-level error codes when a transport exists.
 
@@ -26,10 +27,12 @@ The runtime may preserve multiple schema readers/writers in a future transport, 
 A security or ingestion consumer submits:
 
 - artifact bytes it already possesses;
-- versioned `AnalysisRequest`;
+- versioned `AnalysisRequest` schema `1.0.0`;
 - optional closed `bounded_source_context` only for non-secret correlation metadata.
 
-The runtime returns a versioned `EvidenceBundle`. `RuntimeDisposition` describes analysis completeness only. `consumer_verdict_required` remains true. The consumer decides maliciousness, incident state, quarantine/block/allow/review, notification, and retention.
+The runtime returns `EvidenceBundle` schema `1.1.0`. The v1.1 evidence revision preserves `analysis_job_id` as the opaque deterministic correlation identifier used by v1.0 and adds required `analysis_job_identity_sha256`. That companion SHA-256 binds the published job ID to receipt-visible request ID, requested profile, artifact SHA-256, one unambiguous runtime policy ID, and runtime source revision. JSON Schema validates the digest shape; the Rust validator recomputes cross-field equality. The archived v1.0 evidence schema remains available as `schemas/evidence-bundle-1.0.0.schema.json` for compatibility inspection, while the current and versioned v1.1 schemas are `schemas/evidence-bundle.schema.json` and `schemas/evidence-bundle-1.1.0.schema.json`.
+
+The companion digest is self-consistency evidence, not producer authentication. A party able to rewrite the entire unsigned receipt can recompute it; consumers must not treat it as a substitute for signed provenance, immutable worker identity, or stable analyzer attestation. `RuntimeDisposition` describes analysis completeness only. `consumer_verdict_required` remains true. The consumer decides maliciousness, incident state, quarantine/block/allow/review, notification, and retention.
 
 Artifact-analysis output is risk evidence. A hash, static finding, dynamic trace, or analyzer score is not authoritative truth about the binary/application and must not be projected as an authoritative Enterprise Architecture fact.
 

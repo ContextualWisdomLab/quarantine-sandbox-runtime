@@ -8,6 +8,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Added
 
+- Artifact-analysis evidence schema `1.1.0` adds required `analysis_job_identity_sha256` security evidence while preserving the v1.0 opaque `analysis_job_id` semantics. Immutable `1.0.0` and `1.1.0` schema snapshots are retained alongside the current schema.
 - Bounded command-execution contract (`CommandExecutionRequest`/`CommandExecutionResult`/
   `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
   consumer that needs to run one command to completion and receive a structured exit status plus
@@ -51,6 +52,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Changed
 
+- Artifact-analysis job identity validation now uses the additive evidence `1.1.0` contract rather than redefining `analysis_job_id` under `1.0.0`. The companion digest binds the opaque job ID to request/profile/artifact/policy/runtime identity while leaving analyzer provenance to its own contract.
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.
 - Artifact-analysis implementation moved from generic crate-root files into `src/artifact_analysis/` to match the accepted DDD bounded context while preserving the public crate facade.
 - Rootless Podman implementation moved from the Core `sandbox_execution` path into `src/infrastructure/`; the Core no longer depends on `application_service` error types.
@@ -69,11 +71,13 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Fixed
 
+- Artifact-analysis receipts with stale job identity evidence now fail closed when the job ID, request ID, artifact subject, runtime policy ID, or runtime source revision changes. Missing or duplicated policy-boundary identity also fails closed instead of being selected by record order.
 - `production_source_has_no_panic_shortcuts` (`tests/ddd_architecture.rs`) excludes each source file's own `#[cfg(test)] mod tests` block before scanning for `.unwrap(`/`.expect(`/`panic!(` so legitimate test-only assertions are not classified as production shortcuts.
 - Podman inspection/process parsing accepts explicit JSON `null` capability fields, accepts the `io.podman.annotations.userns` annotation as effective user-namespace evidence when `HostConfig.UsernsMode` is empty, and strips a trailing NUL from `/proc/<pid>/attr/current`-derived LSM labels. These compatibility repairs affect the shared application-service verification path as well as command execution.
 
 ### Security
 
+- Artifact-analysis evidence `1.1.0` rejects malformed or contradictory `analysis_job_identity_sha256` values and keeps v1.0 schema semantics archived rather than silently tightening them under the old version number.
 - Duplicate or malformed analyzer identifiers fail engine construction.
 - Universal Mach-O headers are structurally bounded so Java class magic is not treated as Mach-O by signature alone.
 - Unsupported dynamic profiles and analyzer failures remain explicitly inconclusive.
