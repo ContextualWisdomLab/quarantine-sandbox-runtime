@@ -26,16 +26,16 @@ The PRD requires attributable evidence and an auditor-verifiable execution ident
 
 ## RED
 
-Test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`.
+Initial test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`. Review-hardening commit `87f579311e992a5815e7887e83e050598d23902d` closes a false-GREEN in that RED by additionally requiring identical analyzer configuration and identical input to retain identical job identity and semantic evidence across independent engine instances. Distinguishing analyzers by process-local randomness would make the first inequality pass while violating the TRD determinism contract, so randomness is now rejected by executable regression rather than documentation alone.
 
 The fixture constructs two otherwise-identical `StaticOnly` engines with the same request, artifact bytes, policy ID, runtime source revision, and analyzer ID. The two analyzer implementations deliberately emit different valid `StaticCapability` evidence. Current production should produce the same `analysis_job_id` because the analyzer implementation is not an input to deterministic identity.
 
 The RED permits two future outcomes:
 
 1. fail closed before execution when stable analyzer provenance is unavailable; or
-2. admit both analyzers only when a stable versioned provenance identity makes their deterministic job identities distinct.
+2. admit both analyzers only when a stable versioned provenance identity makes their deterministic job identities distinct while repeated identical provenance/input remains stable.
 
-The RED rejects asymmetric admission and rejects different evidence under one identical job identity.
+The RED rejects asymmetric admission, random/non-repeatable identity, and different evidence under one identical job identity.
 
 ## Alternatives
 
@@ -49,7 +49,7 @@ Rejected. Runtime source revision and analyzer source/package/configuration are 
 
 ### Derive identity from Rust `TypeId`, pointer/address, process-local randomness, or source paths
 
-Rejected. Those values are not stable auditable supply-chain provenance across builds/processes and do not establish an immutable analyzer artifact/configuration.
+Rejected. Those values are not stable auditable supply-chain provenance across builds/processes and do not establish an immutable analyzer artifact/configuration. The hardened RED also requires repeated identical configuration/input to retain identical identity, so random salting cannot satisfy the contract.
 
 ### Versioned analyzer provenance identity
 
@@ -57,12 +57,13 @@ Selected direction after causal RED. `artifact_analysis` should own a stable pro
 
 ## Smallest causal GREEN
 
-After `06ee0a...` executes for the intended collision:
+After the hardened RED executes for the intended collision:
 
 - introduce an explicit analyzer provenance contract rather than inferring executable identity from a display ID;
 - validate provenance before analyzer/worker invocation;
 - bind provenance into deterministic job identity and attributable evidence;
 - preserve analyzer provenance across serialization so the consumer can verify which analyzer semantics produced the evidence;
+- keep repeated identical provenance/request/artifact/policy/runtime inputs deterministic across process/engine instances;
 - keep request/artifact/policy/runtime identity and analyzer identity as separate fields even when all participate in a digest;
 - version the JSON/Rust contract if the existing `1.0.0` wire semantics cannot be extended compatibly;
 - keep #49 capability isolation, #50 bounded result transport, and #52 truthful dynamic execution as independent gates.
@@ -89,7 +90,7 @@ request/profile
 
 Before analyzer provenance can support an immutable release claim, one unchanged integrated protected candidate must prove:
 
-- causal RED then focused/full GREEN for the provenance collision;
+- causal RED then focused/full GREEN for the provenance collision and deterministic-repeat guard;
 - exact analyzer package/artifact digest and approved configuration bound to the worker invocation;
 - exact worker isolation evidence from #49 and bounded result ingestion from #50;
 - truthful dynamic execution semantics from #52 where applicable;
