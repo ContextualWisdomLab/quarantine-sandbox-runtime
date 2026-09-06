@@ -256,9 +256,7 @@ fn is_lowercase_hex(value: &str, exact_len: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn validate_repository_relative_path(
-    value: &str,
-) -> Result<(), ClaudePluginPackageContractError> {
+fn validate_repository_relative_path(value: &str) -> Result<(), ClaudePluginPackageContractError> {
     if value.is_empty()
         || value.len() > MAX_PATH_BYTES
         || value.starts_with('/')
@@ -282,9 +280,7 @@ fn validate_repository_relative_path(
     Ok(())
 }
 
-fn validate_probe_codes(
-    probe_codes: &[String],
-) -> Result<(), ClaudePluginPackageContractError> {
+fn validate_probe_codes(probe_codes: &[String]) -> Result<(), ClaudePluginPackageContractError> {
     if probe_codes.is_empty() || probe_codes.len() > MAX_PROBE_COUNT {
         return Err(ClaudePluginPackageContractError::InvalidProbeSet);
     }
