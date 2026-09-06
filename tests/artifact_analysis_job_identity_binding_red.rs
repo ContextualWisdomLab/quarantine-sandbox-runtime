@@ -49,9 +49,7 @@ fn append_policy_boundary(
     bundle.evidence.push(additional);
 }
 
-fn recompute_published_identity_digest(
-    bundle: &mut quarantine_sandbox_runtime::EvidenceBundle,
-) {
+fn recompute_published_identity_digest(bundle: &mut quarantine_sandbox_runtime::EvidenceBundle) {
     let policy_id = bundle
         .evidence
         .iter()
@@ -182,8 +180,7 @@ fn recomputable_companion_digest_must_not_make_stale_job_id_self_verifying() {
 
     assert_eq!(reconstructed.analysis_job_id, original_job_id);
     assert_ne!(
-        reconstructed.analysis_job_identity_sha256,
-        original_identity,
+        reconstructed.analysis_job_identity_sha256, original_identity,
         "the hostile reconstruction must recompute the published companion digest"
     );
     assert!(
