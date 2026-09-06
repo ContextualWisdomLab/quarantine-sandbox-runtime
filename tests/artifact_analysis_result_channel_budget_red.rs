@@ -10,8 +10,9 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisEngine, AnalysisProfile, AnalysisRequest, AnalyzerFailure, AnalyzerFinding,
-    EvidenceKind, IngestedArtifact, IngestionPolicy, RuntimeDisposition, StaticAnalyzer,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, EvidenceKind, IngestedArtifact, IngestionPolicy, RuntimeDisposition,
+    StaticAnalyzer,
 };
 
 const DECLARED_PROFILE_OUTPUT_BUDGET_BYTES: usize = 65_536;
@@ -63,9 +64,13 @@ fn analyzer_result_amplification_cannot_complete_past_declared_profile_budget() 
     let result = engine.analyze_bytes(&request, b"purpose-built-safe-fixture");
 
     match result {
+        Err(AnalysisError::IsolatedAnalyzerWorkerRequired) => panic!(
+            "#49's fail-closed isolation prerequisite is not #50 result-channel GREEN; this RED must remain blocked until the analyzer can execute behind the isolated-worker port"
+        ),
         Err(_) => {
-            // Fail-closed rejection is an acceptable future GREEN once the
-            // versioned profile budget is bound to the worker/result channel.
+            // Fail-closed rejection is an acceptable future GREEN only after
+            // the worker/result-channel path exists and rejects this invocation
+            // for its bounded-ingestion contract rather than for missing isolation.
         }
         Ok(bundle) => {
             let serialized = serde_json::to_vec(&bundle).expect("evidence bundle serializes");
