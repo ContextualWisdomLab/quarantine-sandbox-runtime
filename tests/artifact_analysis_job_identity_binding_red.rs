@@ -4,6 +4,7 @@ use quarantine_sandbox_runtime::{
     AnalysisEngine, AnalysisProfile, AnalysisRequest, EVIDENCE_BUNDLE_SCHEMA_VERSION, EvidenceKind,
 };
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 fn static_request() -> AnalysisRequest {
     AnalysisRequest {
@@ -46,6 +47,41 @@ fn append_policy_boundary(
         bundle.analysis_job_id, additional.sequence_number
     );
     bundle.evidence.push(additional);
+}
+
+fn recompute_published_identity_digest(
+    bundle: &mut quarantine_sandbox_runtime::EvidenceBundle,
+) {
+    let policy_id = bundle
+        .evidence
+        .iter()
+        .filter(|record| {
+            record.evidence_kind == EvidenceKind::PolicyBoundary
+                && record.attributes.contains_key("policy_id")
+        })
+        .map(|record| {
+            record
+                .attributes
+                .get("policy_id")
+                .expect("filtered policy identity source must contain policy_id")
+                .as_str()
+        })
+        .next()
+        .expect("control bundle must contain a policy identity source");
+
+    let mut hasher = Sha256::new();
+    for component in [
+        bundle.analysis_job_id.as_str(),
+        bundle.request_id.as_str(),
+        bundle.runtime.requested_profile.as_str(),
+        bundle.artifact.artifact_sha256.as_str(),
+        policy_id,
+        bundle.runtime.source_revision.as_str(),
+    ] {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    bundle.analysis_job_identity_sha256 = format!("{:x}", hasher.finalize());
 }
 
 #[test]
@@ -131,6 +167,28 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
     assert!(
         revision_tampered.validate().is_err(),
         "changing runtime source_revision without changing job identity evidence must invalidate the receipt"
+    );
+}
+
+#[test]
+fn recomputable_companion_digest_must_not_make_stale_job_id_self_verifying() {
+    let bundle = control_bundle();
+    let original_job_id = bundle.analysis_job_id.clone();
+    let original_identity = bundle.analysis_job_identity_sha256.clone();
+
+    let mut reconstructed = bundle;
+    reconstructed.request_id = "job_identity_binding_reconstructed_request".to_owned();
+    recompute_published_identity_digest(&mut reconstructed);
+
+    assert_eq!(reconstructed.analysis_job_id, original_job_id);
+    assert_ne!(
+        reconstructed.analysis_job_identity_sha256,
+        original_identity,
+        "the hostile reconstruction must recompute the published companion digest"
+    );
+    assert!(
+        reconstructed.validate().is_err(),
+        "a recomputable unsigned companion digest must not make a stale opaque analysis_job_id self-verifiable"
     );
 }
 
