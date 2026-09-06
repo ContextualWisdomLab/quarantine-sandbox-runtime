@@ -31,10 +31,14 @@ Port-level GREEN still does not complete #49 or ADR-0009. A later adapter must p
 
 ## Standards and research
 
-NIST SP 800-190 remains the final NIST application-container security guide. It treats container isolation and runtime controls as security mechanisms rather than software-interface conventions. The Open Container Initiative released Runtime Specification v1.3.0 on 2025-11-04; it remains the latest listed OCI runtime-spec release as of this review. These sources justify a backend-neutral execution contract plus concrete runtime enforcement, but neither source makes a particular adapter sufficient without observed evidence.
+NIST SP 800-190 remains the current NIST application-container security guide. It treats container isolation and runtime controls as security mechanisms rather than software-interface conventions. The Open Container Initiative released Runtime Specification v1.3.0 on 2025-11-04, and the OCI release index still lists v1.3.0 as the latest runtime-spec release as of 2026-09-07. These sources justify a backend-neutral execution contract plus concrete runtime enforcement, but neither source makes a particular adapter sufficient without observed evidence.
+
+Peer-reviewed systems research supports the same evidence boundary. Van't Hof and Nieh (2022) show that conventional containers rely on the operating system to enforce isolation and introduce a smaller security monitor specifically to strengthen that trust boundary. The relevance here is not that BlackBox is the selected backend; it is that an API declaration or worker self-report cannot substitute for enforcement at the actual isolation boundary. Consequently, #69 keeps request/receipt consistency separate from #49/ADR-0009 effective-runtime proof.
 
 ### References
 
 Open Container Initiative. (2025, November 4). *OCI runtime-spec v. 1.3.0 release notice*. https://opencontainers.org/release-notices/v1-3-0-runtime-spec/
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
+
+Van't Hof, A., & Nieh, J. (2022). BlackBox: A container security monitor for protecting containers on untrusted operating systems. In *16th USENIX Symposium on Operating Systems Design and Implementation (OSDI 22)* (pp. 683–700). USENIX Association. https://www.usenix.org/conference/osdi22/presentation/vant-hof
