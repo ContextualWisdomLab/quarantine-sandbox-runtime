@@ -108,7 +108,10 @@ fn failed_create_with_owned_cidfile_receipt_is_cleaned_by_exact_id() {
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| {
-        line.starts_with("create --name ") && line.split_whitespace().any(|arg| arg.starts_with("--cidfile="))
+        line.starts_with("create --name ")
+            && line
+                .split_whitespace()
+                .any(|arg| arg.starts_with("--cidfile="))
     }));
     assert!(
         calls
@@ -143,13 +146,78 @@ fn cleanup_failure_for_owned_failed_create_surfaces_leak_risk() {
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| {
-        line.starts_with("create --name ") && line.split_whitespace().any(|arg| arg.starts_with("--cidfile="))
+        line.starts_with("create --name ")
+            && line
+                .split_whitespace()
+                .any(|arg| arg.starts_with("--cidfile="))
     }));
     assert!(
         calls
             .lines()
             .any(|line| line == format!("rm --force --ignore {OWNED_CONTAINER_ID}"))
     );
+    assert!(!calls.lines().any(|line| line.starts_with("start ")));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(call_log);
+}
+
+#[test]
+fn malformed_failed_create_receipt_fails_closed_without_name_cleanup() {
+    let call_log = temporary_path("malformed-receipt-call-log");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; printf '%s\\n' 'not-an-owned-container-id' > \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
+        call_log.display(),
+        security_info_json(),
+    );
+    let program = write_executable("fake-podman-malformed-receipt", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let error = adapter
+        .run_command_at(&request(), &policy(), 1_780_000_004)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create_receipt",
+            }
+        )
+    );
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(calls.lines().any(|line| line.starts_with("create --name ")));
+    assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
+    assert!(!calls.lines().any(|line| line.starts_with("start ")));
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(call_log);
+}
+
+#[test]
+fn unreadable_failed_create_receipt_fails_closed_without_name_cleanup() {
+    let call_log = temporary_path("unreadable-receipt-call-log");
+    let script = format!(
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; mkdir \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
+        call_log.display(),
+        security_info_json(),
+    );
+    let program = write_executable("fake-podman-unreadable-receipt", &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let error = adapter
+        .run_command_at(&request(), &policy(), 1_780_000_005)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "container_create_receipt",
+        })
+    );
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(calls.lines().any(|line| line.starts_with("create --name ")));
+    assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
     let _ = fs::remove_file(program);
