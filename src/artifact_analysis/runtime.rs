@@ -11,10 +11,7 @@ use crate::{
     IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
 };
 
-use super::{
-    contracts::EvidenceBundle,
-    ingestion::ingest_bytes_with_optional_name,
-};
+use super::{contracts::EvidenceBundle, ingestion::ingest_bytes_with_optional_name};
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
 
