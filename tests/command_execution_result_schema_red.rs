@@ -37,7 +37,11 @@ fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
         .iter()
         .filter(|variant| variant.get("type").and_then(Value::as_str) == Some("null"))
         .count();
-    assert_eq!(null_variants, 1, "receipt schema must admit exactly one null variant");
+    assert_eq!(
+        null_variants,
+        1,
+        "receipt schema must admit exactly one null variant"
+    );
     variants
         .iter()
         .find(|variant| variant.get("type").and_then(Value::as_str) == Some("object"))
@@ -48,7 +52,10 @@ fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
 #[test]
 fn command_result_schema_declares_optional_strict_source_artifact_receipt() {
     let schema = command_result_schema();
-    assert_eq!(schema.get("additionalProperties"), Some(&Value::Bool(false)));
+    assert_eq!(
+        schema.get("additionalProperties"),
+        Some(&Value::Bool(false))
+    );
 
     let properties = schema
         .get("properties")

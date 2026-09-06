@@ -7,10 +7,7 @@
 
 #![cfg(unix)]
 
-use std::{
-    fs,
-    os::unix::fs::MetadataExt,
-};
+use std::{fs, os::unix::fs::MetadataExt};
 
 use quarantine_sandbox_runtime::{PrSourceArtifactInput, stage_pr_source_artifact};
 use sha2::{Digest, Sha256};
