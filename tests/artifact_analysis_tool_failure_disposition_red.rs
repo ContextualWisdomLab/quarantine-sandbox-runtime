@@ -68,37 +68,148 @@ fn bundle_with_tool_failure(disposition: RuntimeDisposition) -> EvidenceBundle {
     }
 }
 
-fn logical_schema_binds_tool_failure_to_disposition(value: &Value) -> bool {
-    const LOGICAL_KEYWORDS: [&str; 10] = [
-        "if",
-        "then",
-        "else",
-        "allOf",
-        "anyOf",
-        "oneOf",
-        "not",
-        "contains",
-        "dependentSchemas",
-        "dependentRequired",
-    ];
-
-    match value {
+/// Evaluate only the Draft 2020-12 assertion/applicator vocabulary needed by
+/// this cross-field contract. Unknown annotation/format/bound keywords are
+/// deliberately ignored because the fixtures are already valid under those
+/// independent constraints; this helper exists only to prove that the checked-
+/// in logical guard actually accepts/rejects representative wire instances.
+fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
+    match schema {
+        Value::Bool(accepted) => *accepted,
         Value::Object(object) => {
-            for keyword in LOGICAL_KEYWORDS {
-                if let Some(logic) = object.get(keyword) {
-                    let rendered = logic.to_string();
-                    if rendered.contains("tool_failure") && rendered.contains("completed") {
-                        return true;
+            if let Some(expected) = object.get("const")
+                && expected != instance
+            {
+                return false;
+            }
+
+            if let Some(allowed) = object.get("enum").and_then(Value::as_array)
+                && !allowed.iter().any(|candidate| candidate == instance)
+            {
+                return false;
+            }
+
+            if let Some(required) = object.get("required").and_then(Value::as_array) {
+                let Some(instance_object) = instance.as_object() else {
+                    return false;
+                };
+                if required.iter().filter_map(Value::as_str).any(|property| {
+                    !instance_object.contains_key(property)
+                }) {
+                    return false;
+                }
+            }
+
+            if let Some(properties) = object.get("properties").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, property_schema) in properties {
+                    if let Some(property_value) = instance_object.get(property)
+                        && !relevant_schema_accepts(property_schema, property_value)
+                    {
+                        return false;
                     }
                 }
             }
-            object
-                .values()
-                .any(logical_schema_binds_tool_failure_to_disposition)
+
+            if let Some(item_schema) = object.get("items")
+                && let Some(items) = instance.as_array()
+                && items
+                    .iter()
+                    .any(|item| !relevant_schema_accepts(item_schema, item))
+            {
+                return false;
+            }
+
+            if let Some(contains_schema) = object.get("contains")
+                && let Some(items) = instance.as_array()
+                && !items
+                    .iter()
+                    .any(|item| relevant_schema_accepts(contains_schema, item))
+            {
+                return false;
+            }
+
+            if let Some(all_of) = object.get("allOf").and_then(Value::as_array)
+                && all_of
+                    .iter()
+                    .any(|subschema| !relevant_schema_accepts(subschema, instance))
+            {
+                return false;
+            }
+
+            if let Some(any_of) = object.get("anyOf").and_then(Value::as_array)
+                && !any_of
+                    .iter()
+                    .any(|subschema| relevant_schema_accepts(subschema, instance))
+            {
+                return false;
+            }
+
+            if let Some(one_of) = object.get("oneOf").and_then(Value::as_array)
+                && one_of
+                    .iter()
+                    .filter(|subschema| relevant_schema_accepts(subschema, instance))
+                    .count()
+                    != 1
+            {
+                return false;
+            }
+
+            if let Some(not_schema) = object.get("not")
+                && relevant_schema_accepts(not_schema, instance)
+            {
+                return false;
+            }
+
+            if let Some(if_schema) = object.get("if") {
+                let branch = if relevant_schema_accepts(if_schema, instance) {
+                    object.get("then")
+                } else {
+                    object.get("else")
+                };
+                if let Some(branch_schema) = branch
+                    && !relevant_schema_accepts(branch_schema, instance)
+                {
+                    return false;
+                }
+            }
+
+            if let Some(dependent_schemas) = object.get("dependentSchemas").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, dependent_schema) in dependent_schemas {
+                    if instance_object.contains_key(property)
+                        && !relevant_schema_accepts(dependent_schema, instance)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if let Some(dependent_required) =
+                object.get("dependentRequired").and_then(Value::as_object)
+                && let Some(instance_object) = instance.as_object()
+            {
+                for (property, dependencies) in dependent_required {
+                    if !instance_object.contains_key(property) {
+                        continue;
+                    }
+                    let Some(dependencies) = dependencies.as_array() else {
+                        return false;
+                    };
+                    if dependencies
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|dependency| !instance_object.contains_key(dependency))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            true
         }
-        Value::Array(items) => items
-            .iter()
-            .any(logical_schema_binds_tool_failure_to_disposition),
         _ => false,
     }
 }
@@ -123,13 +234,23 @@ fn tool_failure_evidence_cannot_claim_completed_disposition() {
 }
 
 #[test]
-fn evidence_bundle_schema_binds_tool_failure_to_non_completed_disposition() {
+fn evidence_bundle_schema_executes_tool_failure_disposition_semantics() {
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
             .expect("checked-in evidence schema must be valid JSON");
+    let inconclusive = serde_json::to_value(bundle_with_tool_failure(
+        RuntimeDisposition::Inconclusive,
+    ))
+    .expect("inconclusive fixture must serialize");
+    let completed = serde_json::to_value(bundle_with_tool_failure(RuntimeDisposition::Completed))
+        .expect("completed fixture must serialize");
 
     assert!(
-        logical_schema_binds_tool_failure_to_disposition(&schema),
-        "the wire schema needs a logical guard preventing tool_failure evidence from coexisting with completed disposition"
+        relevant_schema_accepts(&schema, &inconclusive),
+        "the wire schema must continue to admit an otherwise-valid ToolFailure + Inconclusive receipt"
+    );
+    assert!(
+        !relevant_schema_accepts(&schema, &completed),
+        "the wire schema must execute a logical guard that rejects the same receipt when disposition is Completed"
     );
 }
