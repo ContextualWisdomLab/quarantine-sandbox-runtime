@@ -38,8 +38,7 @@ fn receipt_object_schema(receipt_schema: &Value) -> &Map<String, Value> {
         .filter(|variant| variant.get("type").and_then(Value::as_str) == Some("null"))
         .count();
     assert_eq!(
-        null_variants,
-        1,
+        null_variants, 1,
         "receipt schema must admit exactly one null variant"
     );
     variants
