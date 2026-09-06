@@ -2,19 +2,19 @@
 
 ## Status
 
-Issue #66 is a RED-only evidence-integrity finding on artifact-analysis parent Draft #18 exact `994ba5fa5ceda20c622861efbff241294867dc39`. Test-bearing commit `2e60083b36c7e007844dac0cddc76883f87f9e67` adds only the hostile receipt regression; production Rust and JSON Schema remain inherited unchanged until the exact RED executes for the intended cause.
+Issue #66 is a RED-only evidence-integrity finding on artifact-analysis parent Draft #18 exact `994ba5fa5ceda20c622861efbff241294867dc39`. Initial test-bearing commit `2e60083b36c7e007844dac0cddc76883f87f9e67` added the hostile receipt regression; latest hardening `b19f467d7c3758e3373463b1ddbafe6767f0abd9` also binds the runtime policy identity that production already hashes into `analysis_job_id`. Production Rust and JSON Schema remain inherited unchanged until the exact RED executes for the intended cause.
 
 ## Problem and contract authority
 
 `AnalysisEngine::deterministic_job_id()` hashes `request_id`, requested profile, artifact SHA-256, policy ID, runtime source revision, and configured analyzer IDs. The TRD requires evidence identifiers and ordering to be deterministic for the same request/configuration/bytes. The public `EvidenceBundle` in turn labels `analysis_job_id` as the deterministic analysis-job identifier.
 
-`EvidenceBundle::validate()` does not verify any relationship between that identifier and the identity-bearing fields serialized beside it. It only validates `analysis_job_id` as bounded non-empty text. A reconstructed receipt can therefore keep the old job ID while changing request identity, artifact subject, or runtime source revision and still remain structurally acceptable.
+`EvidenceBundle::validate()` does not verify any relationship between that identifier and the identity-bearing fields serialized beside it. It only validates `analysis_job_id` as bounded non-empty text. A reconstructed receipt can therefore keep the old job ID while changing request identity, artifact subject, runtime policy identity, or runtime source revision and still remain structurally acceptable.
 
-`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to the enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID itself truthful. #58/#59 binds duplicated artifact-subject representations; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
+`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to the enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID itself truthful. #58/#59 binds duplicated artifact-subject representations; #62/#63 binds duplicated runtime-boundary booleans; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
 
 ## DDD ownership
 
-`artifact_analysis` owns deterministic analysis-job identity, normalized evidence identity, subject identity, and receipt integrity. `sandbox_execution` owns worker/runtime isolation and lifecycle evidence. Analyzer implementation provenance remains #54/#55; this issue must compose with that versioned provenance rather than treating mutable `producer_id` strings as identity authority.
+`artifact_analysis` owns deterministic analysis-job identity, normalized evidence identity, subject identity, runtime policy attribution within the receipt, and receipt integrity. `sandbox_execution` owns worker/runtime isolation and lifecycle evidence. Analyzer implementation provenance remains #54/#55; this issue must compose with that versioned provenance rather than treating mutable `producer_id` strings as identity authority.
 
 ## RED acceptance
 
@@ -23,6 +23,7 @@ Issue #66 is a RED-only evidence-integrity finding on artifact-analysis parent D
 - an untouched `StaticOnly` control receipt to remain valid;
 - changing only `request_id` while preserving the old `analysis_job_id` and evidence IDs to fail closed;
 - changing top-level artifact SHA-256 and the nested `ArtifactIdentity.artifact_sha256` together to the same alternate valid digest, while preserving the old job ID, to fail closed so #58/#59 cannot be the accidental failure cause;
+- changing `PolicyBoundary.attributes["policy_id"]` while preserving the old job ID to fail closed because production hashes that policy ID into deterministic job identity;
 - changing `RuntimeManifest.source_revision` while preserving the old job ID to fail closed.
 
 The RED intentionally does not mutate requested profile because #52/#53 already owns profile/completeness semantics. It does not mutate analyzer display IDs because #54/#55 owns stable analyzer provenance.
@@ -49,4 +50,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Release effect
 
-No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/runtime fields can change without invalidating the deterministic `analysis_job_id`. A GREEN for #66 does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
+No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/policy/runtime fields can change without invalidating the deterministic `analysis_job_id`. A GREEN for #66 does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
