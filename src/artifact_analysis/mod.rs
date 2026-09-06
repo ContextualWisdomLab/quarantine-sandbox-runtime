@@ -6,17 +6,20 @@
 //! `sandbox_execution` context through an explicit port rather than embedding
 //! container-backend details here.
 
+mod analysis_engine;
 mod contracts;
+mod evidence_bundle;
 mod ingestion;
 mod runtime;
 
+pub use analysis_engine::AnalysisEngine;
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    CONTRACT_SCHEMA_VERSION, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
-    RuntimeDisposition, RuntimeManifest,
+    CONTRACT_SCHEMA_VERSION, ContractError, EvidenceKind, EvidenceRecord, RuntimeDisposition,
+    RuntimeManifest,
 };
+pub use evidence_bundle::{EvidenceBundle, to_pretty_json};
 pub use ingestion::{IngestedArtifact, IngestionError, IngestionPolicy, ingest_bytes};
 pub use runtime::{
-    AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer,
-    StaticAnalyzer, to_pretty_json,
+    AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer, StaticAnalyzer,
 };
