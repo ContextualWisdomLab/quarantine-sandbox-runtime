@@ -10,7 +10,7 @@ Issue #66 is a RED-only evidence-integrity finding on artifact-analysis parent D
 
 `EvidenceBundle::validate()` does not verify any relationship between that identifier and the identity-bearing fields serialized beside it. It only validates `analysis_job_id` as bounded non-empty text. A reconstructed receipt can therefore keep the old job ID while changing request identity, artifact subject, or runtime source revision and still remain structurally acceptable.
 
-#60/#61 is narrower: it binds each `EvidenceRecord.evidence_id` to the enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID itself truthful. #58/#59 binds duplicated artifact-subject representations; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
+`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to the enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID itself truthful. #58/#59 binds duplicated artifact-subject representations; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
 
 ## DDD ownership
 
