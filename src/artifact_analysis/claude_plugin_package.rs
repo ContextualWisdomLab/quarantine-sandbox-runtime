@@ -256,9 +256,7 @@ fn is_lowercase_hex(value: &str, exact_len: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn validate_repository_relative_path(
-    value: &str,
-) -> Result<(), ClaudePluginPackageContractError> {
+fn validate_repository_relative_path(value: &str) -> Result<(), ClaudePluginPackageContractError> {
     if value.is_empty()
         || value.len() > MAX_PATH_BYTES
         || value.starts_with('/')
@@ -282,9 +280,7 @@ fn validate_repository_relative_path(
     Ok(())
 }
 
-fn validate_probe_codes(
-    probe_codes: &[String],
-) -> Result<(), ClaudePluginPackageContractError> {
+fn validate_probe_codes(probe_codes: &[String]) -> Result<(), ClaudePluginPackageContractError> {
     if probe_codes.is_empty() || probe_codes.len() > MAX_PROBE_COUNT {
         return Err(ClaudePluginPackageContractError::InvalidProbeSet);
     }
@@ -367,6 +363,8 @@ mod tests {
         candidate.maximum_disk_bytes = MAX_DISK_BYTES;
         candidate.maximum_output_bytes = MAX_OUTPUT_BYTES;
         candidate.maximum_wall_time = MAX_WALL_TIME_SECONDS;
+        candidate.network_policy_reference = "network_deny_v1".to_owned();
+        candidate.filesystem_policy_reference = "filesystem_ephemeral_v1".to_owned();
         assert_eq!(candidate.validate(), Ok(()));
     }
 }
