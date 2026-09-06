@@ -1,12 +1,11 @@
 //! Public artifact-analysis receipt boundary with cross-field identity verification.
 
-use std::ops::{Deref, DerefMut};
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::contracts::{
-    ContractError, EvidenceBundle as WireEvidenceBundle, EvidenceKind,
+    ArtifactDescriptor, ContractError, EvidenceBundle as WireEvidenceBundle, EvidenceKind,
+    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 
 const ANALYSIS_JOB_PREFIX: &str = "analysis_job_";
@@ -16,15 +15,32 @@ const ANALYSIS_JOB_IDENTITY_BOUNDARY: &str = "analysis_job_identity_binding";
 
 /// Validated artifact-analysis receipt exposed to consumers.
 ///
-/// The inner wire shape remains the versioned `1.0.0` contract. This boundary
-/// adds semantic validation that JSON Schema cannot express: the public job
-/// identifier contains a digest of receipt-visible request, profile, artifact,
-/// policy, and runtime-source identity. The trailing analyzer-sensitive digest
-/// remains correlation data until stable analyzer provenance is supplied by the
-/// analyzer-provenance contract.
+/// The public shape remains the versioned `1.0.0` wire contract. Semantic
+/// validation additionally binds the job identifier to receipt-visible request,
+/// profile, artifact, policy, and runtime-source identity. The trailing
+/// analyzer-sensitive digest remains correlation data until stable analyzer
+/// provenance is supplied by the analyzer-provenance contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct EvidenceBundle(WireEvidenceBundle);
+pub struct EvidenceBundle {
+    /// Contract version, currently `1.0.0`.
+    pub schema_version: String,
+    /// Deterministic analysis-job identifier with a receipt-visible identity digest.
+    pub analysis_job_id: String,
+    /// Original request identifier.
+    pub request_id: String,
+    /// Immutable artifact descriptor.
+    pub artifact: ArtifactDescriptor,
+    /// Runtime identity and boundary facts.
+    pub runtime: RuntimeManifest,
+    /// Execution completeness, not maliciousness.
+    pub disposition: RuntimeDisposition,
+    /// Always true because the consumer owns the verdict.
+    pub consumer_verdict_required: bool,
+    /// Ordered evidence records.
+    pub evidence: Vec<EvidenceRecord>,
+    /// Stable machine-readable limitations.
+    pub limitations: Vec<String>,
+}
 
 impl EvidenceBundle {
     pub(super) fn from_generated(mut wire: WireEvidenceBundle) -> Result<Self, ContractError> {
@@ -37,7 +53,7 @@ impl EvidenceBundle {
             })
             .ok_or(identity_binding_error())?
             .to_owned();
-        let receipt_identity_digest = receipt_identity_digest(&wire)?;
+        let receipt_identity_digest = receipt_identity_digest_from_wire(&wire)?;
 
         wire.analysis_job_id = format!(
             "{ANALYSIS_JOB_PREFIX}{receipt_identity_digest}_{analyzer_identity_suffix}"
@@ -49,7 +65,7 @@ impl EvidenceBundle {
             );
         }
 
-        let bundle = Self(wire);
+        let bundle = Self::from_wire(wire);
         bundle.validate()?;
         Ok(bundle)
     }
@@ -62,7 +78,7 @@ impl EvidenceBundle {
     /// the job identifier is malformed, the runtime policy identity is absent,
     /// or the embedded receipt-identity digest contradicts the receipt fields.
     pub fn validate(&self) -> Result<(), ContractError> {
-        self.0.validate()?;
+        self.to_wire().validate()?;
 
         let identifier = self
             .analysis_job_id
@@ -79,25 +95,39 @@ impl EvidenceBundle {
             return Err(identity_binding_error());
         }
 
-        if receipt_digest != receipt_identity_digest(&self.0)? {
+        if receipt_digest != receipt_identity_digest(self)? {
             return Err(identity_binding_error());
         }
 
         Ok(())
     }
-}
 
-impl Deref for EvidenceBundle {
-    type Target = WireEvidenceBundle;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    fn from_wire(wire: WireEvidenceBundle) -> Self {
+        Self {
+            schema_version: wire.schema_version,
+            analysis_job_id: wire.analysis_job_id,
+            request_id: wire.request_id,
+            artifact: wire.artifact,
+            runtime: wire.runtime,
+            disposition: wire.disposition,
+            consumer_verdict_required: wire.consumer_verdict_required,
+            evidence: wire.evidence,
+            limitations: wire.limitations,
+        }
     }
-}
 
-impl DerefMut for EvidenceBundle {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    fn to_wire(&self) -> WireEvidenceBundle {
+        WireEvidenceBundle {
+            schema_version: self.schema_version.clone(),
+            analysis_job_id: self.analysis_job_id.clone(),
+            request_id: self.request_id.clone(),
+            artifact: self.artifact.clone(),
+            runtime: self.runtime.clone(),
+            disposition: self.disposition,
+            consumer_verdict_required: self.consumer_verdict_required,
+            evidence: self.evidence.clone(),
+            limitations: self.limitations.clone(),
+        }
     }
 }
 
@@ -107,29 +137,59 @@ impl DerefMut for EvidenceBundle {
 ///
 /// Returns [`serde_json::Error`] if serialization fails.
 pub fn to_pretty_json(bundle: &EvidenceBundle) -> Result<String, serde_json::Error> {
-    super::runtime::to_pretty_json(&bundle.0)
+    super::runtime::to_pretty_json(&bundle.to_wire())
 }
 
-fn receipt_identity_digest(bundle: &WireEvidenceBundle) -> Result<String, ContractError> {
-    let policy_id = bundle
-        .evidence
-        .iter()
-        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
-        .and_then(|record| record.attributes.get("policy_id"))
-        .ok_or(identity_binding_error())?;
+fn receipt_identity_digest(bundle: &EvidenceBundle) -> Result<String, ContractError> {
+    receipt_identity_digest_components(
+        &bundle.request_id,
+        bundle.runtime.requested_profile.as_str(),
+        &bundle.artifact.artifact_sha256,
+        runtime_policy_id(&bundle.evidence)?,
+        &bundle.runtime.source_revision,
+    )
+}
 
+fn receipt_identity_digest_from_wire(
+    bundle: &WireEvidenceBundle,
+) -> Result<String, ContractError> {
+    receipt_identity_digest_components(
+        &bundle.request_id,
+        bundle.runtime.requested_profile.as_str(),
+        &bundle.artifact.artifact_sha256,
+        runtime_policy_id(&bundle.evidence)?,
+        &bundle.runtime.source_revision,
+    )
+}
+
+fn receipt_identity_digest_components(
+    request_id: &str,
+    requested_profile: &str,
+    artifact_sha256: &str,
+    policy_id: &str,
+    source_revision: &str,
+) -> Result<String, ContractError> {
     let mut hasher = Sha256::new();
     for component in [
-        bundle.request_id.as_str(),
-        bundle.runtime.requested_profile.as_str(),
-        bundle.artifact.artifact_sha256.as_str(),
-        policy_id.as_str(),
-        bundle.runtime.source_revision.as_str(),
+        request_id,
+        requested_profile,
+        artifact_sha256,
+        policy_id,
+        source_revision,
     ] {
         hasher.update(component.as_bytes());
         hasher.update([0]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn runtime_policy_id(evidence: &[EvidenceRecord]) -> Result<&str, ContractError> {
+    evidence
+        .iter()
+        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
+        .and_then(|record| record.attributes.get("policy_id"))
+        .map(String::as_str)
+        .ok_or(identity_binding_error())
 }
 
 fn is_lowercase_hex(value: &str) -> bool {
