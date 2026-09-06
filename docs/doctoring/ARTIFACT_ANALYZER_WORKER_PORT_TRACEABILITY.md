@@ -13,7 +13,8 @@ Issue #69 / Draft #70 defines the backend-neutral Analyzer Worker Execution port
 - Parent formatter repair was adopted without force push by two-parent commit `f863a8975220f85c404ba8627406eb87055b4ec0`; fresh compare resolved merge base exactly to current #18 with `behind_by=0`.
 - Security review then found that the isolation-policy SHA-256 was only syntax-checked in the receipt. The request carried no expected digest, so any well-formed lower-case digest could pass. RED hardening `4118ce0ac93766d3ba7263009faefc7352e493f7` makes the request pin the expected isolation-policy digest and requires `validate_against` to reject a different receipt digest.
 - Review of exact `cc75b4187792ffc83276be4306d4a2d01972b1cf` found a second contract false-GREEN: issue #69 says public identifiers are bounded and SHA-256 identities are immutable, but the existing RED did not reject oversized/control-bearing analyzer, policy, backend, and version text or 63-character/non-hex digests. RED hardening `a0bd5d1ce729fd2d332c32ebdd05d9577a1d191a` adds `tests/artifact_analysis_worker_identifier_contract.rs`, using the repository's existing 128-byte/control-free engine-identifier boundary and exact 64-character lower-case hexadecimal digest semantics.
-- Native CI `34058534560` belongs to predecessor `cc75b418...`; its queued state does not transfer after the identifier/digest RED moved the branch.
+- Exact `361f6359d1ffb27751a41b690d68e5763953c0e3` acquired hosted runners in native CI `34060248271`. Negative rootless/AppArmor `101559371329` passed. Verify `101559371339` passed exact checkout, dependency lock, repository-policy validation, and coverage-parser tests, then failed at `cargo fmt --check`; `cargo test` was skipped. Coverage `101559371421` and branch coverage `101559371244` also failed before the intended missing-port compile cause, while positive-LSM `101559371386` remained queued.
+- The formatter prerequisite was isolated to the newly added identifier/digest RED and repaired without production/schema semantics in `413e20579bab7e234ef6e6ef33fa926c8a5c3f6c`. A temporary branch-only rustfmt evidence workflow was introduced only to obtain tool-owned formatting evidence, then removed in `b266212a7d95eb147fd128a0a25b3cba285067cd` so it cannot become a standing source-fix workflow. Standard native CI remains the authoritative formatting/test gate.
 
 ## Contract boundary
 
@@ -25,7 +26,7 @@ A Rust trait, fake adapter, serialized receipt, requested budget, matching recei
 
 ## RED and minimum GREEN
 
-The RED intentionally references worker-port types that do not exist yet. The intended first failure is a compile-contract failure showing that ADR-0009's port has not landed. Production must not move until the current exact RED executes for the intended cause.
+The RED intentionally references worker-port types that do not exist yet. The intended first semantic failure is a compile-contract failure showing that ADR-0009's port has not landed. Production must not move until a formatted exact RED executes for that intended cause; `361f6359...` did not cross that gate because formatting failed first.
 
 After causal RED execution, the smallest GREEN is the backend-neutral port/value-object implementation and validation required by the tests, including exact request/receipt isolation-policy binding, requested/applied budget binding, bounded/control-free identifier validation, and exact lower-case SHA-256 validation. It must not wire arbitrary external analyzers back into the controller process and must not add Podman-specific types to `artifact_analysis`.
 
