@@ -7,8 +7,7 @@ use quarantine_sandbox_runtime::{
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
-const VALID_SHA256: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const VALID_SHA256: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn budget() -> AnalyzerWorkerBudget {
     AnalyzerWorkerBudget {
