@@ -130,13 +130,14 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
         .port();
     let log = fixture.path().join("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 1024 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         ready_port
     );
     let program = write_executable(fixture.path(), "cleanup-output-limit-podman", &script);
-    let adapter =
-        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(1));
+    let adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_output_limit_bytes(512)
+        .with_command_timeout(Duration::from_secs(1));
     let lease = adapter
         .launch_at(&request(&"a".repeat(64)), &policy(), 1_780_000_000)
         .expect("launch should succeed before bounded cleanup failure");

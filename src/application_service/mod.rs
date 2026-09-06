@@ -7,6 +7,10 @@ pub use command_execution::{
     CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
     CommandExecutionResult, execute_command,
 };
+// Crate-internal only: lets an infrastructure backend adapter (e.g.
+// `infrastructure::podman`) build a `CommandExecutionResult` without
+// exposing the intermediate outcome type as public API.
+pub(crate) use command_execution::CommandExecutionOutcome;
 pub use coordinator::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ExpiredLeaseCleanupResult, LeaseOwnerId,
