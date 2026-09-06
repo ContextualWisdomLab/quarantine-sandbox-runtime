@@ -60,8 +60,8 @@ Issue #60 remains independent of #49 analyzer capability isolation, #50 bounded 
 
 ## References
 
-OpenSSF. (2026). *SLSA specification v1.2: Provenance*. https://slsa.dev/spec/v1.2/provenance
+SLSA Community. (2025). *SLSA specification v1.2: Provenance*. https://slsa.dev/spec/v1.2/provenance
 
-OpenSSF. (2026). *SLSA specification v1.2: Build requirements*. https://slsa.dev/spec/v1.2/build-requirements
+SLSA Community. (2025). *SLSA specification v1.2: Build requirements*. https://slsa.dev/spec/v1.2/build-requirements
 
 Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019). in-toto: Providing farm-to-table guarantees for bits and bytes. In *28th USENIX Security Symposium (USENIX Security 19)* (pp. 1393–1410). USENIX Association. https://www.usenix.org/conference/usenixsecurity19/presentation/torres-arias
