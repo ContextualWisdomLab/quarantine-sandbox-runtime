@@ -1,4 +1,4 @@
-//! RED contract for self-verifiable analysis-job identity in artifact-analysis receipts.
+//! Contract tests for self-verifiable analysis-job identity in artifact-analysis receipts.
 
 use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
 
@@ -11,12 +11,15 @@ fn static_request() -> AnalysisRequest {
     }
 }
 
+fn control_bundle() -> quarantine_sandbox_runtime::EvidenceBundle {
+    AnalysisEngine::default()
+        .analyze_bytes(&static_request(), b"analysis-job-identity-binding-fixture")
+        .expect("static analysis must produce a valid control bundle")
+}
+
 #[test]
 fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
-    let engine = AnalysisEngine::default();
-    let bundle = engine
-        .analyze_bytes(&static_request(), b"analysis-job-identity-binding-fixture")
-        .expect("static analysis must produce a valid control bundle");
+    let bundle = control_bundle();
 
     assert_eq!(bundle.validate(), Ok(()));
     let original_job_id = bundle.analysis_job_id.clone();
@@ -68,5 +71,40 @@ fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
     assert!(
         revision_tampered.validate().is_err(),
         "changing runtime source_revision without changing analysis_job_id must invalidate the receipt"
+    );
+}
+
+#[test]
+fn analysis_job_id_rejects_malformed_binding_and_missing_policy_identity() {
+    let bundle = control_bundle();
+
+    for malformed_job_id in [
+        format!("job_{}_{}", "a".repeat(64), "b".repeat(32)),
+        format!("analysis_job_{}", "a".repeat(96)),
+        format!("analysis_job_{}_{}", "a".repeat(63), "b".repeat(32)),
+        format!("analysis_job_{}_{}", "A".repeat(64), "b".repeat(32)),
+        format!("analysis_job_{}_{}", "g".repeat(64), "b".repeat(32)),
+        format!("analysis_job_{}_{}", "a".repeat(64), "b".repeat(31)),
+        format!("analysis_job_{}_{}", "a".repeat(64), "B".repeat(32)),
+        format!("analysis_job_{}_{}", "a".repeat(64), "g".repeat(32)),
+    ] {
+        let mut malformed = bundle.clone();
+        malformed.analysis_job_id = malformed_job_id;
+        assert!(
+            malformed.validate().is_err(),
+            "malformed composite job identity must fail closed"
+        );
+    }
+
+    let mut missing_policy_identity = bundle;
+    let policy_boundary = missing_policy_identity
+        .evidence
+        .iter_mut()
+        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
+        .expect("control bundle must contain PolicyBoundary evidence");
+    policy_boundary.attributes.remove("policy_id");
+    assert!(
+        missing_policy_identity.validate().is_err(),
+        "a job identity cannot be verified without its runtime policy identity"
     );
 }
