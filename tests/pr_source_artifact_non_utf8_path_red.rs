@@ -1,3 +1,5 @@
+//! RED regression for byte-faithful non-UTF-8 Git pathname staging.
+
 #![cfg(unix)]
 
 use std::{ffi::OsString, fs, os::unix::ffi::OsStringExt};
