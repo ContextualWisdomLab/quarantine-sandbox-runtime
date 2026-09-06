@@ -445,12 +445,13 @@ impl AnalysisEngine {
 
 impl Default for AnalysisEngine {
     fn default() -> Self {
-        Self::with_bundled_static_analyzers(
-            IngestionPolicy::default(),
-            "foundation_policy_v1",
-            "development",
-        )
-        .expect("built-in analysis engine configuration must remain valid")
+        Self {
+            ingestion_policy: IngestionPolicy::default(),
+            policy_id: "foundation_policy_v1".to_owned(),
+            source_revision: "development".to_owned(),
+            analyzers: vec![Box::new(FormatAnalyzer)],
+            analyzer_execution_path: AnalyzerExecutionPath::BundledRuntime,
+        }
     }
 }
 
@@ -627,6 +628,31 @@ mod tests {
         ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
             Ok(Vec::new())
         }
+    }
+
+    #[test]
+    fn default_bundled_configuration_remains_valid() {
+        let ingestion_policy = IngestionPolicy::default();
+        let analyzers: Vec<Box<dyn StaticAnalyzer>> = vec![Box::new(FormatAnalyzer)];
+        assert_eq!(
+            AnalysisEngine::validate_configuration(
+                &ingestion_policy,
+                "foundation_policy_v1",
+                "development",
+                &analyzers,
+            ),
+            Ok(())
+        );
+
+        let engine = AnalysisEngine::default();
+        assert_eq!(engine.policy_id, "foundation_policy_v1");
+        assert_eq!(engine.source_revision, "development");
+        assert_eq!(
+            engine.analyzer_execution_path,
+            AnalyzerExecutionPath::BundledRuntime
+        );
+        assert_eq!(engine.analyzers.len(), 1);
+        assert_eq!(engine.analyzers[0].analyzer_id(), "format_analyzer");
     }
 
     #[test]
