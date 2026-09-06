@@ -1,8 +1,6 @@
 //! RED contract for binding ArtifactIdentity evidence to the top-level subject.
 
-use quarantine_sandbox_runtime::{
-    AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind,
-};
+use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
 
 fn static_request() -> AnalysisRequest {
     AnalysisRequest {
