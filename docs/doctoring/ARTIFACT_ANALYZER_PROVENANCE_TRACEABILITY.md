@@ -99,8 +99,8 @@ Before analyzer provenance can support an immutable release claim, one unchanged
 
 ## References
 
-OpenSSF. (2025). *SLSA specification: Build provenance* (Version 1.2). https://slsa.dev/spec/v1.2/build-provenance
+SLSA Community. (2025). *Build: Provenance* (SLSA Version 1.2). https://slsa.dev/spec/v1.2/build-provenance
 
-Souppaya, M., Scarfone, K., & Dodson, D. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST Special Publication 800-218). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-218
+Scarfone, K., Souppaya, M., & Dodson, D. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST Special Publication 800-218). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-218
 
 SLSA provenance distinguishes the producer/build identity and resolved inputs needed to verify how an artifact was produced. NIST SSDF PS.3.2 requires provenance data for software components to be collected, safeguarded, maintained, and updated when components change. These references support the provenance model; repository-specific RED/GREEN evidence remains the acceptance authority.
