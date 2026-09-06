@@ -1,11 +1,24 @@
 //! Coverage tests for every contract-validation propagation path.
 
-use std::collections::BTreeMap;
-
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle, EvidenceKind,
-    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
+    AnalysisEngine, AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind,
+    BoundedSourceContext, ContractError, EvidenceBundle, IngestionPolicy,
 };
+
+fn valid_request() -> AnalysisRequest {
+    AnalysisRequest {
+        schema_version: "1.0.0".to_owned(),
+        request_id: "request_coverage".to_owned(),
+        profile: AnalysisProfile::StaticOnly,
+        bounded_source_context: Some(BoundedSourceContext {
+            source_channel_code: Some("coverage_test".to_owned()),
+            original_file_name: Some("sample.bin".to_owned()),
+            declared_media_type: None,
+            host_artifact_reference: None,
+            submitted_at: None,
+        }),
+    }
+}
 
 fn valid_artifact() -> ArtifactDescriptor {
     ArtifactDescriptor {
@@ -19,32 +32,14 @@ fn valid_artifact() -> ArtifactDescriptor {
 }
 
 fn valid_bundle() -> EvidenceBundle {
-    EvidenceBundle {
-        schema_version: "1.0.0".to_owned(),
-        analysis_job_id: "analysis_job_coverage".to_owned(),
-        request_id: "request_coverage".to_owned(),
-        artifact: valid_artifact(),
-        runtime: RuntimeManifest {
-            runtime_name: "quarantine-sandbox-runtime".to_owned(),
-            runtime_version: "0.1.0".to_owned(),
-            source_revision: "revision_coverage".to_owned(),
-            requested_profile: AnalysisProfile::StaticOnly,
-            dynamic_execution_performed: false,
-            network_access_performed: false,
-            credentials_available: false,
-        },
-        disposition: RuntimeDisposition::Completed,
-        consumer_verdict_required: true,
-        evidence: vec![EvidenceRecord {
-            evidence_id: "evidence_coverage_0001".to_owned(),
-            sequence_number: 1,
-            evidence_kind: EvidenceKind::ArtifactIdentity,
-            producer_id: "runtime_core".to_owned(),
-            summary: "Artifact identity established.".to_owned(),
-            attributes: BTreeMap::new(),
-        }],
-        limitations: vec!["runtime_does_not_determine_maliciousness".to_owned()],
-    }
+    AnalysisEngine::with_bundled_static_analyzers(
+        IngestionPolicy::default(),
+        "foundation_policy_v1",
+        "revision_coverage",
+    )
+    .expect("fixture engine configuration must remain valid")
+    .analyze_bytes(&valid_request(), b"abc")
+    .expect("production-generated fixture bundle must validate")
 }
 
 #[test]

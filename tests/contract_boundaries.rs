@@ -1,11 +1,8 @@
 //! Boundary tests for hostile contract metadata and attestations.
 
-use std::collections::BTreeMap;
-
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, RuntimeDisposition,
-    RuntimeManifest,
+    AnalysisEngine, AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind,
+    BoundedSourceContext, ContractError, EvidenceBundle, IngestionPolicy,
 };
 
 fn valid_request() -> AnalysisRequest {
@@ -35,32 +32,14 @@ fn valid_artifact() -> ArtifactDescriptor {
 }
 
 fn valid_bundle() -> EvidenceBundle {
-    EvidenceBundle {
-        schema_version: "1.0.0".to_owned(),
-        analysis_job_id: "analysis_job_boundary".to_owned(),
-        request_id: "request_boundary".to_owned(),
-        artifact: valid_artifact(),
-        runtime: RuntimeManifest {
-            runtime_name: "quarantine-sandbox-runtime".to_owned(),
-            runtime_version: "0.1.0".to_owned(),
-            source_revision: "revision_boundary".to_owned(),
-            requested_profile: AnalysisProfile::StaticOnly,
-            dynamic_execution_performed: false,
-            network_access_performed: false,
-            credentials_available: false,
-        },
-        disposition: RuntimeDisposition::Completed,
-        consumer_verdict_required: true,
-        evidence: vec![EvidenceRecord {
-            evidence_id: "evidence_boundary_0001".to_owned(),
-            sequence_number: 1,
-            evidence_kind: EvidenceKind::ArtifactIdentity,
-            producer_id: "runtime_core".to_owned(),
-            summary: "Artifact identity established.".to_owned(),
-            attributes: BTreeMap::new(),
-        }],
-        limitations: vec!["runtime_does_not_determine_maliciousness".to_owned()],
-    }
+    AnalysisEngine::with_bundled_static_analyzers(
+        IngestionPolicy::default(),
+        "foundation_policy_v1",
+        "revision_boundary",
+    )
+    .expect("fixture engine configuration must remain valid")
+    .analyze_bytes(&valid_request(), b"abc")
+    .expect("production-generated fixture bundle must validate")
 }
 
 #[test]
