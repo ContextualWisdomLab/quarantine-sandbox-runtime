@@ -531,11 +531,26 @@ impl RootlessPodmanAdapter {
             started_at_epoch_seconds,
         )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
+        let create_receipt_directory = tempfile::Builder::new()
+            .prefix("qsr-command-create-")
+            .tempdir()
+            .map_err(|_| {
+                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                    operation: "container_create_receipt",
+                })
+            })?;
+        let create_receipt_path = create_receipt_directory.path().join("container-id");
+        let create_receipt_path_text = create_receipt_path.to_str().ok_or(
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            }),
+        )?;
 
         let mut create_args = vec![
             "create".to_owned(),
             "--name".to_owned(),
             sandbox_name.clone(),
+            format!("--cidfile={create_receipt_path_text}"),
             "--pull=never".to_owned(),
             "--read-only".to_owned(),
             "--read-only-tmpfs=false".to_owned(),
@@ -600,7 +615,17 @@ impl RootlessPodmanAdapter {
 
         let create_output = match self.checked_output("container_create", &create_args) {
             Ok(output) => output,
-            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error.into())),
+            Err(error) => {
+                let original = CommandExecutionError::Backend(error);
+                let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                    .map_err(CommandExecutionError::Backend)?;
+                return match owned_container_id {
+                    Some(container_id) => {
+                        Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                    }
+                    None => Err(original),
+                };
+            }
         };
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
@@ -938,10 +963,9 @@ impl RootlessPodmanAdapter {
         &self,
         sandbox_name: &str,
     ) -> Result<(), ApplicationServiceError> {
-        // `--ignore` makes cleanup idempotent: a failed create may or may not
-        // have persisted the deterministic name, and absence is also a proven
-        // leak-free terminal state. Podman documents `rm --ignore` for exactly
-        // this absent-container case.
+        // This name-based helper is retained only for post-success paths until
+        // #36 binds the complete lifecycle to the acquired long container ID.
+        // A failed create with no owned receipt must never reach this helper.
         let remove_args = [
             "rm".to_owned(),
             "--force".to_owned(),
@@ -952,6 +976,34 @@ impl RootlessPodmanAdapter {
             Ok(())
         } else {
             Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    fn cleanup_owned_command_container(
+        &self,
+        container_id: &str,
+    ) -> Result<(), ApplicationServiceError> {
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            "--ignore".to_owned(),
+            container_id.to_owned(),
+        ];
+        if self.command_succeeded(&remove_args) {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    fn cleanup_owned_command_container_or_report(
+        &self,
+        container_id: &str,
+        original: CommandExecutionError,
+    ) -> CommandExecutionError {
+        match self.cleanup_owned_command_container(container_id) {
+            Ok(()) => original,
+            Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
         }
     }
 
@@ -1411,6 +1463,31 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
         return None;
     }
     Some(identifier.to_owned())
+}
+
+fn read_command_create_receipt(path: &Path) -> Result<Option<String>, ApplicationServiceError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            });
+        }
+    };
+    let identifier = std::str::from_utf8(&bytes)
+        .ok()
+        .map(str::trim)
+        .filter(|identifier| {
+            identifier.len() == 64
+                && identifier
+                    .chars()
+                    .all(|character| matches!(character, '0'..='9' | 'a'..='f'))
+        })
+        .ok_or(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_create_receipt",
+        })?;
+    Ok(Some(identifier.to_owned()))
 }
 
 fn sandbox_identity(
