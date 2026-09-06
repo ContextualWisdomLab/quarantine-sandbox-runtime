@@ -1,0 +1,34 @@
+name: Branch rustfmt evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt-evidence:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Capture exact rustfmt delta
+        run: |
+          cargo fmt --all
+          git diff -- . ':(exclude).github/workflows/branch-rustfmt-evidence.yml' > rustfmt.patch
+          test -s rustfmt.patch
+      - name: Upload rustfmt delta
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rustfmt-patch-${{ github.event.pull_request.head.sha }}
+          path: rustfmt.patch
+          if-no-files-found: error
