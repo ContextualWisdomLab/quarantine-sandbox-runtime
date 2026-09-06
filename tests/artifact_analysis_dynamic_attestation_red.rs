@@ -9,8 +9,8 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle,
-    EvidenceKind, EvidenceRecord, RuntimeDisposition, RuntimeManifest,
+    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle, EvidenceKind,
+    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 use serde_json::Value;
 
@@ -23,9 +23,8 @@ fn dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
             artifact_name: "artifact.bin".to_owned(),
             original_file_name: None,
             artifact_size_bytes: 3,
-            artifact_sha256:
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-                    .to_owned(),
+            artifact_sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                .to_owned(),
             artifact_kind: ArtifactKind::Unknown,
         },
         runtime: RuntimeManifest {
@@ -48,8 +47,7 @@ fn dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
                 summary: "Artifact identity established.".to_owned(),
                 attributes: BTreeMap::from([(
                     "artifact_sha256".to_owned(),
-                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-                        .to_owned(),
+                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned(),
                 )]),
             },
             EvidenceRecord {
@@ -107,16 +105,17 @@ fn logical_schema_binds_dynamic_completeness(value: &Value) -> bool {
                 .values()
                 .any(logical_schema_binds_dynamic_completeness)
         }
-        Value::Array(items) => items
-            .iter()
-            .any(logical_schema_binds_dynamic_completeness),
+        Value::Array(items) => items.iter().any(logical_schema_binds_dynamic_completeness),
         _ => false,
     }
 }
 
 #[test]
 fn approved_dynamic_profiles_can_truthfully_attest_isolated_execution() {
-    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
         let bundle = dynamic_bundle(profile);
         bundle.validate().unwrap_or_else(|error| {
             panic!(
@@ -128,7 +127,10 @@ fn approved_dynamic_profiles_can_truthfully_attest_isolated_execution() {
 
 #[test]
 fn unavailable_dynamic_profiles_remain_valid_inconclusive_receipts() {
-    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
         let bundle = unavailable_dynamic_bundle(profile);
         bundle.validate().unwrap_or_else(|error| {
             panic!(
@@ -140,7 +142,10 @@ fn unavailable_dynamic_profiles_remain_valid_inconclusive_receipts() {
 
 #[test]
 fn dynamic_profile_cannot_claim_completion_when_execution_did_not_occur() {
-    for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
         let mut bundle = unavailable_dynamic_bundle(profile);
         bundle.disposition = RuntimeDisposition::Completed;
 
@@ -166,12 +171,11 @@ fn static_only_profile_still_rejects_dynamic_execution_attestation() {
 
 #[test]
 fn evidence_bundle_schema_does_not_globally_forbid_dynamic_execution() {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../schemas/evidence-bundle.schema.json"
-    ))
-    .expect("checked-in evidence schema must be valid JSON");
-    let dynamic_execution_schema = &schema["properties"]["runtime"]["properties"]
-        ["dynamic_execution_performed"];
+    let schema: Value =
+        serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
+            .expect("checked-in evidence schema must be valid JSON");
+    let dynamic_execution_schema =
+        &schema["properties"]["runtime"]["properties"]["dynamic_execution_performed"];
 
     assert_ne!(
         dynamic_execution_schema.get("const"),
@@ -182,10 +186,9 @@ fn evidence_bundle_schema_does_not_globally_forbid_dynamic_execution() {
 
 #[test]
 fn evidence_bundle_schema_cross_binds_dynamic_execution_and_completion() {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../schemas/evidence-bundle.schema.json"
-    ))
-    .expect("checked-in evidence schema must be valid JSON");
+    let schema: Value =
+        serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
+            .expect("checked-in evidence schema must be valid JSON");
 
     assert!(
         logical_schema_binds_dynamic_completeness(&schema),
