@@ -4,7 +4,8 @@
 //! ingestion (#50). The public contract already models dynamic profiles and
 //! runtime-behavior evidence, so an isolated worker must be able to attest that
 //! dynamic execution actually occurred without weakening the static-only
-//! boundary or allowing an unavailable worker to be reported as completed.
+//! boundary, allowing an unavailable worker to be reported as completed, or
+//! carrying observed runtime behavior when no dynamic execution occurred.
 
 use std::collections::BTreeMap;
 
@@ -76,11 +77,22 @@ fn unavailable_dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
     bundle
 }
 
+fn runtime_behavior_without_execution_bundle(
+    profile: AnalysisProfile,
+    disposition: RuntimeDisposition,
+) -> EvidenceBundle {
+    let mut bundle = dynamic_bundle(profile);
+    bundle.runtime.dynamic_execution_performed = false;
+    bundle.disposition = disposition;
+    bundle
+}
+
 /// Evaluate the Draft 2020-12 assertion/applicator vocabulary needed by this
 /// cross-field contract. Unrelated annotations and independent bounds are
 /// intentionally ignored; the representative fixtures already satisfy those
 /// constraints and this helper exists to execute the profile/execution/
-/// disposition logic instead of merely searching schema text for keywords.
+/// disposition/evidence-kind logic instead of merely searching schema text for
+/// keywords.
 fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
     match schema {
         Value::Bool(accepted) => *accepted,
@@ -284,6 +296,35 @@ fn static_only_profile_still_rejects_dynamic_execution_attestation() {
 }
 
 #[test]
+fn static_only_profile_cannot_carry_observed_runtime_behavior_without_execution() {
+    let bundle = runtime_behavior_without_execution_bundle(
+        AnalysisProfile::StaticOnly,
+        RuntimeDisposition::Completed,
+    );
+
+    assert!(
+        bundle.validate().is_err(),
+        "StaticOnly with execution=false must not carry RuntimeBehavior evidence; observed runtime behavior requires an actual dynamic execution boundary"
+    );
+}
+
+#[test]
+fn unavailable_dynamic_profile_cannot_carry_observed_runtime_behavior() {
+    for profile in [
+        AnalysisProfile::LinuxDynamic,
+        AnalysisProfile::WindowsDynamic,
+    ] {
+        let bundle =
+            runtime_behavior_without_execution_bundle(profile, RuntimeDisposition::Inconclusive);
+
+        assert!(
+            bundle.validate().is_err(),
+            "an unavailable dynamic worker with execution=false must not retain RuntimeBehavior evidence: profile={profile:?}"
+        );
+    }
+}
+
+#[test]
 fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
@@ -300,6 +341,10 @@ fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
         false_completion.disposition = RuntimeDisposition::Completed;
         let false_completion =
             serde_json::to_value(false_completion).expect("fixture must serialize");
+        let runtime_behavior_without_execution = serde_json::to_value(
+            runtime_behavior_without_execution_bundle(profile, RuntimeDisposition::Inconclusive),
+        )
+        .expect("fixture must serialize");
 
         assert!(
             relevant_schema_accepts(&schema, &completed),
@@ -313,6 +358,10 @@ fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
             !relevant_schema_accepts(&schema, &false_completion),
             "the wire schema must reject execution=false + Completed: profile={profile:?}"
         );
+        assert!(
+            !relevant_schema_accepts(&schema, &runtime_behavior_without_execution),
+            "the wire schema must reject RuntimeBehavior evidence when dynamic execution did not occur: profile={profile:?}"
+        );
     }
 
     let static_execution = serde_json::to_value(dynamic_bundle(AnalysisProfile::StaticOnly))
@@ -320,5 +369,15 @@ fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
     assert!(
         !relevant_schema_accepts(&schema, &static_execution),
         "the wire schema must reject StaticOnly + dynamic_execution_performed=true"
+    );
+
+    let static_runtime_behavior = serde_json::to_value(runtime_behavior_without_execution_bundle(
+        AnalysisProfile::StaticOnly,
+        RuntimeDisposition::Completed,
+    ))
+    .expect("fixture must serialize");
+    assert!(
+        !relevant_schema_accepts(&schema, &static_runtime_behavior),
+        "the wire schema must reject RuntimeBehavior evidence for StaticOnly even when dynamic_execution_performed=false"
     );
 }
