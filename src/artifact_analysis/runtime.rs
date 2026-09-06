@@ -68,10 +68,8 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine preserves a worker
     /// failure as attributable evidence once isolated worker execution is available.
-    fn analyze(
-        &self,
-        artifact: &IngestedArtifact,
-    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
+    fn analyze(&self, artifact: &IngestedArtifact)
+    -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
 
 /// Foundation analyzer that records the ingestion format classification.
@@ -556,7 +554,10 @@ mod tests {
             &self,
             _artifact: &IngestedArtifact,
         ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
-            Err(AnalyzerFailure::new("reported_failure_analyzer", "fixture_failure"))
+            Err(AnalyzerFailure::new(
+                "reported_failure_analyzer",
+                "fixture_failure",
+            ))
         }
     }
 

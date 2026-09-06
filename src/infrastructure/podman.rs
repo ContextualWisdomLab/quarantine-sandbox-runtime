@@ -540,11 +540,14 @@ impl RootlessPodmanAdapter {
                 })
             })?;
         let create_receipt_path = create_receipt_directory.path().join("container-id");
-        let create_receipt_path_text = create_receipt_path.to_str().ok_or(
-            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                operation: "container_create_receipt",
-            }),
-        )?;
+        let create_receipt_path_text =
+            create_receipt_path
+                .to_str()
+                .ok_or(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendInvocationFailed {
+                        operation: "container_create_receipt",
+                    },
+                ))?;
 
         let mut create_args = vec![
             "create".to_owned(),
