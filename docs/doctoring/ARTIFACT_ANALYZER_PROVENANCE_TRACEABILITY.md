@@ -26,16 +26,22 @@ The PRD requires attributable evidence and an auditor-verifiable execution ident
 
 ## RED
 
-Initial test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`. Review-hardening commit `87f579311e992a5815e7887e83e050598d23902d` closes a false-GREEN in that RED by additionally requiring identical analyzer configuration and identical input to retain identical job identity and semantic evidence across independent engine instances. Distinguishing analyzers by process-local randomness would make the first inequality pass while violating the TRD determinism contract, so randomness is now rejected by executable regression rather than documentation alone.
+Initial test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`. Review-hardening commit `87f579311e992a5815e7887e83e050598d23902d` closes a false-GREEN by requiring identical analyzer configuration/input to retain identical job identity and semantic evidence across independent engine instances. Commit `c32c2c489356213e70360087851b6c08df855c61` closes two additional false-GREEN paths: changing only the job digest while leaving serialized analyzer `producer_id` ambiguous, and deriving purported provenance circularly from the analyzer findings themselves.
 
-The fixture constructs two otherwise-identical `StaticOnly` engines with the same request, artifact bytes, policy ID, runtime source revision, and analyzer ID. The two analyzer implementations deliberately emit different valid `StaticCapability` evidence. Current production should produce the same `analysis_job_id` because the analyzer implementation is not an input to deterministic identity.
+The hardened fixture now has three analyzer implementations sharing one display `analyzer_id`:
+
+1. version one emits semantic result `alpha`;
+2. version two emits semantic result `beta`;
+3. version three is a distinct implementation but intentionally emits the same semantic result as version one.
+
+Current production collapses all three onto the same deterministic job input and the same serialized analyzer `producer_id`. The third fixture matters because output hashing is not provenance: two different executable/configuration identities can legitimately emit identical findings and still must remain attributable to what actually ran.
 
 The RED permits two future outcomes:
 
 1. fail closed before execution when stable analyzer provenance is unavailable; or
-2. admit both analyzers only when a stable versioned provenance identity makes their deterministic job identities distinct while repeated identical provenance/input remains stable.
+2. admit analyzers only when a stable versioned provenance identity makes materially different implementations/configurations distinct while repeated identical provenance/input remains stable.
 
-The RED rejects asymmetric admission, random/non-repeatable identity, and different evidence under one identical job identity.
+The RED rejects asymmetric admission, random/non-repeatable identity, different evidence under one identical job identity, job-only provenance that leaves serialized producer identity ambiguous, and provenance inferred from emitted findings.
 
 ## Alternatives
 
@@ -47,9 +53,13 @@ Rejected. A human-readable stable producer code is useful Ubiquitous Language bu
 
 Rejected. Runtime source revision and analyzer source/package/configuration are different authorities. Overloading one field would become false when analyzers are independently released or externally packaged.
 
+### Derive identity from findings or result digests
+
+Rejected. Evidence is an output of analyzer execution, not prior proof of which analyzer artifact/configuration was authorized and invoked. Distinct analyzers can emit identical results, and a compromised analyzer can choose outputs adversarially. Result-derived identity is therefore circular and cannot support pre-invocation admission or supply-chain attribution.
+
 ### Derive identity from Rust `TypeId`, pointer/address, process-local randomness, or source paths
 
-Rejected. Those values are not stable auditable supply-chain provenance across builds/processes and do not establish an immutable analyzer artifact/configuration. The hardened RED also requires repeated identical configuration/input to retain identical identity, so random salting cannot satisfy the contract.
+Rejected. Those values are not stable auditable supply-chain provenance across builds/processes and do not establish an immutable analyzer artifact/configuration. The hardened RED requires repeated identical configuration/input to retain identical identity, so random salting cannot satisfy the contract.
 
 ### Versioned analyzer provenance identity
 
@@ -59,9 +69,9 @@ Selected direction after causal RED. `artifact_analysis` should own a stable pro
 
 After the hardened RED executes for the intended collision:
 
-- introduce an explicit analyzer provenance contract rather than inferring executable identity from a display ID;
+- introduce an explicit analyzer provenance contract rather than inferring executable identity from a display ID or findings;
 - validate provenance before analyzer/worker invocation;
-- bind provenance into deterministic job identity and attributable evidence;
+- bind provenance into deterministic job identity and attributable serialized producer/worker evidence;
 - preserve analyzer provenance across serialization so the consumer can verify which analyzer semantics produced the evidence;
 - keep repeated identical provenance/request/artifact/policy/runtime inputs deterministic across process/engine instances;
 - keep request/artifact/policy/runtime identity and analyzer identity as separate fields even when all participate in a digest;
@@ -82,7 +92,7 @@ request/profile
     + approved analyzer configuration identity
     + exact worker/runtime provenance
         -> deterministic analysis-job identity
-        -> attributable evidence records
+        -> attributable serialized producer/worker evidence
         -> consumer-verifiable evidence bundle
 ```
 
@@ -90,8 +100,8 @@ request/profile
 
 Before analyzer provenance can support an immutable release claim, one unchanged integrated protected candidate must prove:
 
-- causal RED then focused/full GREEN for the provenance collision and deterministic-repeat guard;
-- exact analyzer package/artifact digest and approved configuration bound to the worker invocation;
+- causal RED then focused/full GREEN for provenance collision, repeat determinism, producer attribution, and same-output/different-producer guards;
+- exact analyzer package/artifact digest and approved configuration bound to the worker invocation before findings are accepted;
 - exact worker isolation evidence from #49 and bounded result ingestion from #50;
 - truthful dynamic execution semantics from #52 where applicable;
 - schema/compatibility tests for serialized provenance;
@@ -104,4 +114,4 @@ SLSA Community. (2025). *Build: Provenance* (SLSA Version 1.2). https://slsa.dev
 
 Scarfone, K., Souppaya, M., & Dodson, D. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST Special Publication 800-218). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-218
 
-SLSA provenance distinguishes the producer/build identity and resolved inputs needed to verify how an artifact was produced. NIST SSDF PS.3.2 requires provenance data for software components to be collected, safeguarded, maintained, and updated when components change. These references support the provenance model; repository-specific RED/GREEN evidence remains the acceptance authority.
+SLSA provenance distinguishes producer/build identity and resolved inputs needed to verify how an artifact was produced. NIST SSDF PS.3.2 requires provenance data for software components to be collected, safeguarded, maintained, and updated when components change. These references support the provenance model; repository-specific RED/GREEN evidence remains the acceptance authority.
