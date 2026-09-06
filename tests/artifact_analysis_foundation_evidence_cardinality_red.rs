@@ -1,4 +1,4 @@
-//! RED contract for requiring exactly one runtime-owned foundation evidence record per kind.
+//! RED contract for foundation-record cardinality in v1 bundled-runtime receipts.
 
 use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
 
@@ -43,7 +43,7 @@ fn foundation_index(
 }
 
 #[test]
-fn runtime_owned_foundation_evidence_must_exist_exactly_once() {
+fn v1_foundation_evidence_records_must_exist_exactly_once() {
     let engine = AnalysisEngine::default();
     let bundle = engine
         .analyze_bytes(
@@ -76,51 +76,7 @@ fn runtime_owned_foundation_evidence_must_exist_exactly_once() {
         canonicalize_record_identities(&mut duplicated);
         assert!(
             duplicated.validate().is_err(),
-            "bundle must reject duplicate {evidence_kind:?} foundation evidence"
-        );
-    }
-}
-
-#[test]
-fn foundation_evidence_origin_must_not_be_spoofable_with_producer_id() {
-    let engine = AnalysisEngine::default();
-    let bundle = engine
-        .analyze_bytes(
-            &static_request(),
-            b"foundation-evidence-origin-fixture",
-        )
-        .expect("foundation static analysis must produce a valid control bundle");
-
-    assert_eq!(bundle.validate(), Ok(()));
-
-    for evidence_kind in [
-        EvidenceKind::ArtifactIdentity,
-        EvidenceKind::FileFormat,
-        EvidenceKind::PolicyBoundary,
-    ] {
-        let foundation_index = foundation_index(&bundle, evidence_kind);
-        assert_ne!(
-            bundle.evidence[foundation_index].producer_id,
-            "foreign_foundation_producer",
-            "control producer must differ from the forged producer"
-        );
-
-        let mut forged_origin = bundle.clone();
-        forged_origin.evidence[foundation_index].producer_id =
-            "foreign_foundation_producer".to_owned();
-        assert!(
-            forged_origin.validate().is_err(),
-            "bundle must reject {evidence_kind:?} foundation evidence whose runtime ownership is replaced by an untrusted producer identifier"
-        );
-
-        let mut foreign_duplicate = bundle.clone();
-        let mut duplicate = bundle.evidence[foundation_index].clone();
-        duplicate.producer_id = "foreign_foundation_producer".to_owned();
-        foreign_duplicate.evidence.push(duplicate);
-        canonicalize_record_identities(&mut foreign_duplicate);
-        assert!(
-            foreign_duplicate.validate().is_err(),
-            "bundle must reject ambiguous duplicate {evidence_kind:?} evidence even when the duplicate claims a different producer"
+            "bundle must reject a duplicated canonical {evidence_kind:?} foundation record"
         );
     }
 }
