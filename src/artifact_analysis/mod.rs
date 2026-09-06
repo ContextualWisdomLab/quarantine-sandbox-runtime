@@ -18,7 +18,7 @@ pub use contracts::{
     CONTRACT_SCHEMA_VERSION, ContractError, EvidenceKind, EvidenceRecord, RuntimeDisposition,
     RuntimeManifest,
 };
-pub use evidence_bundle::{EvidenceBundle, to_pretty_json};
+pub use evidence_bundle::{EVIDENCE_BUNDLE_SCHEMA_VERSION, EvidenceBundle, to_pretty_json};
 pub use ingestion::{IngestedArtifact, IngestionError, IngestionPolicy, ingest_bytes};
 pub use runtime::{
     AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer, StaticAnalyzer,

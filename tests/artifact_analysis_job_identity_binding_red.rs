@@ -1,6 +1,9 @@
-//! Contract tests for self-verifiable analysis-job identity in artifact-analysis receipts.
+//! Contract tests for versioned, self-verifiable analysis-job identity evidence.
 
-use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
+use quarantine_sandbox_runtime::{
+    AnalysisEngine, AnalysisProfile, AnalysisRequest, EVIDENCE_BUNDLE_SCHEMA_VERSION, EvidenceKind,
+};
+use serde_json::Value;
 
 fn static_request() -> AnalysisRequest {
     AnalysisRequest {
@@ -18,18 +21,29 @@ fn control_bundle() -> quarantine_sandbox_runtime::EvidenceBundle {
 }
 
 #[test]
-fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
+fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
     let bundle = control_bundle();
 
     assert_eq!(bundle.validate(), Ok(()));
+    assert_eq!(bundle.schema_version, EVIDENCE_BUNDLE_SCHEMA_VERSION);
     let original_job_id = bundle.analysis_job_id.clone();
+    let original_identity = bundle.analysis_job_identity_sha256.clone();
+
+    let mut job_id_tampered = bundle.clone();
+    job_id_tampered.analysis_job_id = "opaque_alternate_analysis_job".to_owned();
+    assert_eq!(job_id_tampered.analysis_job_identity_sha256, original_identity);
+    assert!(
+        job_id_tampered.validate().is_err(),
+        "changing analysis_job_id without changing its identity digest must invalidate the receipt"
+    );
 
     let mut request_tampered = bundle.clone();
     request_tampered.request_id = "job_identity_binding_forged_request".to_owned();
     assert_eq!(request_tampered.analysis_job_id, original_job_id);
+    assert_eq!(request_tampered.analysis_job_identity_sha256, original_identity);
     assert!(
         request_tampered.validate().is_err(),
-        "changing request_id without changing analysis_job_id must invalidate the receipt"
+        "changing request_id without changing job identity evidence must invalidate the receipt"
     );
 
     let mut subject_tampered = bundle.clone();
@@ -45,9 +59,10 @@ fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
         .attributes
         .insert("artifact_sha256".to_owned(), alternate_sha256);
     assert_eq!(subject_tampered.analysis_job_id, original_job_id);
+    assert_eq!(subject_tampered.analysis_job_identity_sha256, original_identity);
     assert!(
         subject_tampered.validate().is_err(),
-        "changing the consistently represented artifact subject without changing analysis_job_id must invalidate the receipt"
+        "changing the consistently represented artifact subject without changing job identity evidence must invalidate the receipt"
     );
 
     let mut policy_tampered = bundle.clone();
@@ -60,39 +75,38 @@ fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
         .attributes
         .insert("policy_id".to_owned(), "forged_policy_v2".to_owned());
     assert_eq!(policy_tampered.analysis_job_id, original_job_id);
+    assert_eq!(policy_tampered.analysis_job_identity_sha256, original_identity);
     assert!(
         policy_tampered.validate().is_err(),
-        "changing the runtime policy identity without changing analysis_job_id must invalidate the receipt"
+        "changing runtime policy identity without changing job identity evidence must invalidate the receipt"
     );
 
     let mut revision_tampered = bundle.clone();
     revision_tampered.runtime.source_revision = "forged_source_revision".to_owned();
     assert_eq!(revision_tampered.analysis_job_id, original_job_id);
+    assert_eq!(revision_tampered.analysis_job_identity_sha256, original_identity);
     assert!(
         revision_tampered.validate().is_err(),
-        "changing runtime source_revision without changing analysis_job_id must invalidate the receipt"
+        "changing runtime source_revision without changing job identity evidence must invalidate the receipt"
     );
 }
 
 #[test]
-fn analysis_job_id_rejects_malformed_binding_and_ambiguous_policy_identity() {
+fn analysis_job_identity_rejects_malformed_digest_and_ambiguous_policy_identity() {
     let bundle = control_bundle();
 
-    for malformed_job_id in [
-        format!("job_{}_{}", "a".repeat(64), "b".repeat(32)),
-        format!("analysis_job_{}", "a".repeat(96)),
-        format!("analysis_job_{}_{}", "a".repeat(63), "b".repeat(32)),
-        format!("analysis_job_{}_{}", "A".repeat(64), "b".repeat(32)),
-        format!("analysis_job_{}_{}", "g".repeat(64), "b".repeat(32)),
-        format!("analysis_job_{}_{}", "a".repeat(64), "b".repeat(31)),
-        format!("analysis_job_{}_{}", "a".repeat(64), "B".repeat(32)),
-        format!("analysis_job_{}_{}", "a".repeat(64), "g".repeat(32)),
+    for malformed_digest in [
+        String::new(),
+        "a".repeat(63),
+        "a".repeat(65),
+        "A".repeat(64),
+        "g".repeat(64),
     ] {
         let mut malformed = bundle.clone();
-        malformed.analysis_job_id = malformed_job_id;
+        malformed.analysis_job_identity_sha256 = malformed_digest;
         assert!(
             malformed.validate().is_err(),
-            "malformed composite job identity must fail closed"
+            "malformed job-identity SHA-256 must fail closed"
         );
     }
 
@@ -105,7 +119,7 @@ fn analysis_job_id_rejects_malformed_binding_and_ambiguous_policy_identity() {
     policy_boundary.attributes.remove("policy_id");
     assert!(
         missing_policy_identity.validate().is_err(),
-        "a job identity cannot be verified without its runtime policy identity"
+        "job identity cannot be verified without runtime policy identity"
     );
 
     let mut duplicate_policy_identity = bundle;
@@ -128,6 +142,47 @@ fn analysis_job_id_rejects_malformed_binding_and_ambiguous_policy_identity() {
         .push(duplicate_policy_boundary);
     assert!(
         duplicate_policy_identity.validate().is_err(),
-        "a job identity cannot bind an ambiguous runtime policy identity"
+        "job identity cannot bind an ambiguous runtime policy identity"
     );
+}
+
+#[test]
+fn evidence_bundle_schema_versioning_is_explicit_and_preserves_v1_0() {
+    let bundle = control_bundle();
+    assert_eq!(bundle.schema_version, "1.1.0");
+
+    let mut legacy_version = bundle;
+    legacy_version.schema_version = "1.0.0".to_owned();
+    assert!(matches!(
+        legacy_version.validate(),
+        Err(quarantine_sandbox_runtime::ContractError::UnsupportedSchemaVersion {
+            actual_version
+        }) if actual_version == "1.0.0"
+    ));
+
+    let current_schema: Value = serde_json::from_str(include_str!(
+        "../schemas/evidence-bundle.schema.json"
+    ))
+    .expect("current evidence schema must be valid JSON");
+    let versioned_current_schema: Value = serde_json::from_str(include_str!(
+        "../schemas/evidence-bundle-1.1.0.schema.json"
+    ))
+    .expect("versioned current evidence schema must be valid JSON");
+    let legacy_schema: Value = serde_json::from_str(include_str!(
+        "../schemas/evidence-bundle-1.0.0.schema.json"
+    ))
+    .expect("legacy evidence schema must be valid JSON");
+
+    assert_eq!(current_schema, versioned_current_schema);
+    assert_eq!(current_schema["properties"]["schema_version"]["const"], "1.1.0");
+    assert_eq!(legacy_schema["properties"]["schema_version"]["const"], "1.0.0");
+
+    let current_required = current_schema["required"]
+        .as_array()
+        .expect("current evidence schema must declare required fields");
+    assert!(current_required.iter().any(|field| field == "analysis_job_identity_sha256"));
+    let legacy_required = legacy_schema["required"]
+        .as_array()
+        .expect("legacy evidence schema must declare required fields");
+    assert!(!legacy_required.iter().any(|field| field == "analysis_job_identity_sha256"));
 }

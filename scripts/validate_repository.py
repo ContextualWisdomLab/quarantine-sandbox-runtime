@@ -11,6 +11,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMA_FILES = (
     "schemas/analysis-request.schema.json",
+    "schemas/evidence-bundle-1.0.0.schema.json",
+    "schemas/evidence-bundle-1.1.0.schema.json",
     "schemas/evidence-bundle.schema.json",
     "schemas/application-service-request.schema.json",
     "schemas/application-service-lease.schema.json",
@@ -31,6 +33,8 @@ REQUIRED_FILES = (
     ".github/workflows/release.yml",
     "src/artifact_analysis/mod.rs",
     "src/artifact_analysis/contracts.rs",
+    "src/artifact_analysis/analysis_engine.rs",
+    "src/artifact_analysis/evidence_bundle.rs",
     "src/artifact_analysis/ingestion.rs",
     "src/artifact_analysis/runtime.rs",
     "src/application_service/mod.rs",

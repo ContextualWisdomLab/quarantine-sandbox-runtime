@@ -4,28 +4,34 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::contracts::{
-    ArtifactDescriptor, ContractError, EvidenceBundle as WireEvidenceBundle, EvidenceKind,
-    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
+    ArtifactDescriptor, CONTRACT_SCHEMA_VERSION, ContractError,
+    EvidenceBundle as WireEvidenceBundle, EvidenceKind, EvidenceRecord, RuntimeDisposition,
+    RuntimeManifest,
 };
 
-const ANALYSIS_JOB_PREFIX: &str = "analysis_job_";
-const RECEIPT_IDENTITY_DIGEST_HEX_BYTES: usize = 64;
-const ANALYZER_IDENTITY_SUFFIX_HEX_BYTES: usize = 32;
+/// Current public artifact-analysis evidence-bundle schema version.
+pub const EVIDENCE_BUNDLE_SCHEMA_VERSION: &str = "1.1.0";
+
 const ANALYSIS_JOB_IDENTITY_BOUNDARY: &str = "analysis_job_identity_binding";
+const SHA256_HEX_BYTES: usize = 64;
 
 /// Validated artifact-analysis receipt exposed to consumers.
 ///
-/// The public shape remains the versioned `1.0.0` wire contract. Semantic
-/// validation additionally binds the job identifier to receipt-visible request,
-/// profile, artifact, policy, and runtime-source identity. The trailing
-/// analyzer-sensitive digest remains correlation data until stable analyzer
-/// provenance is supplied by the analyzer-provenance contract.
+/// Schema `1.1.0` preserves the opaque `analysis_job_id` semantics from `1.0.0`
+/// and adds `analysis_job_identity_sha256` as required security evidence. The
+/// digest binds the published job identifier to receipt-visible request,
+/// profile, artifact, policy, and runtime-source identity without pretending to
+/// authenticate the producer. Stable analyzer provenance remains a separate
+/// contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvidenceBundle {
-    /// Contract version, currently `1.0.0`.
+    /// Evidence contract version, currently `1.1.0`.
     pub schema_version: String,
-    /// Deterministic analysis-job identifier with a receipt-visible identity digest.
+    /// Deterministic analysis-job correlation identifier.
     pub analysis_job_id: String,
+    /// SHA-256 binding of the job identifier and receipt-visible identity inputs.
+    pub analysis_job_identity_sha256: String,
     /// Original request identifier.
     pub request_id: String,
     /// Immutable artifact descriptor.
@@ -43,69 +49,47 @@ pub struct EvidenceBundle {
 }
 
 impl EvidenceBundle {
-    pub(super) fn from_generated(mut wire: WireEvidenceBundle) -> Result<Self, ContractError> {
+    pub(super) fn from_generated(wire: WireEvidenceBundle) -> Result<Self, ContractError> {
         wire.validate()?;
-        let analyzer_identity_suffix = wire
-            .analysis_job_id
-            .strip_prefix(ANALYSIS_JOB_PREFIX)
-            .filter(|value| {
-                value.len() == ANALYZER_IDENTITY_SUFFIX_HEX_BYTES && is_lowercase_hex(value)
-            })
-            .ok_or(identity_binding_error())?
-            .to_owned();
-        let receipt_identity_digest = receipt_identity_digest_from_wire(&wire)?;
-
-        wire.analysis_job_id = format!(
-            "{ANALYSIS_JOB_PREFIX}{receipt_identity_digest}_{analyzer_identity_suffix}"
-        );
-        for record in &mut wire.evidence {
-            record.evidence_id = format!(
-                "{}:evidence:{:04}",
-                wire.analysis_job_id, record.sequence_number
-            );
-        }
-
-        let bundle = Self::from_wire(wire);
+        let analysis_job_identity_sha256 = receipt_identity_digest_from_wire(&wire)?;
+        let bundle = Self::from_wire(wire, analysis_job_identity_sha256);
         bundle.validate()?;
         Ok(bundle)
     }
 
-    /// Validate wire structure and bind the job identifier to receipt-visible identity inputs.
+    /// Validate the versioned wire structure and bind job identity to receipt-visible inputs.
     ///
     /// # Errors
     ///
-    /// Returns [`ContractError`] when the underlying wire contract is invalid,
-    /// the job identifier is malformed, the runtime policy identity is absent or ambiguous,
-    /// or the embedded receipt-identity digest contradicts the receipt fields.
+    /// Returns [`ContractError`] when the evidence schema version is unsupported,
+    /// the inherited structural contract is invalid, the job-identity digest is
+    /// malformed, the runtime policy identity is absent or ambiguous, or the
+    /// digest contradicts the receipt fields.
     pub fn validate(&self) -> Result<(), ContractError> {
-        self.to_wire().validate()?;
-
-        let identifier = self
-            .analysis_job_id
-            .strip_prefix(ANALYSIS_JOB_PREFIX)
-            .ok_or(identity_binding_error())?;
-        let (receipt_digest, analyzer_suffix) = identifier
-            .split_once('_')
-            .ok_or(identity_binding_error())?;
-        if receipt_digest.len() != RECEIPT_IDENTITY_DIGEST_HEX_BYTES
-            || !is_lowercase_hex(receipt_digest)
-            || analyzer_suffix.len() != ANALYZER_IDENTITY_SUFFIX_HEX_BYTES
-            || !is_lowercase_hex(analyzer_suffix)
+        if self.schema_version != EVIDENCE_BUNDLE_SCHEMA_VERSION {
+            return Err(ContractError::UnsupportedSchemaVersion {
+                actual_version: self.schema_version.clone(),
+            });
+        }
+        if self.analysis_job_identity_sha256.len() != SHA256_HEX_BYTES
+            || !is_lowercase_hex(&self.analysis_job_identity_sha256)
         {
             return Err(identity_binding_error());
         }
 
-        if receipt_digest != receipt_identity_digest(self)? {
+        self.to_wire().validate()?;
+        if self.analysis_job_identity_sha256 != receipt_identity_digest(self)? {
             return Err(identity_binding_error());
         }
 
         Ok(())
     }
 
-    fn from_wire(wire: WireEvidenceBundle) -> Self {
+    fn from_wire(wire: WireEvidenceBundle, analysis_job_identity_sha256: String) -> Self {
         Self {
-            schema_version: wire.schema_version,
+            schema_version: EVIDENCE_BUNDLE_SCHEMA_VERSION.to_owned(),
             analysis_job_id: wire.analysis_job_id,
+            analysis_job_identity_sha256,
             request_id: wire.request_id,
             artifact: wire.artifact,
             runtime: wire.runtime,
@@ -118,7 +102,7 @@ impl EvidenceBundle {
 
     fn to_wire(&self) -> WireEvidenceBundle {
         WireEvidenceBundle {
-            schema_version: self.schema_version.clone(),
+            schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
             analysis_job_id: self.analysis_job_id.clone(),
             request_id: self.request_id.clone(),
             artifact: self.artifact.clone(),
@@ -131,18 +115,19 @@ impl EvidenceBundle {
     }
 }
 
-/// Serialize a validated bundle as stable human-readable JSON.
+/// Serialize a validated evidence bundle as stable human-readable JSON.
 ///
 /// # Errors
 ///
 /// Returns [`serde_json::Error`] if serialization fails.
 pub fn to_pretty_json(bundle: &EvidenceBundle) -> Result<String, serde_json::Error> {
-    super::runtime::to_pretty_json(&bundle.to_wire())
+    serde_json::to_string_pretty(bundle)
 }
 
 fn receipt_identity_digest(bundle: &EvidenceBundle) -> Result<String, ContractError> {
     let policy_id = runtime_policy_id(&bundle.evidence)?;
     Ok(receipt_identity_digest_components(
+        &bundle.analysis_job_id,
         &bundle.request_id,
         bundle.runtime.requested_profile.as_str(),
         &bundle.artifact.artifact_sha256,
@@ -156,6 +141,7 @@ fn receipt_identity_digest_from_wire(
 ) -> Result<String, ContractError> {
     let policy_id = runtime_policy_id(&bundle.evidence)?;
     Ok(receipt_identity_digest_components(
+        &bundle.analysis_job_id,
         &bundle.request_id,
         bundle.runtime.requested_profile.as_str(),
         &bundle.artifact.artifact_sha256,
@@ -165,6 +151,7 @@ fn receipt_identity_digest_from_wire(
 }
 
 fn receipt_identity_digest_components(
+    analysis_job_id: &str,
     request_id: &str,
     requested_profile: &str,
     artifact_sha256: &str,
@@ -173,6 +160,7 @@ fn receipt_identity_digest_components(
 ) -> String {
     let mut hasher = Sha256::new();
     for component in [
+        analysis_job_id,
         request_id,
         requested_profile,
         artifact_sha256,
