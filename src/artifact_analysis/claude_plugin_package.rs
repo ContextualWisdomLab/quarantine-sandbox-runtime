@@ -363,8 +363,6 @@ mod tests {
         candidate.maximum_disk_bytes = MAX_DISK_BYTES;
         candidate.maximum_output_bytes = MAX_OUTPUT_BYTES;
         candidate.maximum_wall_time = MAX_WALL_TIME_SECONDS;
-        candidate.network_policy_reference = "network_deny_v1".to_owned();
-        candidate.filesystem_policy_reference = "filesystem_ephemeral_v1".to_owned();
         assert_eq!(candidate.validate(), Ok(()));
     }
 }
