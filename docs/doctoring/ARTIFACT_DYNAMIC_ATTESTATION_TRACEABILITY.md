@@ -10,6 +10,8 @@ The public artifact-analysis contract already exposes `AnalysisProfile::LinuxDyn
 
 A second cross-field gap is equally important: the current bundle validator does not bind `requested_profile`, `dynamic_execution_performed`, and `disposition` together. A hand-constructed or deserialized `LinuxDynamic`/`WindowsDynamic` bundle can currently set `dynamic_execution_performed=false` and still validate with `RuntimeDisposition::Completed`. That would let a missing worker be presented as complete evidence even though the TRD requires unavailable dynamic profiles to fail closed as incomplete.
 
+The current `schemas/evidence-bundle.schema.json` duplicates both defects at the wire boundary: `dynamic_execution_performed` is globally fixed to `false`, while `requested_profile`, execution, and `disposition` have no logical cross-field constraint. Repairing Rust validation without repairing the schema would leave a second consumer-visible contract with different semantics.
+
 This is independent from issue #49, which owns analyzer/worker capability isolation, and issue #50, which owns bounded worker-to-controller result ingestion. Issue #52 owns the semantics of the evidence receipt once approved dynamic execution actually occurs or is unavailable.
 
 ## Constraints
@@ -19,7 +21,7 @@ This is independent from issue #49, which owns analyzer/worker capability isolat
 - Current deny-by-default profiles do not gain network access or credentials merely because dynamic execution becomes representable.
 - `RuntimeBehavior` evidence must be attributable to the exact artifact, analysis profile, worker invocation, policy, and immutable runtime authority before a completed dynamic receipt is trusted.
 - A boolean alone is not execution or isolation evidence. Issue #49 worker containment, issue #50 result-channel bounds, runtime cleanup, and real backend evidence remain independent release gates.
-- Rust validation and JSON Schema must enforce the same profile/execution/completeness semantics. JSON Schema Draft 2020-12 provides conditional `if`/`then`/`else` applicators when the selected wire version needs cross-field assertions.
+- Rust validation and JSON Schema must enforce the same profile/execution/completeness semantics. JSON Schema Draft 2020-12 provides conditional and combinator applicators for cross-field assertions.
 - If changing `1.0.0` validation would change an established wire meaning, version the contract and JSON Schema rather than silently redefining it.
 
 ## Alternatives
@@ -36,6 +38,10 @@ Rejected. This would weaken the static-only invariant and permit a static receip
 
 Rejected. `EvidenceBundle::validate()` is the runtime's own wire-integrity boundary. Accepting `requested_profile=linux_dynamic`, `dynamic_execution_performed=false`, and `disposition=completed` makes a semantically incomplete receipt structurally valid and pushes a security-relevant invariant onto every consumer.
 
+### Repair only the Rust validator
+
+Rejected. The JSON Schema is a published compatibility surface. Leaving `const:false` or independent completeness fields in the schema would make Rust and wire validation disagree.
+
 ### Infer execution only from the presence of `RuntimeBehavior`
 
 Rejected as insufficient. Evidence-kind presence does not replace an explicit runtime execution fact, and malformed or forged bundles still need cross-field validation.
@@ -46,18 +52,22 @@ Selected direction after causal RED. Static-only receipts require no execution; 
 
 ## RED
 
-Initial test-bearing authority: `4cc901d7cb40bdc833e08b0c695ba12c27fa2f68`, `tests/artifact_analysis_dynamic_attestation_red.rs` (issue #52).
+Initial truthful-execution authority: `4cc901d7cb40bdc833e08b0c695ba12c27fa2f68`, `tests/artifact_analysis_dynamic_attestation_red.rs` (issue #52).
 
-Cross-field hardening authority: `7fa9116a993d6854ad579db2512ff921edcb8611`.
+Rust cross-field hardening authority: `7fa9116a993d6854ad579db2512ff921edcb8611`.
 
-The regression now covers four states:
+Wire-schema hardening authority: `bb1001016f3efd3183fb903cdde242f0859279e5`.
+
+The regression now covers six boundaries:
 
 1. otherwise-valid completed `LinuxDynamic` and `WindowsDynamic` bundles with `dynamic_execution_performed=true`, no network/credentials, and attributable `RuntimeBehavior` evidence must be representable;
 2. unavailable Linux/Windows dynamic profiles with `dynamic_execution_performed=false` and `Inconclusive` remain valid receipts;
 3. the same unavailable dynamic state must not validate after changing only `disposition` to `Completed`;
-4. `StaticOnly + dynamic_execution_performed=true` remains invalid.
+4. `StaticOnly + dynamic_execution_performed=true` remains invalid;
+5. the evidence-bundle JSON Schema must not globally force `dynamic_execution_performed=false` once approved dynamic completion is representable;
+6. the schema must contain a logical cross-field guard that binds `requested_profile`, `dynamic_execution_performed`, and `disposition`, while leaving the exact Draft 2020-12 composition strategy open.
 
-Current production is expected to RED in two independent ways: the truthful completed dynamic bundles fail because `RuntimeManifest::validate()` unconditionally rejects execution, while the false-completion bundles currently validate because `EvidenceBundle::validate()` does not cross-bind requested profile, actual execution, and completeness.
+Current production/contract is expected to RED in three independent ways: truthful completed dynamic bundles fail because `RuntimeManifest::validate()` unconditionally rejects execution; false-completion bundles currently validate because `EvidenceBundle::validate()` does not cross-bind requested profile, actual execution, and completeness; and the checked-in 1.0.0 schema globally forbids execution while lacking any logical completeness guard.
 
 ## Smallest causal GREEN after executed RED
 
@@ -69,11 +79,11 @@ Make runtime-manifest/bundle validation profile-aware without implementing or pr
 4. A dynamic profile with execution false cannot validate as `Completed`.
 5. Current P0 profile: network access and credentials remain false unless a separately versioned policy and evidence model deliberately changes that boundary.
 
-The smallest contract repair must keep Rust types, JSON Schema, PRD/TRD, compatibility tests, and consumer documentation semantically aligned. JSON Schema Draft 2020-12 conditional applicators are available for cross-field constraints; schema structure is an implementation choice, but the wire contract must reject the same false-completion states as Rust validation. The repair must not mark ADR-0009 Accepted or authorize release before issues #49 and #50 plus real worker isolation/resource/cleanup evidence are GREEN on one unchanged integrated candidate.
+The smallest contract repair must keep Rust types, JSON Schema, PRD/TRD, compatibility tests, and consumer documentation semantically aligned. JSON Schema Draft 2020-12 conditional/combinator applicators are available for cross-field constraints; schema structure remains an implementation choice, but the wire contract must reject the same false-completion states as Rust validation and must not retain an unconditional execution=false constraint. The repair must not mark ADR-0009 Accepted or authorize release before issues #49 and #50 plus real worker isolation/resource/cleanup evidence are GREEN on one unchanged integrated candidate.
 
 ## Release evidence
 
-A dynamic artifact-analysis release requires more than a contract-valid boolean. The exact worker invocation must be bound to immutable artifact/profile/analyzer/runtime identity, capability-denying isolation, bounded CPU/RAM/PID/time/storage/output, bounded result ingestion, deterministic failure attribution, leak-free termination/cleanup, current-head security/coverage/SBOM/provenance, and protected integration. Static evidence must remain distinguishable from observed runtime behavior, and an unavailable dynamic worker must never be upgraded from `Inconclusive` to `Completed` by serialization or consumer reconstruction.
+A dynamic artifact-analysis release requires more than a contract-valid boolean. The exact worker invocation must be bound to immutable artifact/profile/analyzer/runtime identity, capability-denying isolation, bounded CPU/RAM/PID/time/storage/output, bounded result ingestion, deterministic failure attribution, leak-free termination/cleanup, current-head security/coverage/SBOM/provenance, and protected integration. Static evidence must remain distinguishable from observed runtime behavior, an unavailable dynamic worker must never be upgraded from `Inconclusive` to `Completed` by serialization or consumer reconstruction, and Rust/schema validators must agree on those states.
 
 ## References
 
