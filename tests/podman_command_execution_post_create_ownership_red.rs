@@ -21,8 +21,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-const OWNED_CONTAINER_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OWNED_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -149,9 +148,9 @@ fn successful_create_binds_every_lifecycle_operation_to_the_acquired_container_i
         "container inspect must target the acquired container ID: {calls}"
     );
     assert!(
-        calls.lines().any(|line| {
-            line.starts_with("rm --force ") && line.ends_with(OWNED_CONTAINER_ID)
-        }),
+        calls
+            .lines()
+            .any(|line| { line.starts_with("rm --force ") && line.ends_with(OWNED_CONTAINER_ID) }),
         "destructive removal must target the acquired container ID: {calls}"
     );
 

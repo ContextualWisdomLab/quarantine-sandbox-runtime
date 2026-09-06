@@ -85,7 +85,10 @@ fn command_without_source_rejects_an_unexpected_host_bind_and_cleans_up() {
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(), security_info, inspect, top,
+        calls.display(),
+        security_info,
+        inspect,
+        top,
     );
     let program = write_executable("unexpected-host-bind", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
