@@ -9,6 +9,11 @@ use quarantine_sandbox_runtime::{
     AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, ingest_bytes,
 };
 
+const ISOLATION_POLICY_SHA256: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const INVALID_ISOLATION_POLICY_SHA256: &str =
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
 fn analyzer_identity() -> AnalyzerWorkerIdentity {
     AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
         .expect("valid immutable analyzer identity")
@@ -30,7 +35,7 @@ fn isolation_evidence() -> AnalyzerWorkerIsolationEvidence {
         worker_id: "worker_0123456789abcdef".to_owned(),
         runtime_backend_id: "rootless_podman".to_owned(),
         runtime_backend_version: "5.4.2".to_owned(),
-        isolation_policy_sha256: "b".repeat(64),
+        isolation_policy_sha256: ISOLATION_POLICY_SHA256.to_owned(),
         applied_budget: budget(),
         network_access_performed: false,
         credentials_available: false,
@@ -45,8 +50,14 @@ fn fixture_request<'a>(
     identity: &'a AnalyzerWorkerIdentity,
     artifact: &'a quarantine_sandbox_runtime::IngestedArtifact,
 ) -> AnalyzerWorkerRequest<'a> {
-    AnalyzerWorkerRequest::new(identity, artifact, "artifact_worker_policy_v1", budget())
-        .expect("valid worker request must be admitted")
+    AnalyzerWorkerRequest::new(
+        identity,
+        artifact,
+        "artifact_worker_policy_v1",
+        ISOLATION_POLICY_SHA256,
+        budget(),
+    )
+    .expect("valid worker request must be admitted")
 }
 
 fn fixture_receipt(
@@ -105,8 +116,26 @@ fn worker_request_requires_immutable_analyzer_identity_and_nonzero_budgets() {
     }
 
     assert!(
-        AnalyzerWorkerRequest::new(&identity, &artifact, "", budget()).is_err(),
+        AnalyzerWorkerRequest::new(
+            &identity,
+            &artifact,
+            "",
+            ISOLATION_POLICY_SHA256,
+            budget(),
+        )
+        .is_err(),
         "empty policy identity must fail closed"
+    );
+    assert!(
+        AnalyzerWorkerRequest::new(
+            &identity,
+            &artifact,
+            "artifact_worker_policy_v1",
+            INVALID_ISOLATION_POLICY_SHA256,
+            budget(),
+        )
+        .is_err(),
+        "malformed isolation policy digest must fail closed"
     );
 
     for field in [
@@ -133,6 +162,7 @@ fn worker_request_requires_immutable_analyzer_identity_and_nonzero_budgets() {
                     &identity,
                     &artifact,
                     "artifact_worker_policy_v1",
+                    ISOLATION_POLICY_SHA256,
                     invalid,
                 ),
                 Err(AnalyzerWorkerContractError::InvalidBudget { field_name })
@@ -174,6 +204,15 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
         policy_mismatch.validate_against(&request),
         Err(AnalyzerWorkerContractError::ReceiptMismatch {
             field_name: "policy_id"
+        })
+    ));
+
+    let mut isolation_policy_mismatch = receipt.clone();
+    isolation_policy_mismatch.isolation.isolation_policy_sha256 = "c".repeat(64);
+    assert!(matches!(
+        isolation_policy_mismatch.validate_against(&request),
+        Err(AnalyzerWorkerContractError::ReceiptMismatch {
+            field_name: "isolation_policy_sha256"
         })
     ));
 
