@@ -141,25 +141,27 @@ pub fn to_pretty_json(bundle: &EvidenceBundle) -> Result<String, serde_json::Err
 }
 
 fn receipt_identity_digest(bundle: &EvidenceBundle) -> Result<String, ContractError> {
-    receipt_identity_digest_components(
+    let policy_id = runtime_policy_id(&bundle.evidence)?;
+    Ok(receipt_identity_digest_components(
         &bundle.request_id,
         bundle.runtime.requested_profile.as_str(),
         &bundle.artifact.artifact_sha256,
-        runtime_policy_id(&bundle.evidence)?,
+        policy_id,
         &bundle.runtime.source_revision,
-    )
+    ))
 }
 
 fn receipt_identity_digest_from_wire(
     bundle: &WireEvidenceBundle,
 ) -> Result<String, ContractError> {
-    receipt_identity_digest_components(
+    let policy_id = runtime_policy_id(&bundle.evidence)?;
+    Ok(receipt_identity_digest_components(
         &bundle.request_id,
         bundle.runtime.requested_profile.as_str(),
         &bundle.artifact.artifact_sha256,
-        runtime_policy_id(&bundle.evidence)?,
+        policy_id,
         &bundle.runtime.source_revision,
-    )
+    ))
 }
 
 fn receipt_identity_digest_components(
@@ -168,7 +170,7 @@ fn receipt_identity_digest_components(
     artifact_sha256: &str,
     policy_id: &str,
     source_revision: &str,
-) -> Result<String, ContractError> {
+) -> String {
     let mut hasher = Sha256::new();
     for component in [
         request_id,
@@ -180,7 +182,7 @@ fn receipt_identity_digest_components(
         hasher.update(component.as_bytes());
         hasher.update([0]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    format!("{:x}", hasher.finalize())
 }
 
 fn runtime_policy_id(evidence: &[EvidenceRecord]) -> Result<&str, ContractError> {

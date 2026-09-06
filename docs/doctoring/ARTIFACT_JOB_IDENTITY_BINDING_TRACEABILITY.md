@@ -2,43 +2,61 @@
 
 ## Status
 
-Issue #66 is a RED-only evidence-integrity finding on artifact-analysis parent Draft #18 exact `994ba5fa5ceda20c622861efbff241294867dc39`. Initial test-bearing commit `2e60083b36c7e007844dac0cddc76883f87f9e67` added the hostile receipt regression; latest hardening `b19f467d7c3758e3373463b1ddbafe6767f0abd9` also binds the runtime policy identity that production already hashes into `analysis_job_id`. Production Rust and JSON Schema remain inherited unchanged until the exact RED executes for the intended cause.
+Issue #66 is a causally executed evidence-integrity defect on artifact-analysis parent Draft #18 exact `994ba5fa5ceda20c622861efbff241294867dc39`. Initial test-bearing commit `2e60083b36c7e007844dac0cddc76883f87f9e67` added the hostile receipt regression; `b19f467d7c3758e3373463b1ddbafe6767f0abd9` added runtime policy identity because production already includes that policy in deterministic job correlation. CodeRabbit's `MD018` documentation finding was repaired by `fbd9204c57d3031f43fd81b82ec60cd11aca3aab` and the review thread is resolved.
+
+Exact RED head `4b0a192c6ed6251e434819e2066807b377801356` executed on native CI run `34038409956`. Verify job `101500613351` checked out the exact head, passed formatting, repository policy and preceding tests, then failed in `tests/artifact_analysis_job_identity_binding_red.rs` at `analysis_job_id_must_bind_identity_bearing_receipt_inputs` with `changing request_id without changing analysis_job_id must invalidate the receipt`. This is the intended stale-job-identity cause. Hosted negative rootless/AppArmor passed on the same RED run; positive-LSM remains an independent capability gate.
+
+Production candidate `69f2a6f65eb9f5141ade1dbaf837ec67076c6597` introduced the semantic receipt boundary. `36aead6d6700208a0c6a3dc8962d3739a7071cf3` kept the public receipt shape explicit instead of exposing the private raw wire type. The candidate is not GREEN authority until exact-head verify, coverage, and branch coverage execute successfully.
 
 ## Problem and contract authority
 
-`AnalysisEngine::deterministic_job_id()` hashes `request_id`, requested profile, artifact SHA-256, policy ID, runtime source revision, and configured analyzer IDs. The TRD requires evidence identifiers and ordering to be deterministic for the same request/configuration/bytes. The public `EvidenceBundle` in turn labels `analysis_job_id` as the deterministic analysis-job identifier.
+The runtime's internal `deterministic_job_id()` hashes `request_id`, requested profile, artifact SHA-256, policy ID, runtime source revision, and configured analyzer IDs. The TRD requires deterministic evidence identity for the same request/configuration/bytes. Before #66, the public validator checked `analysis_job_id` only as bounded text, so a deserialized receipt could keep a stale identifier while changing receipt-visible identity fields.
 
-`EvidenceBundle::validate()` does not verify any relationship between that identifier and the identity-bearing fields serialized beside it. It only validates `analysis_job_id` as bounded non-empty text. A reconstructed receipt can therefore keep the old job ID while changing request identity, artifact subject, runtime policy identity, or runtime source revision and still remain structurally acceptable.
-
-`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to the enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID itself truthful. #58/#59 binds duplicated artifact-subject representations; #62/#63 binds duplicated runtime-boundary booleans; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
+`#60/#61` is narrower: it binds each `EvidenceRecord.evidence_id` to its enclosing job ID and sequence. Canonical record IDs do not make the enclosing job ID truthful. #58/#59 binds duplicated artifact-subject representations; #62/#63 binds duplicated runtime-boundary facts; #64/#65 owns foundation-record cardinality; #54/#55 owns stable analyzer provenance; #52/#53 owns profile/execution/completeness semantics.
 
 ## DDD ownership
 
-`artifact_analysis` owns deterministic analysis-job identity, normalized evidence identity, subject identity, runtime policy attribution within the receipt, and receipt integrity. `sandbox_execution` owns worker/runtime isolation and lifecycle evidence. Analyzer implementation provenance remains #54/#55; this issue must compose with that versioned provenance rather than treating mutable `producer_id` strings as identity authority.
+`artifact_analysis` owns deterministic analysis-job identity, normalized evidence identity, artifact subject identity, runtime policy attribution inside the receipt, and receipt-integrity validation. `sandbox_execution` owns worker/runtime isolation and lifecycle evidence. Stable analyzer provenance remains #54/#55 and must not be replaced with mutable `producer_id` display strings.
 
-## RED acceptance
+The repair therefore uses a public artifact-analysis anti-corruption boundary: private runtime assembly may retain its current analyzer-sensitive correlation identifier, while the public receipt publishes a semantically verifiable identity derived from receipt-visible fields.
+
+## Causal GREEN design
+
+For generated receipts, the public job identifier is:
+
+`analysis_job_<receipt_identity_sha256>_<legacy_analyzer_sensitive_suffix>`
+
+where `receipt_identity_sha256` is the full lower-case SHA-256 of these UTF-8 components in order, with one NUL byte after every component:
+
+1. `request_id`;
+2. `runtime.requested_profile.as_str()`;
+3. `artifact.artifact_sha256`;
+4. runtime-owned `PolicyBoundary.attributes["policy_id"]`;
+5. `runtime.source_revision`.
+
+The trailing 32-hex suffix preserves the runtime's existing analyzer-sensitive deterministic correlation. It is syntax-checked but is not promoted to trusted provenance. #54/#55 remains responsible for a stable versioned analyzer identity/attestation contract.
+
+Generated `EvidenceRecord.evidence_id` values are rewritten against the published composite job ID so the public receipt remains internally referentially consistent. `EvidenceBundle::validate()` first applies the inherited `1.0.0` structural wire checks and then recomputes the receipt-visible digest. Missing policy identity, malformed composite job identity, or a digest contradiction fails closed.
+
+The repair does not claim authentication. A party able to rewrite the entire receipt and recompute an unsigned digest can still construct a self-consistent receipt. Signed/attested provenance, immutable worker identity, and analyzer provenance remain separate release gates. This control closes stale-field contradiction; it does not substitute for provenance authenticity.
+
+The JSON Schema remains the structural `1.0.0` wire schema. Draft 2020-12 cannot recompute SHA-256 over multiple fields, so the semantic cross-field binding is enforced by the Rust public validator rather than represented as a misleading regex. The composite identifier remains within the existing 128-byte bounded string contract, preserving the schema's opaque identifier compatibility.
+
+## RED acceptance retained
 
 `tests/artifact_analysis_job_identity_binding_red.rs` requires:
 
 - an untouched `StaticOnly` control receipt to remain valid;
-- changing only `request_id` while preserving the old `analysis_job_id` and evidence IDs to fail closed;
-- changing top-level artifact SHA-256 and the nested `ArtifactIdentity.artifact_sha256` together to the same alternate valid digest, while preserving the old job ID, to fail closed so #58/#59 cannot be the accidental failure cause;
-- changing `PolicyBoundary.attributes["policy_id"]` while preserving the old job ID to fail closed because production hashes that policy ID into deterministic job identity;
+- changing only `request_id` while preserving the old job/evidence IDs to fail closed;
+- changing top-level artifact SHA-256 and nested `ArtifactIdentity.artifact_sha256` together to one alternate valid digest, while preserving the old job ID, to fail closed without relying on #58/#59;
+- changing runtime-owned `PolicyBoundary.attributes["policy_id"]` while preserving the old job ID to fail closed;
 - changing `RuntimeManifest.source_revision` while preserving the old job ID to fail closed.
 
-The RED intentionally does not mutate requested profile because #52/#53 already owns profile/completeness semantics. It does not mutate analyzer display IDs because #54/#55 owns stable analyzer provenance.
-
-## Smallest causal GREEN after executed RED
-
-A regex or prefix check on `analysis_job_id` is not sufficient. The job identity must become verifiable from a versioned canonical identity descriptor or another cryptographically bound representation. Validation must reject contradiction rather than silently recalculate and overwrite a forged/stale ID.
-
-If schema `1.0.0` does not expose enough trustworthy identity inputs to recompute the current hash without relying on mutable producer text, the repair should introduce an explicit versioned job-identity input/provenance structure and compatibility/version transition. Hash input order and separators must be documented as contract data if consumers are expected to verify the digest; otherwise a signed/attested identity structure should be authoritative and the opaque job ID should be treated only as correlation metadata.
-
-The repair must preserve #58/#59 subject consistency, #60/#61 record/job referential integrity, #62/#63 runtime-boundary consistency, #64/#65 structural foundation cardinality, and #54/#55 analyzer provenance.
+Requested profile mutation remains outside this focused RED because #52/#53 owns profile/completeness semantics. Analyzer display-ID mutation remains outside because #54/#55 owns stable analyzer provenance.
 
 ## Evidence basis
 
-SLSA v1.2 was released on 2025-11-24 and is the current Approved specification. Its Provenance section defines provenance as verifiable information used to trace an artifact back to where and how it was produced. The peer-reviewed in-toto model likewise relies on verifiable links between artifacts and the steps/evidence describing them. These sources support verifiable identity and integrity; this repository's versioned job-identity contract remains the normative authority.
+SLSA v1.2 was released on 2025-11-24 and is the current Approved specification. Its Provenance section defines provenance as verifiable information used to trace an artifact back to where and how it was produced. The peer-reviewed in-toto model likewise relies on verifiable links between artifacts and the steps/evidence describing them. These sources support verifiable identity and integrity; this repository's versioned receipt semantics remain normative.
 
 ## References
 
@@ -50,4 +68,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Release effect
 
-No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/policy/runtime fields can change without invalidating the deterministic `analysis_job_id`. A GREEN for #66 does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
+No artifact-analysis receipt is release-authoritative while identity-bearing request/subject/policy/runtime fields can contradict its published deterministic job identity. Exact-head GREEN for #66 is still required. A GREEN here does not waive #49/#50/#52/#54/#56/#58/#60/#62/#64, real positive isolation, exact-head review/security/coverage, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
