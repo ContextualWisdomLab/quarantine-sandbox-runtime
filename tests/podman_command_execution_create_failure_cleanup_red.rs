@@ -21,8 +21,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-const OWNED_CONTAINER_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OWNED_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -179,11 +178,9 @@ fn malformed_failed_create_receipt_fails_closed_without_name_cleanup() {
 
     assert_eq!(
         error,
-        CommandExecutionError::Backend(
-            ApplicationServiceError::MalformedIsolationInspection {
-                operation: "container_create_receipt",
-            }
-        )
+        CommandExecutionError::Backend(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_create_receipt",
+        })
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("create --name ")));
