@@ -12,6 +12,7 @@ use quarantine_sandbox_runtime::{
     AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle,
     EvidenceKind, EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
+use serde_json::Value;
 
 fn dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
     EvidenceBundle {
@@ -77,6 +78,42 @@ fn unavailable_dynamic_bundle(profile: AnalysisProfile) -> EvidenceBundle {
     bundle
 }
 
+fn logical_schema_binds_dynamic_completeness(value: &Value) -> bool {
+    const LOGICAL_KEYWORDS: [&str; 8] = [
+        "if",
+        "then",
+        "else",
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "not",
+        "dependentSchemas",
+    ];
+
+    match value {
+        Value::Object(object) => {
+            for keyword in LOGICAL_KEYWORDS {
+                if let Some(logic) = object.get(keyword) {
+                    let rendered = logic.to_string();
+                    if rendered.contains("requested_profile")
+                        && rendered.contains("dynamic_execution_performed")
+                        && rendered.contains("disposition")
+                    {
+                        return true;
+                    }
+                }
+            }
+            object
+                .values()
+                .any(logical_schema_binds_dynamic_completeness)
+        }
+        Value::Array(items) => items
+            .iter()
+            .any(logical_schema_binds_dynamic_completeness),
+        _ => false,
+    }
+}
+
 #[test]
 fn approved_dynamic_profiles_can_truthfully_attest_isolated_execution() {
     for profile in [AnalysisProfile::LinuxDynamic, AnalysisProfile::WindowsDynamic] {
@@ -124,5 +161,34 @@ fn static_only_profile_still_rejects_dynamic_execution_attestation() {
             boundary_name: "dynamic_execution_performed",
         }),
         "StaticOnly must remain non-executing even after dynamic-profile attestation becomes representable"
+    );
+}
+
+#[test]
+fn evidence_bundle_schema_does_not_globally_forbid_dynamic_execution() {
+    let schema: Value = serde_json::from_str(include_str!(
+        "../schemas/evidence-bundle.schema.json"
+    ))
+    .expect("checked-in evidence schema must be valid JSON");
+    let dynamic_execution_schema = &schema["properties"]["runtime"]["properties"]
+        ["dynamic_execution_performed"];
+
+    assert_ne!(
+        dynamic_execution_schema.get("const"),
+        Some(&Value::Bool(false)),
+        "the wire schema must not globally force dynamic_execution_performed=false when approved dynamic profiles can complete"
+    );
+}
+
+#[test]
+fn evidence_bundle_schema_cross_binds_dynamic_execution_and_completion() {
+    let schema: Value = serde_json::from_str(include_str!(
+        "../schemas/evidence-bundle.schema.json"
+    ))
+    .expect("checked-in evidence schema must be valid JSON");
+
+    assert!(
+        logical_schema_binds_dynamic_completeness(&schema),
+        "the wire schema needs a logical cross-field guard binding requested_profile, dynamic_execution_performed, and disposition"
     );
 }
