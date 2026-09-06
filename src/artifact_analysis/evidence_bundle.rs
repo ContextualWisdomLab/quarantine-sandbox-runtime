@@ -75,7 +75,7 @@ impl EvidenceBundle {
     /// # Errors
     ///
     /// Returns [`ContractError`] when the underlying wire contract is invalid,
-    /// the job identifier is malformed, the runtime policy identity is absent,
+    /// the job identifier is malformed, the runtime policy identity is absent or ambiguous,
     /// or the embedded receipt-identity digest contradicts the receipt fields.
     pub fn validate(&self) -> Result<(), ContractError> {
         self.to_wire().validate()?;
@@ -186,10 +186,17 @@ fn receipt_identity_digest_components(
 }
 
 fn runtime_policy_id(evidence: &[EvidenceRecord]) -> Result<&str, ContractError> {
-    evidence
+    let mut policy_boundaries = evidence
         .iter()
-        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
-        .and_then(|record| record.attributes.get("policy_id"))
+        .filter(|record| record.evidence_kind == EvidenceKind::PolicyBoundary);
+    let policy_boundary = policy_boundaries.next().ok_or(identity_binding_error())?;
+    if policy_boundaries.next().is_some() {
+        return Err(identity_binding_error());
+    }
+
+    policy_boundary
+        .attributes
+        .get("policy_id")
         .map(String::as_str)
         .ok_or(identity_binding_error())
 }
