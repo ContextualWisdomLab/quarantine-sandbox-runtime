@@ -59,7 +59,10 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
 
     let mut job_id_tampered = bundle.clone();
     job_id_tampered.analysis_job_id = "opaque_alternate_analysis_job".to_owned();
-    assert_eq!(job_id_tampered.analysis_job_identity_sha256, original_identity);
+    assert_eq!(
+        job_id_tampered.analysis_job_identity_sha256,
+        original_identity
+    );
     assert!(
         job_id_tampered.validate().is_err(),
         "changing analysis_job_id without changing its identity digest must invalidate the receipt"
@@ -68,7 +71,10 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
     let mut request_tampered = bundle.clone();
     request_tampered.request_id = "job_identity_binding_forged_request".to_owned();
     assert_eq!(request_tampered.analysis_job_id, original_job_id);
-    assert_eq!(request_tampered.analysis_job_identity_sha256, original_identity);
+    assert_eq!(
+        request_tampered.analysis_job_identity_sha256,
+        original_identity
+    );
     assert!(
         request_tampered.validate().is_err(),
         "changing request_id without changing job identity evidence must invalidate the receipt"
@@ -87,7 +93,10 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
         .attributes
         .insert("artifact_sha256".to_owned(), alternate_sha256);
     assert_eq!(subject_tampered.analysis_job_id, original_job_id);
-    assert_eq!(subject_tampered.analysis_job_identity_sha256, original_identity);
+    assert_eq!(
+        subject_tampered.analysis_job_identity_sha256,
+        original_identity
+    );
     assert!(
         subject_tampered.validate().is_err(),
         "changing the consistently represented artifact subject without changing job identity evidence must invalidate the receipt"
@@ -103,7 +112,10 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
         .attributes
         .insert("policy_id".to_owned(), "forged_policy_v2".to_owned());
     assert_eq!(policy_tampered.analysis_job_id, original_job_id);
-    assert_eq!(policy_tampered.analysis_job_identity_sha256, original_identity);
+    assert_eq!(
+        policy_tampered.analysis_job_identity_sha256,
+        original_identity
+    );
     assert!(
         policy_tampered.validate().is_err(),
         "changing runtime policy identity without changing job identity evidence must invalidate the receipt"
@@ -112,7 +124,10 @@ fn analysis_job_identity_must_bind_identity_bearing_receipt_inputs() {
     let mut revision_tampered = bundle.clone();
     revision_tampered.runtime.source_revision = "forged_source_revision".to_owned();
     assert_eq!(revision_tampered.analysis_job_id, original_job_id);
-    assert_eq!(revision_tampered.analysis_job_identity_sha256, original_identity);
+    assert_eq!(
+        revision_tampered.analysis_job_identity_sha256,
+        original_identity
+    );
     assert!(
         revision_tampered.validate().is_err(),
         "changing runtime source_revision without changing job identity evidence must invalidate the receipt"
@@ -201,22 +216,25 @@ fn evidence_bundle_schema_versioning_is_explicit_and_preserves_v1_0() {
         }) if actual_version == "1.0.0"
     ));
 
-    let current_schema: Value = serde_json::from_str(include_str!(
-        "../schemas/evidence-bundle.schema.json"
-    ))
-    .expect("current evidence schema must be valid JSON");
-    let versioned_current_schema: Value = serde_json::from_str(include_str!(
-        "../schemas/evidence-bundle-1.1.0.schema.json"
-    ))
-    .expect("versioned current evidence schema must be valid JSON");
-    let legacy_schema: Value = serde_json::from_str(include_str!(
-        "../schemas/evidence-bundle-1.0.0.schema.json"
-    ))
-    .expect("legacy evidence schema must be valid JSON");
+    let current_schema: Value =
+        serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
+            .expect("current evidence schema must be valid JSON");
+    let versioned_current_schema: Value =
+        serde_json::from_str(include_str!("../schemas/evidence-bundle-1.1.0.schema.json"))
+            .expect("versioned current evidence schema must be valid JSON");
+    let legacy_schema: Value =
+        serde_json::from_str(include_str!("../schemas/evidence-bundle-1.0.0.schema.json"))
+            .expect("legacy evidence schema must be valid JSON");
 
     assert_eq!(current_schema, versioned_current_schema);
-    assert_eq!(current_schema["properties"]["schema_version"]["const"], "1.1.0");
-    assert_eq!(legacy_schema["properties"]["schema_version"]["const"], "1.0.0");
+    assert_eq!(
+        current_schema["properties"]["schema_version"]["const"],
+        "1.1.0"
+    );
+    assert_eq!(
+        legacy_schema["properties"]["schema_version"]["const"],
+        "1.0.0"
+    );
 
     let current_required = current_schema["required"]
         .as_array()
