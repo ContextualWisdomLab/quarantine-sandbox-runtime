@@ -53,7 +53,11 @@ impl AnalyzerFailure {
     }
 }
 
-/// Pluggable, non-executing static analyzer.
+/// Pluggable analyzer contract retained for compatibility while isolated workers are introduced.
+///
+/// Implementations supplied through [`AnalysisEngine::new`] are not invoked in the runtime host
+/// process. Production execution requires an isolated analyzer-worker path; until that port is
+/// available, externally supplied analyzers fail closed before invocation.
 pub trait StaticAnalyzer: Send + Sync {
     /// Return a stable producer identifier.
     fn analyzer_id(&self) -> &'static str;
@@ -62,8 +66,8 @@ pub trait StaticAnalyzer: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine
-    /// preserves the failure as evidence and marks the bundle inconclusive.
+    /// Returns [`AnalyzerFailure`] when analysis cannot complete. The engine preserves a worker
+    /// failure as attributable evidence once isolated worker execution is available.
     fn analyze(&self, artifact: &IngestedArtifact)
     -> Result<Vec<AnalyzerFinding>, AnalyzerFailure>;
 }
@@ -93,6 +97,12 @@ impl StaticAnalyzer for FormatAnalyzer {
             )]),
         }])
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnalyzerExecutionPath {
+    BundledRuntime,
+    IsolatedWorkerRequired,
 }
 
 /// Runtime orchestration or input failure.
@@ -125,6 +135,9 @@ pub enum AnalysisError {
     /// At least one analyzer is required.
     #[error("no analyzers configured")]
     NoAnalyzersConfigured,
+    /// Externally supplied analyzer code requires an enforceable isolated worker before invocation.
+    #[error("isolated analyzer worker required before invoking externally supplied analyzer code")]
+    IsolatedAnalyzerWorkerRequired,
 }
 
 /// Ordered static-analysis engine.
@@ -133,21 +146,68 @@ pub struct AnalysisEngine {
     policy_id: String,
     source_revision: String,
     analyzers: Vec<Box<dyn StaticAnalyzer>>,
+    analyzer_execution_path: AnalyzerExecutionPath,
 }
 
 impl AnalysisEngine {
     /// Construct an engine with an explicit policy, revision, and analyzer order.
     ///
+    /// This compatibility constructor validates externally supplied analyzers but does not execute
+    /// them in the runtime host process. [`Self::analyze_bytes`] fails closed with
+    /// [`AnalysisError::IsolatedAnalyzerWorkerRequired`] until an enforceable isolated-worker port
+    /// owns their execution.
+    ///
     /// # Errors
     ///
-    /// Returns [`AnalysisError`] for invalid policy, identifiers, or analyzer
-    /// configuration.
+    /// Returns [`AnalysisError`] for invalid policy, identifiers, or analyzer configuration.
     pub fn new(
         ingestion_policy: IngestionPolicy,
         policy_id: &str,
         source_revision: &str,
         analyzers: Vec<Box<dyn StaticAnalyzer>>,
     ) -> Result<Self, AnalysisError> {
+        Self::validate_configuration(&ingestion_policy, policy_id, source_revision, &analyzers)?;
+
+        Ok(Self {
+            ingestion_policy,
+            policy_id: policy_id.to_owned(),
+            source_revision: source_revision.to_owned(),
+            analyzers,
+            analyzer_execution_path: AnalyzerExecutionPath::IsolatedWorkerRequired,
+        })
+    }
+
+    /// Construct the runtime-owned foundation engine with only bundled non-executing analyzers.
+    ///
+    /// This path is limited to analyzers compiled into this crate and does not authorize arbitrary
+    /// analyzer implementations to run in process.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnalysisError`] when the ingestion policy or engine identifiers are invalid.
+    pub fn with_bundled_static_analyzers(
+        ingestion_policy: IngestionPolicy,
+        policy_id: &str,
+        source_revision: &str,
+    ) -> Result<Self, AnalysisError> {
+        let analyzers: Vec<Box<dyn StaticAnalyzer>> = vec![Box::new(FormatAnalyzer)];
+        Self::validate_configuration(&ingestion_policy, policy_id, source_revision, &analyzers)?;
+
+        Ok(Self {
+            ingestion_policy,
+            policy_id: policy_id.to_owned(),
+            source_revision: source_revision.to_owned(),
+            analyzers,
+            analyzer_execution_path: AnalyzerExecutionPath::BundledRuntime,
+        })
+    }
+
+    fn validate_configuration(
+        ingestion_policy: &IngestionPolicy,
+        policy_id: &str,
+        source_revision: &str,
+        analyzers: &[Box<dyn StaticAnalyzer>],
+    ) -> Result<(), AnalysisError> {
         ingestion_policy.validate()?;
 
         if !is_valid_engine_identifier(policy_id) {
@@ -165,7 +225,7 @@ impl AnalysisEngine {
         }
 
         let mut analyzer_ids = BTreeSet::new();
-        for analyzer in &analyzers {
+        for analyzer in analyzers {
             let analyzer_id = analyzer.analyzer_id();
             if !is_valid_engine_identifier(analyzer_id) {
                 return Err(AnalysisError::InvalidAnalyzerIdentifier {
@@ -179,22 +239,18 @@ impl AnalysisEngine {
             }
         }
 
-        Ok(Self {
-            ingestion_policy,
-            policy_id: policy_id.to_owned(),
-            source_revision: source_revision.to_owned(),
-            analyzers,
-        })
+        Ok(())
     }
 
     /// Analyze bounded bytes and assemble an attributable evidence bundle.
     ///
-    /// The runtime never requires a file name. If bounded source context
-    /// includes one, it is used only as untrusted classification metadata.
+    /// The runtime never requires a file name. If bounded source context includes one, it is used
+    /// only as untrusted classification metadata. Externally supplied analyzers are rejected before
+    /// invocation until an isolated worker can provide enforceable capability evidence.
     ///
     /// # Errors
     ///
-    /// Returns [`AnalysisError`] when request validation, ingestion, or
+    /// Returns [`AnalysisError`] when request validation, ingestion, analyzer isolation, or
     /// generated-contract validation fails.
     pub fn analyze_bytes(
         &self,
@@ -202,6 +258,11 @@ impl AnalysisEngine {
         bytes: &[u8],
     ) -> Result<EvidenceBundle, AnalysisError> {
         request.validate()?;
+
+        if self.analyzer_execution_path == AnalyzerExecutionPath::IsolatedWorkerRequired {
+            return Err(AnalysisError::IsolatedAnalyzerWorkerRequired);
+        }
+
         let original_file_name = request
             .bounded_source_context
             .as_ref()
@@ -384,12 +445,12 @@ impl AnalysisEngine {
 
 impl Default for AnalysisEngine {
     fn default() -> Self {
-        Self {
-            ingestion_policy: IngestionPolicy::default(),
-            policy_id: "foundation_policy_v1".to_owned(),
-            source_revision: "development".to_owned(),
-            analyzers: vec![Box::new(FormatAnalyzer)],
-        }
+        Self::with_bundled_static_analyzers(
+            IngestionPolicy::default(),
+            "foundation_policy_v1",
+            "development",
+        )
+        .expect("built-in analysis engine configuration must remain valid")
     }
 }
 
