@@ -75,7 +75,7 @@ fn analysis_job_id_must_bind_identity_bearing_receipt_inputs() {
 }
 
 #[test]
-fn analysis_job_id_rejects_malformed_binding_and_missing_policy_identity() {
+fn analysis_job_id_rejects_malformed_binding_and_ambiguous_policy_identity() {
     let bundle = control_bundle();
 
     for malformed_job_id in [
@@ -96,7 +96,7 @@ fn analysis_job_id_rejects_malformed_binding_and_missing_policy_identity() {
         );
     }
 
-    let mut missing_policy_identity = bundle;
+    let mut missing_policy_identity = bundle.clone();
     let policy_boundary = missing_policy_identity
         .evidence
         .iter_mut()
@@ -106,5 +106,28 @@ fn analysis_job_id_rejects_malformed_binding_and_missing_policy_identity() {
     assert!(
         missing_policy_identity.validate().is_err(),
         "a job identity cannot be verified without its runtime policy identity"
+    );
+
+    let mut duplicate_policy_identity = bundle;
+    let mut duplicate_policy_boundary = duplicate_policy_identity
+        .evidence
+        .iter()
+        .find(|record| record.evidence_kind == EvidenceKind::PolicyBoundary)
+        .expect("control bundle must contain PolicyBoundary evidence")
+        .clone();
+    duplicate_policy_boundary
+        .attributes
+        .insert("policy_id".to_owned(), "forged_policy_v2".to_owned());
+    duplicate_policy_boundary.sequence_number = duplicate_policy_identity.evidence.len() + 1;
+    duplicate_policy_boundary.evidence_id = format!(
+        "{}:evidence:{:04}",
+        duplicate_policy_identity.analysis_job_id, duplicate_policy_boundary.sequence_number
+    );
+    duplicate_policy_identity
+        .evidence
+        .push(duplicate_policy_boundary);
+    assert!(
+        duplicate_policy_identity.validate().is_err(),
+        "a job identity cannot bind an ambiguous runtime policy identity"
     );
 }
