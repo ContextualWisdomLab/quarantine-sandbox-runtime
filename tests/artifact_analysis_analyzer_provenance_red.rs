@@ -29,10 +29,7 @@ impl StaticAnalyzer for AnalyzerVersionOne {
         Ok(vec![AnalyzerFinding {
             evidence_kind: EvidenceKind::StaticCapability,
             summary: "Analyzer implementation one detected capability alpha.".to_owned(),
-            attributes: BTreeMap::from([(
-                "semantic_result".to_owned(),
-                "alpha".to_owned(),
-            )]),
+            attributes: BTreeMap::from([("semantic_result".to_owned(), "alpha".to_owned())]),
         }])
     }
 }
@@ -51,10 +48,7 @@ impl StaticAnalyzer for AnalyzerVersionTwo {
         Ok(vec![AnalyzerFinding {
             evidence_kind: EvidenceKind::StaticCapability,
             summary: "Analyzer implementation two detected capability beta.".to_owned(),
-            attributes: BTreeMap::from([(
-                "semantic_result".to_owned(),
-                "beta".to_owned(),
-            )]),
+            attributes: BTreeMap::from([("semantic_result".to_owned(), "beta".to_owned())]),
         }])
     }
 }

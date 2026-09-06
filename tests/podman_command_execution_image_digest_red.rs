@@ -14,12 +14,10 @@ use quarantine_sandbox_runtime::{
 };
 use tempfile::TempDir;
 
-const OWNED_CONTAINER_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OWNED_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const EXPECTED_DIGEST_HEX: &str =
     "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-const WRONG_DIGEST_HEX: &str =
-    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+const WRONG_DIGEST_HEX: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -69,7 +67,11 @@ fn fake_podman() -> (TempDir, PathBuf, PathBuf) {
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'must-not-be-trusted\\n' ;;\n  kill:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(), info, OWNED_CONTAINER_ID, inspect, top
+        calls.display(),
+        info,
+        OWNED_CONTAINER_ID,
+        inspect,
+        top
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
