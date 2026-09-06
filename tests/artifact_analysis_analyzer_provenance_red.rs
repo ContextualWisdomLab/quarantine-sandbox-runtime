@@ -11,8 +11,9 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisEngine, AnalysisProfile, AnalysisRequest, AnalyzerFailure, AnalyzerFinding,
-    CONTRACT_SCHEMA_VERSION, EvidenceKind, IngestedArtifact, IngestionPolicy, StaticAnalyzer,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, CONTRACT_SCHEMA_VERSION, EvidenceKind, IngestedArtifact, IngestionPolicy,
+    StaticAnalyzer,
 };
 
 struct AnalyzerVersionOne;
@@ -112,9 +113,17 @@ fn materially_different_analyzers_cannot_share_one_deterministic_job_identity() 
                 second_engine.analyze_bytes(&request(), b"same hostile artifact bytes");
 
             match (first_result, second_result) {
-                (Err(_), Err(_)) => {
-                    // Fail-closed validation immediately before analyzer/worker
-                    // invocation is also valid when stable provenance is absent.
+                (Err(first_error), Err(second_error)) => {
+                    assert!(
+                        !matches!(first_error, AnalysisError::IsolatedAnalyzerWorkerRequired)
+                            && !matches!(
+                                second_error,
+                                AnalysisError::IsolatedAnalyzerWorkerRequired
+                            ),
+                        "#49's missing isolated-worker prerequisite is not #54 provenance GREEN; this RED must remain blocked until analyzer execution reaches provenance admission behind the worker boundary"
+                    );
+                    // A future provenance-specific fail-closed validation
+                    // immediately before analyzer/worker invocation is valid.
                 }
                 (Ok(first_bundle), Ok(second_bundle)) => {
                     let repeated_first_engine = AnalysisEngine::new(
