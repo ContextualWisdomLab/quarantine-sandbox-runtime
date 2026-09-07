@@ -284,8 +284,7 @@ impl SandboxWorkerIsolationEvidence {
                 return Some(field_name);
             }
         }
-        (!is_lowercase_sha256(&self.isolation_policy_sha256))
-            .then_some("isolation_policy_sha256")
+        (!is_lowercase_sha256(&self.isolation_policy_sha256)).then_some("isolation_policy_sha256")
     }
 
     pub(crate) fn boundary_violation(&self) -> Option<&'static str> {
@@ -298,7 +297,8 @@ impl SandboxWorkerIsolationEvidence {
         if !self.cleanup_completed {
             return Some("cleanup_completed");
         }
-        if self.isolation_state.external_egress_denied_status() != IsolationControlStatus::Verified {
+        if self.isolation_state.external_egress_denied_status() != IsolationControlStatus::Verified
+        {
             return Some("external_egress_denied");
         }
         if self.isolation_state.resource_limits_status() != IsolationControlStatus::Verified {

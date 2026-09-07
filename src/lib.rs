@@ -17,19 +17,20 @@ mod sandbox_execution;
 pub use application_service::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest, CommandExecutionResult,
-    ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId, ServiceEndpoint, ServiceProtocol,
-    execute_command,
+    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
+    CommandExecutionResult, ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId,
+    ServiceEndpoint, ServiceProtocol, execute_command,
 };
 pub use artifact_analysis::{
-    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure, AnalyzerFinding,
-    AnalyzerWorkerContractError, AnalyzerWorkerExecutionError, AnalyzerWorkerExecutionPort,
-    AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
-    AnalyzerWorkerRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION,
-    ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError, ContractError,
-    EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact, IngestionError,
-    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
+    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
+    AnalyzerWorkerOutcome, AnalyzerWorkerReceipt, AnalyzerWorkerRequest, ArtifactDescriptor,
+    ArtifactKind, BoundedSourceContext, CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE,
+    CONTRACT_SCHEMA_VERSION, ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError,
+    ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact,
+    IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer,
+    ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 pub use pr_source_artifact::{
@@ -45,7 +46,9 @@ pub use sandbox_execution::{
 impl From<SandboxExecutionError> for ApplicationServiceError {
     fn from(error: SandboxExecutionError) -> Self {
         match error {
-            SandboxExecutionError::InvalidPolicy { field_name } => Self::InvalidPolicy { field_name },
+            SandboxExecutionError::InvalidPolicy { field_name } => {
+                Self::InvalidPolicy { field_name }
+            }
             SandboxExecutionError::ResourceLimitExceeded { resource_name } => {
                 Self::ResourceLimitExceeded { resource_name }
             }
