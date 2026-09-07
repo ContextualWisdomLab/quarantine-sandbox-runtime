@@ -204,7 +204,10 @@ fn backend_failures_and_identifier_bytes_remain_typed() {
             ApplicationServiceError::CleanupFailed,
         ),
     ] {
-        assert_eq!(launch_with_program(fake_podman_failure(failure_operation)), Err(expected));
+        assert_eq!(
+            launch_with_program(fake_podman_failure(failure_operation)),
+            Err(expected)
+        );
     }
 }
 
