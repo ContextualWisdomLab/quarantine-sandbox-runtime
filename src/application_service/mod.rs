@@ -244,7 +244,7 @@ impl ApplicationServiceLease {
             policy_id: metadata.policy_id,
             policy_sha256: metadata.policy_sha256,
             endpoint,
-            started_at_epoch_seconds,
+            started_at_epoch_seconds: metadata.started_at_epoch_seconds,
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
             isolation_attestation: IsolationAttestation::p0(),
