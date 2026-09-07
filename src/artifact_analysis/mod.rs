@@ -29,6 +29,6 @@ pub use contracts::{
 };
 pub use ingestion::{IngestedArtifact, IngestionError, IngestionPolicy, ingest_bytes};
 pub use runtime::{
-    AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer, StaticAnalyzer,
-    to_pretty_json,
+    AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer,
+    StaticAnalyzer, to_pretty_json,
 };
