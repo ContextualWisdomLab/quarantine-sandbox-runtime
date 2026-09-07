@@ -88,6 +88,16 @@ class WorkflowActionPinPolicyTests(unittest.TestCase):
         write_required_repository(root, validator)
         return temporary_directory, root
 
+    def test_unpinned_action_in_primary_ci_workflow_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow(root, "ci.yml", "v1")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
     def test_unpinned_action_in_second_yml_workflow_fails(self) -> None:
         temporary_directory, root = self.new_repository()
         with temporary_directory:
