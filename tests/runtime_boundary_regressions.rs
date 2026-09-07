@@ -154,7 +154,7 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
         .port();
     let log = temporary_path("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 2048 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         backend_info_json(),
         network_inspection_json(),
@@ -165,7 +165,7 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
     );
     let program = write_executable("cleanup-output-limit-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone())
-        .with_command_output_limit_bytes(64)
+        .with_command_output_limit_bytes(1024)
         .with_command_timeout(Duration::from_secs(1));
     let lease = adapter
         .launch_at(&request(&"a".repeat(64)), &policy(), 1_780_000_000)
