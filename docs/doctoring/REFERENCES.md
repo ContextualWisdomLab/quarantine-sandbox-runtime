@@ -1,6 +1,6 @@
 # References
 
-Containers/Image Authors. (2026). *containers-transports — description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
+Containers/Image Authors. (2026). *containers-transports — Description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
 
 Dürst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
 
@@ -18,6 +18,18 @@ Kent, K., Chevalier, S., Grance, T., & Dang, H. (2006). *Guide to integrating fo
 
 Klyne, G., & Newman, C. (2002). *Date and time on the Internet: Timestamps (RFC 3339).* RFC Editor. https://doi.org/10.17487/RFC3339
 
+Linux Kernel Documentation. (2026). *Control group v2*. https://docs.kernel.org/admin-guide/cgroup-v2.html
+
+Linux Kernel Documentation. (2026). *The /proc filesystem: /proc/<pid>/mountinfo*. https://docs.kernel.org/filesystems/proc.html
+
+Linux Kernel Documentation. (2026). *Tmpfs*. https://docs.kernel.org/filesystems/tmpfs.html
+
+Linux man-pages project. (2026). *cgroup_namespaces(7)—Overview of Linux cgroup namespaces*. https://man7.org/linux/man-pages/man7/cgroup_namespaces.7.html
+
+Linux man-pages project. (2026). *namespaces(7)—Overview of Linux namespaces*. https://man7.org/linux/man-pages/man7/namespaces.7.html
+
+Linux man-pages project. (2026). *uts_namespaces(7)—Overview of Linux UTS namespaces*. https://man7.org/linux/man-pages/man7/uts_namespaces.7.html
+
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
 National Institute of Standards and Technology. (2024). *The NIST Cybersecurity Framework (CSF) 2.0* (NIST CSWP 29). https://doi.org/10.6028/NIST.CSWP.29
@@ -28,11 +40,17 @@ Nelson, A., Rekhi, S., Souppaya, M., & Scarfone, K. (2025). *Incident response r
 
 OASIS Open. (2022). *Static Analysis Results Interchange Format (SARIF) version 2.1.0*. https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 
+Open Container Initiative. (2025). *Open Container Initiative Image Specification — Image configuration*. https://specs.opencontainers.org/image-spec/config/
+
 Open Container Initiative. (2025). *Open Container Initiative Runtime Specification version 1.3.0*. https://specs.opencontainers.org/runtime-spec/?v=v1.3.0
 
 Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. https://slsa.dev/spec/v1.2/
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
+
+Podman Authors. (2026). *podman-container-inspect — Display a container’s configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
+
+Podman Authors. (n.d.). *Container inspect data definitions (Podman v4.9.3)*. GitHub. Retrieved September 4, 2026, from https://github.com/containers/podman/blob/v4.9.3/libpod/define/container_inspect.go
 
 Podman Authors. (2026). *podman-network-create — Create a network*. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
 
