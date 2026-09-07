@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalyzerWorkerBudget, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
-    AnalyzerWorkerIsolationEvidence, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
-    AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, ingest_bytes,
+    AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
+    AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, SandboxWorkerBudget,
+    SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
+use serde_json::json;
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ATTRIBUTE_COUNT: usize = 32;
@@ -14,9 +16,10 @@ const MAX_ATTRIBUTE_KEY_BYTES: usize = 128;
 const MAX_ATTRIBUTE_VALUE_BYTES: usize = 1_024;
 const MAX_SUMMARY_BYTES: usize = 4_096;
 const VALID_SHA256: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const WORKER_ID: &str = "worker_0123456789abcdef";
 
-fn budget() -> AnalyzerWorkerBudget {
-    AnalyzerWorkerBudget {
+fn budget() -> SandboxWorkerBudget {
+    SandboxWorkerBudget {
         maximum_cpu_millis: 5_000,
         maximum_memory_bytes: 256 * 1024 * 1024,
         maximum_pids: 32,
@@ -26,25 +29,46 @@ fn budget() -> AnalyzerWorkerBudget {
     }
 }
 
-fn analyzer_identity() -> AnalyzerWorkerIdentity {
-    AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
-        .expect("valid immutable analyzer identity")
+fn verified_isolation_state() -> VerifiedIsolationState {
+    serde_json::from_value(json!({
+        "rootless": "verified",
+        "read_only_root_filesystem": "verified",
+        "all_capabilities_dropped": "verified",
+        "no_new_privileges": "verified",
+        "isolated_user_namespace": "verified",
+        "external_egress_denied": "verified",
+        "loopback_only_publication": "not_applicable",
+        "seccomp_enforced": "verified",
+        "lsm_enforced": "verified",
+        "resource_limits_verified": "verified",
+        "credentials_available": false
+    }))
+    .expect("fixture isolation state must deserialize")
 }
 
-fn isolation_evidence() -> AnalyzerWorkerIsolationEvidence {
-    AnalyzerWorkerIsolationEvidence {
-        worker_id: "worker_0123456789abcdef".to_owned(),
+fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
+    SandboxWorkerIsolationEvidence {
+        worker_id: WORKER_ID.to_owned(),
         runtime_backend_id: "rootless_podman".to_owned(),
         runtime_backend_version: "5.4.2".to_owned(),
         isolation_policy_sha256: VALID_SHA256.to_owned(),
         applied_budget: budget(),
-        network_access_performed: false,
-        credentials_available: false,
+        isolation_state: verified_isolation_state(),
+        host_loopback_access_performed: false,
         host_filesystem_access_performed: false,
         runtime_socket_access_performed: false,
         uncontrolled_subprocess_performed: false,
+        termination: SandboxWorkerTerminationEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
+        },
         cleanup_completed: true,
     }
+}
+
+fn analyzer_identity() -> AnalyzerWorkerIdentity {
+    AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
+        .expect("valid immutable analyzer identity")
 }
 
 fn request_fixture<'a>(

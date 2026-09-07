@@ -3,24 +3,22 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalyzerWorkerBudget, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
-    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
-    AnalyzerWorkerIsolationEvidence, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
-    AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, ingest_bytes,
+    AnalyzerWorkerContractError, AnalyzerWorkerExecutionError, AnalyzerWorkerExecutionPort,
+    AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
+    AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, SandboxWorkerBudget,
+    SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
+use serde_json::json;
 
 const ISOLATION_POLICY_SHA256: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const INVALID_ISOLATION_POLICY_SHA256: &str =
     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+const WORKER_ID: &str = "worker_0123456789abcdef";
 
-fn analyzer_identity() -> AnalyzerWorkerIdentity {
-    AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
-        .expect("valid immutable analyzer identity")
-}
-
-fn budget() -> AnalyzerWorkerBudget {
-    AnalyzerWorkerBudget {
+fn budget() -> SandboxWorkerBudget {
+    SandboxWorkerBudget {
         maximum_cpu_millis: 5_000,
         maximum_memory_bytes: 256 * 1024 * 1024,
         maximum_pids: 32,
@@ -30,20 +28,49 @@ fn budget() -> AnalyzerWorkerBudget {
     }
 }
 
-fn isolation_evidence() -> AnalyzerWorkerIsolationEvidence {
-    AnalyzerWorkerIsolationEvidence {
-        worker_id: "worker_0123456789abcdef".to_owned(),
+fn isolation_state(
+    external_egress_denied: &str,
+    credentials_available: bool,
+) -> VerifiedIsolationState {
+    serde_json::from_value(json!({
+        "rootless": "verified",
+        "read_only_root_filesystem": "verified",
+        "all_capabilities_dropped": "verified",
+        "no_new_privileges": "verified",
+        "isolated_user_namespace": "verified",
+        "external_egress_denied": external_egress_denied,
+        "loopback_only_publication": "not_applicable",
+        "seccomp_enforced": "verified",
+        "lsm_enforced": "verified",
+        "resource_limits_verified": "verified",
+        "credentials_available": credentials_available
+    }))
+    .expect("fixture isolation state must deserialize")
+}
+
+fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
+    SandboxWorkerIsolationEvidence {
+        worker_id: WORKER_ID.to_owned(),
         runtime_backend_id: "rootless_podman".to_owned(),
         runtime_backend_version: "5.4.2".to_owned(),
         isolation_policy_sha256: ISOLATION_POLICY_SHA256.to_owned(),
         applied_budget: budget(),
-        network_access_performed: false,
-        credentials_available: false,
+        isolation_state: isolation_state("verified", false),
+        host_loopback_access_performed: false,
         host_filesystem_access_performed: false,
         runtime_socket_access_performed: false,
         uncontrolled_subprocess_performed: false,
+        termination: SandboxWorkerTerminationEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
+        },
         cleanup_completed: true,
     }
+}
+
+fn analyzer_identity() -> AnalyzerWorkerIdentity {
+    AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
+        .expect("valid immutable analyzer identity")
 }
 
 fn fixture_request<'a>(
@@ -235,29 +262,17 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
                 budget_mismatch.isolation.applied_budget.maximum_cpu_millis += 1;
             }
             "maximum_memory_bytes" => {
-                budget_mismatch
-                    .isolation
-                    .applied_budget
-                    .maximum_memory_bytes += 1;
+                budget_mismatch.isolation.applied_budget.maximum_memory_bytes += 1;
             }
             "maximum_pids" => budget_mismatch.isolation.applied_budget.maximum_pids += 1,
             "maximum_wall_time_millis" => {
-                budget_mismatch
-                    .isolation
-                    .applied_budget
-                    .maximum_wall_time_millis += 1;
+                budget_mismatch.isolation.applied_budget.maximum_wall_time_millis += 1;
             }
             "maximum_scratch_bytes" => {
-                budget_mismatch
-                    .isolation
-                    .applied_budget
-                    .maximum_scratch_bytes += 1;
+                budget_mismatch.isolation.applied_budget.maximum_scratch_bytes += 1;
             }
             "maximum_output_bytes" => {
-                budget_mismatch
-                    .isolation
-                    .applied_budget
-                    .maximum_output_bytes += 1;
+                budget_mismatch.isolation.applied_budget.maximum_output_bytes += 1;
             }
             _ => unreachable!(),
         }
@@ -273,8 +288,9 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
     }
 
     for field in [
-        "network_access_performed",
+        "external_egress_denied",
         "credentials_available",
+        "host_loopback_access_performed",
         "host_filesystem_access_performed",
         "runtime_socket_access_performed",
         "uncontrolled_subprocess_performed",
@@ -282,8 +298,15 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
     ] {
         let mut violated = receipt.clone();
         match field {
-            "network_access_performed" => violated.isolation.network_access_performed = true,
-            "credentials_available" => violated.isolation.credentials_available = true,
+            "external_egress_denied" => {
+                violated.isolation.isolation_state = isolation_state("unavailable", false);
+            }
+            "credentials_available" => {
+                violated.isolation.isolation_state = isolation_state("verified", true);
+            }
+            "host_loopback_access_performed" => {
+                violated.isolation.host_loopback_access_performed = true;
+            }
             "host_filesystem_access_performed" => {
                 violated.isolation.host_filesystem_access_performed = true;
             }

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{EvidenceKind, IngestedArtifact};
+use crate::sandbox_execution::{SandboxWorkerBudget, SandboxWorkerIsolationEvidence};
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ATTRIBUTE_COUNT: usize = 32;
@@ -62,41 +63,6 @@ impl AnalyzerWorkerIdentity {
     }
 }
 
-/// Explicit resource and result-channel budget requested for one analyzer worker.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AnalyzerWorkerBudget {
-    /// Maximum CPU time budget in milliseconds.
-    pub maximum_cpu_millis: u64,
-    /// Maximum resident memory budget in bytes.
-    pub maximum_memory_bytes: u64,
-    /// Maximum process count.
-    pub maximum_pids: u64,
-    /// Maximum wall-clock execution time in milliseconds.
-    pub maximum_wall_time_millis: u64,
-    /// Maximum writable scratch-space budget in bytes.
-    pub maximum_scratch_bytes: u64,
-    /// Maximum worker output budget in bytes.
-    pub maximum_output_bytes: u64,
-}
-
-impl AnalyzerWorkerBudget {
-    fn validate(self) -> Result<(), AnalyzerWorkerContractError> {
-        for (field_name, value) in [
-            ("maximum_cpu_millis", self.maximum_cpu_millis),
-            ("maximum_memory_bytes", self.maximum_memory_bytes),
-            ("maximum_pids", self.maximum_pids),
-            ("maximum_wall_time_millis", self.maximum_wall_time_millis),
-            ("maximum_scratch_bytes", self.maximum_scratch_bytes),
-            ("maximum_output_bytes", self.maximum_output_bytes),
-        ] {
-            if value == 0 {
-                return Err(AnalyzerWorkerContractError::InvalidBudget { field_name });
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Controller-owned request passed through the analyzer-worker execution port.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnalyzerWorkerRequest<'a> {
@@ -108,8 +74,8 @@ pub struct AnalyzerWorkerRequest<'a> {
     pub policy_id: String,
     /// Expected lower-case SHA-256 digest of the immutable isolation policy.
     pub isolation_policy_sha256: String,
-    /// Requested resource and worker-output ceilings.
-    pub budget: AnalyzerWorkerBudget,
+    /// Core-owned resource and worker-output ceilings.
+    pub budget: SandboxWorkerBudget,
 }
 
 impl<'a> AnalyzerWorkerRequest<'a> {
@@ -124,7 +90,7 @@ impl<'a> AnalyzerWorkerRequest<'a> {
         artifact: &'a IngestedArtifact,
         policy_id: &str,
         isolation_policy_sha256: &str,
-        budget: AnalyzerWorkerBudget,
+        budget: SandboxWorkerBudget,
     ) -> Result<Self, AnalyzerWorkerContractError> {
         let request = Self {
             analyzer: analyzer.clone(),
@@ -145,7 +111,10 @@ impl<'a> AnalyzerWorkerRequest<'a> {
                 field_name: "isolation_policy_sha256",
             });
         }
-        self.budget.validate()
+        if let Some(field_name) = self.budget.invalid_field() {
+            return Err(AnalyzerWorkerContractError::InvalidBudget { field_name });
+        }
+        Ok(())
     }
 }
 
@@ -223,72 +192,6 @@ impl AnalyzerWorkerOutcome {
     }
 }
 
-/// Runtime-owned isolation and cleanup evidence accompanying a worker result.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AnalyzerWorkerIsolationEvidence {
-    /// Runtime-owned worker invocation identifier.
-    pub worker_id: String,
-    /// Stable backend implementation identifier.
-    pub runtime_backend_id: String,
-    /// Backend implementation version.
-    pub runtime_backend_version: String,
-    /// Lower-case SHA-256 digest of the applied isolation policy.
-    pub isolation_policy_sha256: String,
-    /// Resource and output ceilings reported as applied by the backend.
-    pub applied_budget: AnalyzerWorkerBudget,
-    /// Whether the worker obtained network access.
-    pub network_access_performed: bool,
-    /// Whether ambient credentials were available to the worker.
-    pub credentials_available: bool,
-    /// Whether broad host filesystem access was observed or granted.
-    pub host_filesystem_access_performed: bool,
-    /// Whether a host/container runtime socket was accessible.
-    pub runtime_socket_access_performed: bool,
-    /// Whether uncontrolled subprocess execution authority was available.
-    pub uncontrolled_subprocess_performed: bool,
-    /// Whether runtime-owned cleanup completed successfully.
-    pub cleanup_completed: bool,
-}
-
-impl AnalyzerWorkerIsolationEvidence {
-    fn validate_identity(&self) -> Result<(), AnalyzerWorkerContractError> {
-        validate_identity_text("worker_id", &self.worker_id)?;
-        validate_identity_text("runtime_backend_id", &self.runtime_backend_id)?;
-        validate_identity_text("runtime_backend_version", &self.runtime_backend_version)?;
-        if !is_lowercase_sha256(&self.isolation_policy_sha256) {
-            return Err(AnalyzerWorkerContractError::InvalidIdentity {
-                field_name: "isolation_policy_sha256",
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_boundary(&self) -> Result<(), AnalyzerWorkerContractError> {
-        for (field_name, violated) in [
-            ("network_access_performed", self.network_access_performed),
-            ("credentials_available", self.credentials_available),
-            (
-                "host_filesystem_access_performed",
-                self.host_filesystem_access_performed,
-            ),
-            (
-                "runtime_socket_access_performed",
-                self.runtime_socket_access_performed,
-            ),
-            (
-                "uncontrolled_subprocess_performed",
-                self.uncontrolled_subprocess_performed,
-            ),
-            ("cleanup_completed", !self.cleanup_completed),
-        ] {
-            if violated {
-                return Err(AnalyzerWorkerContractError::IsolationBoundaryViolated { field_name });
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Worker result plus controller-verifiable request-binding evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnalyzerWorkerReceipt {
@@ -298,8 +201,8 @@ pub struct AnalyzerWorkerReceipt {
     pub artifact_sha256: String,
     /// Worker policy identifier reported by the backend.
     pub policy_id: String,
-    /// Runtime-owned isolation and cleanup evidence.
-    pub isolation: AnalyzerWorkerIsolationEvidence,
+    /// Core-owned runtime isolation, lifecycle, and cleanup evidence.
+    pub isolation: SandboxWorkerIsolationEvidence,
     /// Bounded analyzer result.
     pub outcome: AnalyzerWorkerOutcome,
 }
@@ -313,8 +216,9 @@ impl AnalyzerWorkerReceipt {
     /// # Errors
     ///
     /// Returns [`AnalyzerWorkerContractError`] when the receipt contradicts the
-    /// request, contains malformed runtime-owned identity, reports a denied
-    /// ambient capability, omits cleanup, or contains an unbounded outcome.
+    /// request, contains malformed runtime-owned identity, reports an unavailable
+    /// required control or denied capability, lacks exact terminal cleanup
+    /// evidence, or contains an unbounded outcome.
     pub fn validate_against(
         &self,
         request: &AnalyzerWorkerRequest<'_>,
@@ -336,7 +240,9 @@ impl AnalyzerWorkerReceipt {
                 field_name: "policy_id",
             });
         }
-        self.isolation.validate_identity()?;
+        if let Some(field_name) = self.isolation.invalid_identity_field() {
+            return Err(AnalyzerWorkerContractError::InvalidIdentity { field_name });
+        }
         if self.isolation.isolation_policy_sha256 != request.isolation_policy_sha256 {
             return Err(AnalyzerWorkerContractError::ReceiptMismatch {
                 field_name: "isolation_policy_sha256",
@@ -347,7 +253,9 @@ impl AnalyzerWorkerReceipt {
                 field_name: "applied_budget",
             });
         }
-        self.isolation.validate_boundary()?;
+        if let Some(field_name) = self.isolation.boundary_violation() {
+            return Err(AnalyzerWorkerContractError::IsolationBoundaryViolated { field_name });
+        }
         self.outcome.validate()
     }
 }
@@ -373,7 +281,7 @@ pub enum AnalyzerWorkerContractError {
         /// Stable field name.
         field_name: &'static str,
     },
-    /// Runtime-owned receipt evidence reports a denied capability or missing cleanup.
+    /// Runtime-owned receipt evidence reports a denied capability or invalid lifecycle state.
     #[error("analyzer-worker isolation boundary violated: {field_name}")]
     IsolationBoundaryViolated {
         /// Stable field name.

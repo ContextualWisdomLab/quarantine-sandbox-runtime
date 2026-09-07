@@ -1,22 +1,62 @@
 //! Contract coverage for bounded worker-port identifiers and immutable SHA-256 identities.
 
 use quarantine_sandbox_runtime::{
-    AnalyzerWorkerBudget, AnalyzerWorkerIdentity, AnalyzerWorkerIsolationEvidence,
-    AnalyzerWorkerOutcome, AnalyzerWorkerReceipt, AnalyzerWorkerRequest, IngestionPolicy,
+    AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt, AnalyzerWorkerRequest,
+    IngestionPolicy, SandboxWorkerBudget, SandboxWorkerIsolationEvidence,
+    SandboxWorkerTerminationEvidence, SandboxWorkerTerminationState, VerifiedIsolationState,
     ingest_bytes,
 };
+use serde_json::json;
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const VALID_SHA256: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const WORKER_ID: &str = "worker_0123456789abcdef";
 
-fn budget() -> AnalyzerWorkerBudget {
-    AnalyzerWorkerBudget {
+fn budget() -> SandboxWorkerBudget {
+    SandboxWorkerBudget {
         maximum_cpu_millis: 5_000,
         maximum_memory_bytes: 256 * 1024 * 1024,
         maximum_pids: 32,
         maximum_wall_time_millis: 10_000,
         maximum_scratch_bytes: 64 * 1024 * 1024,
         maximum_output_bytes: 65_536,
+    }
+}
+
+fn verified_isolation_state() -> VerifiedIsolationState {
+    serde_json::from_value(json!({
+        "rootless": "verified",
+        "read_only_root_filesystem": "verified",
+        "all_capabilities_dropped": "verified",
+        "no_new_privileges": "verified",
+        "isolated_user_namespace": "verified",
+        "external_egress_denied": "verified",
+        "loopback_only_publication": "not_applicable",
+        "seccomp_enforced": "verified",
+        "lsm_enforced": "verified",
+        "resource_limits_verified": "verified",
+        "credentials_available": false
+    }))
+    .expect("fixture isolation state must deserialize")
+}
+
+fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
+    SandboxWorkerIsolationEvidence {
+        worker_id: WORKER_ID.to_owned(),
+        runtime_backend_id: "rootless_podman".to_owned(),
+        runtime_backend_version: "5.4.2".to_owned(),
+        isolation_policy_sha256: VALID_SHA256.to_owned(),
+        applied_budget: budget(),
+        isolation_state: verified_isolation_state(),
+        host_loopback_access_performed: false,
+        host_filesystem_access_performed: false,
+        runtime_socket_access_performed: false,
+        uncontrolled_subprocess_performed: false,
+        termination: SandboxWorkerTerminationEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
+        },
+        cleanup_completed: true,
     }
 }
 
@@ -102,19 +142,7 @@ fn worker_receipt_rejects_oversized_or_control_runtime_evidence_identity() {
         analyzer: identity,
         artifact_sha256: artifact.descriptor().artifact_sha256.clone(),
         policy_id: "artifact_worker_policy_v1".to_owned(),
-        isolation: AnalyzerWorkerIsolationEvidence {
-            worker_id: "worker_0123456789abcdef".to_owned(),
-            runtime_backend_id: "rootless_podman".to_owned(),
-            runtime_backend_version: "5.4.2".to_owned(),
-            isolation_policy_sha256: VALID_SHA256.to_owned(),
-            applied_budget: budget(),
-            network_access_performed: false,
-            credentials_available: false,
-            host_filesystem_access_performed: false,
-            runtime_socket_access_performed: false,
-            uncontrolled_subprocess_performed: false,
-            cleanup_completed: true,
-        },
+        isolation: isolation_evidence(),
         outcome: AnalyzerWorkerOutcome::Failed {
             failure_code: "fixture_failure".to_owned(),
         },

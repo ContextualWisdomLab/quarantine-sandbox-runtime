@@ -13,9 +13,8 @@ mod ingestion;
 mod runtime;
 
 pub use analyzer_worker::{
-    AnalyzerWorkerBudget, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
-    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
-    AnalyzerWorkerIsolationEvidence, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
+    AnalyzerWorkerContractError, AnalyzerWorkerExecutionError, AnalyzerWorkerExecutionPort,
+    AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
     AnalyzerWorkerRequest,
 };
 pub use claude_plugin_package::{
