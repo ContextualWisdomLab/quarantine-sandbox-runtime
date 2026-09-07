@@ -152,14 +152,8 @@ fn worker_finding_attributes_match_normalized_evidence_bounds() {
     let invalid_attributes = [
         BTreeMap::from([(String::new(), "value".to_owned())]),
         BTreeMap::from([("key".to_owned(), String::new())]),
-        BTreeMap::from([(
-            "k".repeat(MAX_ATTRIBUTE_KEY_BYTES + 1),
-            "value".to_owned(),
-        )]),
-        BTreeMap::from([(
-            "key".to_owned(),
-            "v".repeat(MAX_ATTRIBUTE_VALUE_BYTES + 1),
-        )]),
+        BTreeMap::from([("k".repeat(MAX_ATTRIBUTE_KEY_BYTES + 1), "value".to_owned())]),
+        BTreeMap::from([("key".to_owned(), "v".repeat(MAX_ATTRIBUTE_VALUE_BYTES + 1))]),
         BTreeMap::from([("key\nforged".to_owned(), "value".to_owned())]),
         BTreeMap::from([("key".to_owned(), "value\nforged".to_owned())]),
         (0..=MAX_ATTRIBUTE_COUNT)
