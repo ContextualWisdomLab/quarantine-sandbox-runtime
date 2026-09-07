@@ -2,11 +2,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::{
-    fs,
-    io::ErrorKind,
-    path::PathBuf,
-};
+use std::{fs, io::ErrorKind, path::PathBuf};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, BackendInvocationFailureKind,
