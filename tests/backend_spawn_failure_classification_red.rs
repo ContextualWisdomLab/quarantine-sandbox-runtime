@@ -75,3 +75,15 @@ fn missing_backend_executable_preserves_not_found_spawn_class() {
         })
     );
 }
+
+#[test]
+fn public_backend_invocation_failure_text_is_provider_neutral() {
+    let error = ApplicationServiceError::BackendInvocationFailed {
+        operation: "runtime_inspection",
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "backend invocation failed during runtime_inspection"
+    );
+}
