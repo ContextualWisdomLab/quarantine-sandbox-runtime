@@ -297,6 +297,31 @@ impl SandboxWorkerIsolationEvidence {
         if !self.cleanup_completed {
             return Some("cleanup_completed");
         }
+        for (field_name, status) in [
+            ("rootless", self.isolation_state.rootless_status()),
+            (
+                "read_only_root_filesystem",
+                self.isolation_state.read_only_root_filesystem_status(),
+            ),
+            (
+                "all_capabilities_dropped",
+                self.isolation_state.all_capabilities_dropped_status(),
+            ),
+            (
+                "no_new_privileges",
+                self.isolation_state.no_new_privileges_status(),
+            ),
+            (
+                "isolated_user_namespace",
+                self.isolation_state.isolated_user_namespace_status(),
+            ),
+            ("seccomp_enforced", self.isolation_state.seccomp_status()),
+            ("lsm_enforced", self.isolation_state.lsm_status()),
+        ] {
+            if status != IsolationControlStatus::Verified {
+                return Some(field_name);
+            }
+        }
         if self.isolation_state.external_egress_denied_status() != IsolationControlStatus::Verified
         {
             return Some("external_egress_denied");
