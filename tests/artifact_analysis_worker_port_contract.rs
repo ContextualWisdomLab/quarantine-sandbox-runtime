@@ -262,17 +262,29 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
                 budget_mismatch.isolation.applied_budget.maximum_cpu_millis += 1;
             }
             "maximum_memory_bytes" => {
-                budget_mismatch.isolation.applied_budget.maximum_memory_bytes += 1;
+                budget_mismatch
+                    .isolation
+                    .applied_budget
+                    .maximum_memory_bytes += 1;
             }
             "maximum_pids" => budget_mismatch.isolation.applied_budget.maximum_pids += 1,
             "maximum_wall_time_millis" => {
-                budget_mismatch.isolation.applied_budget.maximum_wall_time_millis += 1;
+                budget_mismatch
+                    .isolation
+                    .applied_budget
+                    .maximum_wall_time_millis += 1;
             }
             "maximum_scratch_bytes" => {
-                budget_mismatch.isolation.applied_budget.maximum_scratch_bytes += 1;
+                budget_mismatch
+                    .isolation
+                    .applied_budget
+                    .maximum_scratch_bytes += 1;
             }
             "maximum_output_bytes" => {
-                budget_mismatch.isolation.applied_budget.maximum_output_bytes += 1;
+                budget_mismatch
+                    .isolation
+                    .applied_budget
+                    .maximum_output_bytes += 1;
             }
             _ => unreachable!(),
         }
