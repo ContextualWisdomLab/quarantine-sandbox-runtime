@@ -166,9 +166,9 @@ fn artifact_analysis_composes_existing_core_isolation_state() {
         ),
     );
 
-    receipt
-        .validate_against(&request)
-        .expect("Core-owned verified isolation and terminal evidence must compose with the artifact port");
+    receipt.validate_against(&request).expect(
+        "Core-owned verified isolation and terminal evidence must compose with the artifact port",
+    );
 }
 
 #[test]
