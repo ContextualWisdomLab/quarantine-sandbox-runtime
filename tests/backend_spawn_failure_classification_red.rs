@@ -2,7 +2,11 @@
 
 #![cfg(target_os = "linux")]
 
-use std::path::PathBuf;
+use std::{
+    fs,
+    io::ErrorKind,
+    path::PathBuf,
+};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, BackendInvocationFailureKind,
@@ -43,16 +47,32 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
+fn owned_empty_directory() -> PathBuf {
+    for attempt in 0_u32..1_000 {
+        let directory = std::env::temp_dir().join(format!(
+            "quarantine-sandbox-runtime-spawn-red-{}-{attempt}",
+            std::process::id()
+        ));
+        match fs::create_dir(&directory) {
+            Ok(()) => return directory,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("failed to create private RED fixture directory: {error}"),
+        }
+    }
+    panic!("failed to allocate a unique private RED fixture directory");
+}
+
 #[test]
 fn missing_backend_executable_preserves_not_found_spawn_class() {
-    let definitely_missing = PathBuf::from(format!(
-        "/tmp/quarantine-sandbox-runtime-missing-backend-{}",
-        std::process::id()
-    ));
+    let fixture_directory = owned_empty_directory();
+    let definitely_missing = fixture_directory.join("podman");
     let adapter = RootlessPodmanAdapter::new(definitely_missing);
 
+    let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
+    fs::remove_dir(&fixture_directory).expect("private RED fixture directory should stay empty");
+
     assert_eq!(
-        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        result,
         Err(ApplicationServiceError::BackendSpawnFailed {
             operation: "rootless_probe",
             failure_kind: BackendInvocationFailureKind::NotFound,
