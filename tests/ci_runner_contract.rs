@@ -85,7 +85,10 @@ fn every_checkout_discards_persisted_credentials() {
         );
     }
 
-    assert!(checkout_count > 0, "CI must contain at least one checkout step");
+    assert!(
+        checkout_count > 0,
+        "CI must contain at least one checkout step"
+    );
 }
 
 #[test]
