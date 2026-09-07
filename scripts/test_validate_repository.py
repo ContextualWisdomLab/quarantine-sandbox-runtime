@@ -46,8 +46,8 @@ def write_required_repository(root: pathlib.Path, validator) -> None:
             path.write_text("", encoding="utf-8")
 
 
-def write_workflow(root: pathlib.Path, name: str, action_reference: str) -> None:
-    """Write one minimal workflow containing a single action reference."""
+def write_workflow_uses_target(root: pathlib.Path, name: str, uses_target: str) -> None:
+    """Write one minimal workflow containing the supplied action or workflow reference."""
     workflow_path = root / ".github" / "workflows" / name
     workflow_path.parent.mkdir(parents=True, exist_ok=True)
     workflow_path.write_text(
@@ -59,7 +59,34 @@ def write_workflow(root: pathlib.Path, name: str, action_reference: str) -> None
                 "  verify:",
                 "    runs-on: ubuntu-24.04",
                 "    steps:",
-                f"      - uses: actions/checkout@{action_reference}",
+                f"      - uses: {uses_target}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_workflow(root: pathlib.Path, name: str, action_reference: str) -> None:
+    """Write one minimal workflow containing a single external action reference."""
+    write_workflow_uses_target(root, name, f"actions/checkout@{action_reference}")
+
+
+def write_reusable_workflow(root: pathlib.Path, name: str) -> None:
+    """Write a same-repository reusable workflow with no external action dependency."""
+    workflow_path = root / ".github" / "workflows" / name
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: reusable-policy-fixture",
+                "on:",
+                "  workflow_call:",
+                "jobs:",
+                "  verify:",
+                "    runs-on: ubuntu-24.04",
+                "    steps:",
+                "      - run: true",
                 "",
             ]
         ),
@@ -130,6 +157,42 @@ class WorkflowActionPinPolicyTests(unittest.TestCase):
 
             self.assertEqual(result, 1)
             self.assertIn("workflow", stderr.lower())
+
+    def test_same_repository_action_at_running_commit_remains_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow_uses_target(
+                root,
+                "ci.yml",
+                "$/.github/actions/runtime-policy",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_same_repository_reusable_workflow_at_running_commit_remains_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_reusable_workflow(root, "reusable.yml")
+            caller_path = root / ".github" / "workflows" / "ci.yml"
+            caller_path.write_text(
+                "\n".join(
+                    [
+                        "name: local-reusable-workflow-policy-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    uses: $/.github/workflows/reusable.yml",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
 
     def test_multiple_sha_pinned_workflows_remain_valid(self) -> None:
         temporary_directory, root = self.new_repository()
