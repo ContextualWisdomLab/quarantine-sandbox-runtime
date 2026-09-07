@@ -1,6 +1,7 @@
 //! Rootless Podman infrastructure adapter for isolated application services.
 
 use std::{
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::PathBuf,
     process::Output,
@@ -13,8 +14,9 @@ use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
-    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationPolicy, ServiceEndpoint, sandbox_execution::RuntimeLeaseMetadata,
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
+    BackendInvocationFailureKind, CleanupReceipt, IsolationPolicy, ServiceEndpoint,
+    sandbox_execution::RuntimeLeaseMetadata,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -553,22 +555,26 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output =
-            self.command_runner()
-                .run(&self.program, args)
-                .map_err(|error| match error {
-                    BoundedCommandError::Timeout => {
-                        ApplicationServiceError::BackendCommandTimedOut { operation }
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| match error {
+                BoundedCommandError::Timeout => {
+                    ApplicationServiceError::BackendCommandTimedOut { operation }
+                }
+                BoundedCommandError::OutputLimit => {
+                    ApplicationServiceError::BackendOutputLimitExceeded { operation }
+                }
+                BoundedCommandError::Spawn(error_kind) => {
+                    ApplicationServiceError::BackendSpawnFailed {
+                        operation,
+                        failure_kind: classify_spawn_failure(error_kind),
                     }
-                    BoundedCommandError::OutputLimit => {
-                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                    }
-                    BoundedCommandError::Spawn
-                    | BoundedCommandError::Wait
-                    | BoundedCommandError::Capture => {
-                        ApplicationServiceError::BackendInvocationFailed { operation }
-                    }
-                })?;
+                }
+                BoundedCommandError::Wait | BoundedCommandError::Capture => {
+                    ApplicationServiceError::BackendInvocationFailed { operation }
+                }
+            })?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -643,6 +649,17 @@ impl RootlessPodmanAdapter {
 impl Default for RootlessPodmanAdapter {
     fn default() -> Self {
         Self::new("podman")
+    }
+}
+
+fn classify_spawn_failure(error_kind: ErrorKind) -> BackendInvocationFailureKind {
+    match error_kind {
+        ErrorKind::NotFound => BackendInvocationFailureKind::NotFound,
+        ErrorKind::PermissionDenied => BackendInvocationFailureKind::PermissionDenied,
+        ErrorKind::WouldBlock | ErrorKind::OutOfMemory => {
+            BackendInvocationFailureKind::ResourceExhausted
+        }
+        _ => BackendInvocationFailureKind::Other,
     }
 }
 
@@ -874,5 +891,37 @@ fn wait_for_readiness(
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::ErrorKind;
+
+    use super::classify_spawn_failure;
+    use crate::BackendInvocationFailureKind;
+
+    #[test]
+    fn spawn_failure_classification_is_bounded_and_forward_compatible() {
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::NotFound),
+            BackendInvocationFailureKind::NotFound
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::PermissionDenied),
+            BackendInvocationFailureKind::PermissionDenied
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::WouldBlock),
+            BackendInvocationFailureKind::ResourceExhausted
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::OutOfMemory),
+            BackendInvocationFailureKind::ResourceExhausted
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::InvalidInput),
+            BackendInvocationFailureKind::Other
+        );
     }
 }
