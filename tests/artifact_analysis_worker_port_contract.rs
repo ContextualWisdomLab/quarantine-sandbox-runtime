@@ -116,14 +116,8 @@ fn worker_request_requires_immutable_analyzer_identity_and_nonzero_budgets() {
     }
 
     assert!(
-        AnalyzerWorkerRequest::new(
-            &identity,
-            &artifact,
-            "",
-            ISOLATION_POLICY_SHA256,
-            budget(),
-        )
-        .is_err(),
+        AnalyzerWorkerRequest::new(&identity, &artifact, "", ISOLATION_POLICY_SHA256, budget(),)
+            .is_err(),
         "empty policy identity must fail closed"
     );
     assert!(
