@@ -666,28 +666,25 @@ fn effective_lsm_verified(
     process: &ProcessSecurityEvidence,
 ) -> bool {
     let runtime_label = process.lsm_label.trim();
-    if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
-        return false;
-    }
 
     if info.host.security.selinux_enabled {
+        if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
+            return false;
+        }
         let inspect_label = container.process_label.trim();
         return !inspect_label.is_empty()
             && !inspect_label.eq_ignore_ascii_case("unconfined")
             && inspect_label == runtime_label;
     }
 
-    if info.host.security.apparmor_enabled {
-        let inspect_profile = container.apparmor_profile.trim();
-        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
-            return false;
-        };
-        return !inspect_profile.is_empty()
-            && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_profile;
-    }
-
-    false
+    debug_assert!(info.host.security.apparmor_enabled);
+    let inspect_profile = container.apparmor_profile.trim();
+    let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+        return false;
+    };
+    !inspect_profile.is_empty()
+        && !inspect_profile.eq_ignore_ascii_case("unconfined")
+        && inspect_profile == runtime_profile
 }
 
 fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
@@ -870,9 +867,6 @@ fn wait_for_readiness(
             return Ok(());
         }
         let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
     }
 }
