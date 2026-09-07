@@ -2,61 +2,51 @@
 
 ## Decision status
 
-Proposed security-policy repair. Production/runtime behavior is unchanged on this branch. The current slice is RED-only until GitHub-hosted execution demonstrates the repository validator's workflow action-discovery gaps on the exact head.
+Proposed security-policy repair. The hardened RED has now executed causally. Minimum production/policy repair `eeec132cc61fbc86a07c09f75be828afc4d566c3` is a candidate only until an unchanged exact descendant reacquires repository tests and the remaining gates.
 
 ## Problem and live authority
 
-Root PR #1 exact `78281e244c530dcafb3368b9f1d9896e846206a9` keeps `scripts/validate_repository.py` as the repository-local policy gate. Fresh exact-source review found two independent false-negative paths in its action-pin check.
+Root PR #1 exact `78281e244c530dcafb3368b9f1d9896e846206a9` keeps `scripts/validate_repository.py` as the repository-local policy gate. Exact-source review found two independent false-negative paths in its action-pin check.
 
-First, the validator reads only `.github/workflows/ci.yml`; a second `.yml` or `.yaml` workflow is outside the scan. If `ci.yml` is absent, `read_text()` raises instead of returning a deterministic policy failure.
+First, the validator read only `.github/workflows/ci.yml`; a second `.yml` or `.yaml` workflow was outside the scan. If `ci.yml` was absent, `read_text()` raised instead of returning a deterministic policy failure.
 
-Second, the validator collects only lines for which `line.strip().startswith("uses:")`. The repository's real workflow steps use normal YAML sequence syntax such as `- uses: actions/checkout@<sha>`, and the RED fixtures intentionally use the same form. After stripping whitespace those lines begin with `- uses:`, so the current validator does not inspect even the existing `ci.yml` action references. Review `5134484233` records this broader false-negative.
+Second, it collected only lines for which `line.strip().startswith("uses:")`. The repository's real workflow steps use normal YAML sequence syntax such as `- uses: actions/checkout@<sha>`. After stripping whitespace those lines still begin with `- uses:`, so the validator did not inspect even the existing `ci.yml` action references. Review `5134484233` records this broader false-negative.
 
-The local policy therefore proves neither the repository workflow set nor the action references in the workflow it currently opens. A mutable tag or branch may be present in a normal workflow step while `python3 scripts/validate_repository.py` still returns success.
+This is repository security-policy validation, not `sandbox_execution`, `application_service`, or `artifact_analysis` domain behavior. Organization/reusable-workflow policy remains owned by `ContextualWisdomLab/.github`; this repository-local validator is defense in depth for checked-in workflows.
 
-This is repository security-policy validation, not `sandbox_execution`, `application_service`, or `artifact_analysis` domain behavior. It must not move runtime authority into a generic helper or weaken the exact-SHA contract. Organization/reusable-workflow policy remains owned by `ContextualWisdomLab/.github`; this repository-local validator is defense in depth for the files actually present here.
+## Executed RED
 
-## RED contract
+Initial test-bearing commit `f67bcb452f8002ed7eda13eb8e1988c0b1e035ed` added multi-workflow/missing-workflow fixtures. CI-harness `1de70ec9ee07a09b4e1964052746ffbd99646ae4` made them executable in verify. Hardened RED `54138900896cc7aa319fe2066c62ce8209f87ca3` added a primary-`ci.yml` case using the repository's admitted `- uses:` syntax. Gap-ledger head `54299dd50748cb5237530299ed6e1fa6e3845781` preserved zero production change.
 
-Initial test-bearing commit `f67bcb452f8002ed7eda13eb8e1988c0b1e035ed` added `scripts/test_validate_repository.py`. CI-harness commit `1de70ec9ee07a09b4e1964052746ffbd99646ae4` invokes that test from the existing verify lane without adding a new action dependency. Hardened RED commit `54138900896cc7aa319fe2066c62ce8209f87ca3` adds a primary-`ci.yml` case so sequence-step parsing is independently observable from multi-file discovery.
+Native CI `34150580702` on exact `54299dd...` executed the RED. Verify job `101831850483` passed exact checkout, dependency lock, and the existing repository-policy command, then failed at `Test repository policy validator`. A local exact-source reproduction separates the four intended failing cases: primary `ci.yml` `- uses:` was accepted, unpinned second `.yml` and `.yaml` workflows were accepted, and a missing workflow directory raised `FileNotFoundError`; the fully SHA-pinned multi-workflow control remained valid. The local reproduction is diagnostic detail; the GitHub job is the causal gate.
 
-The isolated fixture tests now require:
+## Minimum causal repair
 
-- an unpinned action written as normal `- uses:` syntax in primary `ci.yml` to fail policy validation;
-- an unpinned action in a second `*.yml` workflow to fail;
-- an unpinned action in a `*.yaml` workflow to fail;
-- a missing workflow directory to return a deterministic nonzero policy result instead of raising an uncaught filesystem exception;
-- multiple workflows whose actions are all full-length SHA pinned to remain valid.
+Production/policy commit `eeec132cc61fbc86a07c09f75be828afc4d566c3` changes only workflow action discovery/admission:
 
-Current production should fail the primary-`ci.yml`, second-`.yml`, `.yaml`, and missing-workflow requirements for their respective parsing/discovery/admission causes while the fully pinned control remains GREEN. No validator implementation change is authorized until this hardened RED executes causally.
+1. enumerate regular direct `.yml` and `.yaml` files under `.github/workflows` in deterministic order;
+2. convert an unreadable/missing/empty workflow surface into explicit policy errors;
+3. recognize both sequence-step `- uses: ...` and job-level `uses: ...` forms through one bounded line matcher;
+4. apply the pre-existing exact 40-character lowercase hexadecimal SHA requirement to every discovered `uses` target;
+5. retain every existing required-file, DDD, ADR, schema, placeholder, and database-name check.
 
-## Minimum causal GREEN
-
-After causal execution, change only repository workflow action discovery/admission:
-
-1. enumerate regular `.yml` and `.yaml` files directly under `.github/workflows` in deterministic order;
-2. return an explicit policy error if the workflow directory is missing, unreadable, or contains no workflow definitions;
-3. recognize normal workflow step entries written as `- uses: owner/action@reference` and apply the existing exact 40-character lower-case hexadecimal SHA requirement to every discovered external action reference;
-4. retain all current required-file, DDD, ADR, schema, placeholder, and database-name checks;
-5. do not introduce tag/branch allowlists, mutable exceptions, or a special exemption for reusable/thin-caller workflows.
-
-A full YAML-parser migration is not required for this bounded defect. The minimum repair must, however, parse the actual sequence-step shape the repository uses rather than preserving the current `startswith("uses:")` false negative. More complex YAML forms, if later admitted, require their own executable policy finding.
+No tag/branch allowlist, mutable exception, provider-specific policy, domain-runtime behavior, or central reusable-workflow implementation is added. Local execution of the five focused unit cases passes after this commit, but that does not substitute for exact-head CI.
 
 ## Alternatives considered
 
 **Scan only `ci.yml`.** Rejected because repository policy must cover the workflow set, not one historical filename.
 
-**Keep `startswith("uses:")` and only add multi-file enumeration.** Rejected because the repository's real action steps begin with `- uses:`; discovery without recognizing the admitted syntax remains a false GREEN.
+**Add multi-file enumeration but keep `startswith("uses:")`.** Rejected because the repository's admitted sequence-step syntax would remain unvalidated.
 
-**Rely only on organization GitHub Actions policy.** Rejected as the sole repository check. Organization policy is valuable enforcement but does not make the checked-in repository validator truthful or portable to forks/local review.
+**Rely only on organization GitHub Actions policy.** Rejected as the sole repository check; it does not make the checked-in validator truthful or portable to forks/local review.
 
-**Allow tags from trusted publishers.** Rejected. The existing repository contract intentionally requires immutable commit identities, and changing that acceptance set is unrelated to workflow discovery.
+**Allow tags from trusted publishers.** Rejected because the existing local contract intentionally requires immutable commit identities.
 
-**Silently accept no workflow directory.** Rejected. This repository requires CI/release evidence, so absence of the configured workflow surface is a policy failure rather than success.
+**Silently accept no workflow directory.** Rejected because this repository requires CI/release evidence.
 
 ## Security rationale
 
-GitHub's current Secure use reference states that pinning an action to a full-length commit SHA is the only way to consume an action as an immutable release, and GitHub exposes repository/organization policy to require full-length SHA pins. OpenSSF Scorecard likewise recommends hash pinning rather than version/tag pinning because tags can be renamed or repointed. The local validator should enforce that immutable-reference property over every action reference in every workflow it claims to validate.
+GitHub's Secure use reference states that pinning an action to a full-length commit SHA is the only way to consume it as an immutable release, and GitHub exposes policy to require full-length SHA pins. OpenSSF Scorecard likewise recommends hash pinning instead of version/tag pinning because tags can be repointed. The local validator must enforce that property over every action reference in every workflow it claims to validate.
 
 ## References
 
@@ -68,4 +58,4 @@ Open Source Security Foundation. (n.d.). *Scorecard FAQ: Pinned dependencies*. h
 
 ## Completion boundary
 
-A RED or GREEN in this focused policy test does not transfer root production coverage, security scanning, positive LSM, review, protected-integration, SBOM/provenance, reproducibility, rollback, or immutable-release evidence. The child must preserve current root ancestry non-force and reacquire all applicable exact-head gates after every movement.
+The executed RED and minimum candidate do not transfer root production coverage, security scanning, positive LSM, review, protected-integration, SBOM/provenance, reproducibility, rollback, or immutable-release evidence. Every head movement requires fresh exact-head gates.
