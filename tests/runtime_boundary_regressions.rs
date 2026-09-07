@@ -15,8 +15,7 @@ use quarantine_sandbox_runtime::{
     RootlessPodmanAdapter, ServiceProtocol,
 };
 
-const FAKE_CONTAINER_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const FAKE_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
