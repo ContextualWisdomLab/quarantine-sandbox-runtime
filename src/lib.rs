@@ -17,18 +17,20 @@ mod sandbox_execution;
 pub use application_service::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
-    CommandExecutionResult, ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId,
-    ServiceEndpoint, ServiceProtocol, execute_command,
+    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest, CommandExecutionResult,
+    ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId, ServiceEndpoint, ServiceProtocol,
+    execute_command,
 };
 pub use artifact_analysis::{
-    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
-    AnalyzerFinding, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure, AnalyzerFinding,
+    AnalyzerWorkerBudget, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
+    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
+    AnalyzerWorkerIsolationEvidence, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
+    AnalyzerWorkerRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION,
     ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError, ContractError,
     EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact, IngestionError,
-    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes,
-    to_pretty_json,
+    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 pub use pr_source_artifact::{

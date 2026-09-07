@@ -6,11 +6,18 @@
 //! `sandbox_execution` context through an explicit port rather than embedding
 //! container-backend details here.
 
+mod analyzer_worker;
 mod claude_plugin_package;
 mod contracts;
 mod ingestion;
 mod runtime;
 
+pub use analyzer_worker::{
+    AnalyzerWorkerBudget, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
+    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
+    AnalyzerWorkerIsolationEvidence, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
+    AnalyzerWorkerRequest,
+};
 pub use claude_plugin_package::{
     CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, ClaudePluginPackageAnalysisRequest,
     ClaudePluginPackageContractError,
@@ -22,6 +29,6 @@ pub use contracts::{
 };
 pub use ingestion::{IngestedArtifact, IngestionError, IngestionPolicy, ingest_bytes};
 pub use runtime::{
-    AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer,
-    StaticAnalyzer, to_pretty_json,
+    AnalysisEngine, AnalysisError, AnalyzerFailure, AnalyzerFinding, FormatAnalyzer, StaticAnalyzer,
+    to_pretty_json,
 };
