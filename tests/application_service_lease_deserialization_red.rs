@@ -109,4 +109,75 @@ fn public_lease_deserialization_rejects_invalid_schema_endpoint_and_chronology()
         serde_json::from_value::<ApplicationServiceLease>(impossible_chronology).is_err(),
         "lease expiry must be strictly later than the observed start"
     );
+
+    let mut zero_shutdown_grace = valid_lease();
+    zero_shutdown_grace["shutdown_grace_seconds"] = json!(0);
+    assert!(
+        serde_json::from_value::<ApplicationServiceLease>(zero_shutdown_grace).is_err(),
+        "zero shutdown grace must not materialize trusted lease evidence"
+    );
+}
+
+#[test]
+fn public_lease_deserialization_rejects_invalid_identifiers_and_digests() {
+    for (field_name, invalid_value) in [
+        ("request_id", json!("")),
+        ("request_id", json!("r".repeat(129))),
+        ("request_id", json!("request\ncontrol")),
+        ("image_reference", json!("localhost/cwl/tool:latest")),
+        (
+            "image_reference",
+            json!(format!("localhost/cwl/tool@sha256:{}", "A".repeat(64))),
+        ),
+        ("backend_id", json!("")),
+        ("backend_id", json!("RootlessPodman")),
+        ("backend_id", json!("a".repeat(65))),
+        ("sandbox_id", json!("")),
+        ("sandbox_id", json!("qsr_app_invalid")),
+        ("sandbox_id", json!("a".repeat(65))),
+        ("network_id", json!("")),
+        ("network_id", json!("qsr_net_invalid")),
+        ("network_id", json!("a".repeat(65))),
+        ("policy_id", json!("")),
+        ("policy_id", json!("p".repeat(129))),
+        ("policy_id", json!("policy\ncontrol")),
+        ("policy_sha256", json!("b".repeat(63))),
+        ("policy_sha256", json!("B".repeat(64))),
+        ("policy_sha256", json!("g".repeat(64))),
+    ] {
+        let mut forged = valid_lease();
+        forged[field_name] = invalid_value;
+        assert!(
+            serde_json::from_value::<ApplicationServiceLease>(forged).is_err(),
+            "invalid {field_name} must fail closed at the public lease wire boundary"
+        );
+    }
+}
+
+#[test]
+fn public_deserialization_rejects_unknown_members_for_closed_wire_objects() {
+    let endpoint = json!({
+        "host": "127.0.0.1",
+        "port": 8080,
+        "protocol": "http",
+        "unexpected": true
+    });
+    assert!(
+        serde_json::from_value::<ServiceEndpoint>(endpoint).is_err(),
+        "endpoint additionalProperties=false must be enforced by Rust deserialization"
+    );
+
+    let mut attestation = valid_attestation();
+    attestation["unexpected"] = json!(true);
+    assert!(
+        serde_json::from_value::<IsolationAttestation>(attestation).is_err(),
+        "attestation additionalProperties=false must be enforced by Rust deserialization"
+    );
+
+    let mut lease = valid_lease();
+    lease["unexpected"] = json!(true);
+    assert!(
+        serde_json::from_value::<ApplicationServiceLease>(lease).is_err(),
+        "lease additionalProperties=false must be enforced by Rust deserialization"
+    );
 }
