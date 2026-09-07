@@ -8,8 +8,9 @@ use quarantine_sandbox_runtime::{
     AnalyzerWorkerContractError, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome,
     AnalyzerWorkerReceipt, AnalyzerWorkerRequest, IngestedArtifact, IngestionPolicy,
     SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
-    SandboxWorkerTerminationState, ingest_bytes,
+    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
+use serde_json::json;
 
 const ISOLATION_POLICY_SHA256: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -31,7 +32,34 @@ fn worker_budget() -> SandboxWorkerBudget {
     }
 }
 
-fn termination(worker_id: &str, state: SandboxWorkerTerminationState) -> SandboxWorkerTerminationEvidence {
+fn verified_isolation_state() -> VerifiedIsolationState {
+    isolation_state("verified", false)
+}
+
+fn isolation_state(
+    external_egress_denied: &str,
+    credentials_available: bool,
+) -> VerifiedIsolationState {
+    serde_json::from_value(json!({
+        "rootless": "verified",
+        "read_only_root_filesystem": "verified",
+        "all_capabilities_dropped": "verified",
+        "no_new_privileges": "verified",
+        "isolated_user_namespace": "verified",
+        "external_egress_denied": external_egress_denied,
+        "loopback_only_publication": "not_applicable",
+        "seccomp_enforced": "verified",
+        "lsm_enforced": "verified",
+        "resource_limits_verified": "verified",
+        "credentials_available": credentials_available
+    }))
+    .expect("fixture isolation state must deserialize")
+}
+
+fn termination(
+    worker_id: &str,
+    state: SandboxWorkerTerminationState,
+) -> SandboxWorkerTerminationEvidence {
     SandboxWorkerTerminationEvidence {
         worker_id: worker_id.to_owned(),
         state,
@@ -40,6 +68,7 @@ fn termination(worker_id: &str, state: SandboxWorkerTerminationState) -> Sandbox
 
 fn isolation_evidence(
     termination: SandboxWorkerTerminationEvidence,
+    isolation_state: VerifiedIsolationState,
 ) -> SandboxWorkerIsolationEvidence {
     SandboxWorkerIsolationEvidence {
         worker_id: WORKER_ID.to_owned(),
@@ -47,8 +76,8 @@ fn isolation_evidence(
         runtime_backend_version: "5.4.2".to_owned(),
         isolation_policy_sha256: ISOLATION_POLICY_SHA256.to_owned(),
         applied_budget: worker_budget(),
-        network_access_performed: false,
-        credentials_available: false,
+        isolation_state,
+        host_loopback_access_performed: false,
         host_filesystem_access_performed: false,
         runtime_socket_access_performed: false,
         uncontrolled_subprocess_performed: false,
@@ -88,7 +117,7 @@ fn fixture_receipt(
 }
 
 #[test]
-fn artifact_analysis_composes_core_owned_worker_isolation_values() {
+fn artifact_analysis_composes_existing_core_isolation_state() {
     let core_source = include_str!("../src/sandbox_execution/mod.rs");
     let supporting_source = include_str!("../src/artifact_analysis/analyzer_worker.rs");
 
@@ -103,6 +132,10 @@ fn artifact_analysis_composes_core_owned_worker_isolation_values() {
             "Core sandbox_execution must own {core_type}"
         );
     }
+    assert!(
+        core_source.contains("pub isolation_state: VerifiedIsolationState"),
+        "worker evidence must compose the existing Core VerifiedIsolationState rather than copy its controls"
+    );
     for duplicate_type in [
         "pub struct AnalyzerWorkerBudget",
         "pub struct AnalyzerWorkerIsolationEvidence",
@@ -124,15 +157,18 @@ fn artifact_analysis_composes_core_owned_worker_isolation_values() {
     let receipt = fixture_receipt(
         &identity,
         &artifact,
-        isolation_evidence(termination(
-            WORKER_ID,
-            SandboxWorkerTerminationState::Exited { exit_code: 0 },
-        )),
+        isolation_evidence(
+            termination(
+                WORKER_ID,
+                SandboxWorkerTerminationState::Exited { exit_code: 0 },
+            ),
+            verified_isolation_state(),
+        ),
     );
 
     receipt
         .validate_against(&request)
-        .expect("Core-owned terminal worker evidence must compose with the artifact port");
+        .expect("Core-owned verified isolation and terminal evidence must compose with the artifact port");
 }
 
 #[test]
@@ -149,7 +185,10 @@ fn receipt_rejects_nonterminal_or_other_worker_termination_evidence() {
     let running = fixture_receipt(
         &identity,
         &artifact,
-        isolation_evidence(termination(WORKER_ID, SandboxWorkerTerminationState::Running)),
+        isolation_evidence(
+            termination(WORKER_ID, SandboxWorkerTerminationState::Running),
+            verified_isolation_state(),
+        ),
     );
     assert!(
         matches!(
@@ -164,10 +203,13 @@ fn receipt_rejects_nonterminal_or_other_worker_termination_evidence() {
     let wrong_worker = fixture_receipt(
         &identity,
         &artifact,
-        isolation_evidence(termination(
-            "worker_other_0123456789abcdef",
-            SandboxWorkerTerminationState::Exited { exit_code: 0 },
-        )),
+        isolation_evidence(
+            termination(
+                "worker_other_0123456789abcdef",
+                SandboxWorkerTerminationState::Exited { exit_code: 0 },
+            ),
+            verified_isolation_state(),
+        ),
     );
     assert!(
         matches!(
@@ -177,5 +219,59 @@ fn receipt_rejects_nonterminal_or_other_worker_termination_evidence() {
             })
         ),
         "termination evidence for another worker must not authorize cleanup/outcome acceptance"
+    );
+}
+
+#[test]
+fn receipt_rejects_unverified_shared_core_isolation_state() {
+    let artifact = ingest_bytes(
+        "sample.bin",
+        b"hostile-but-immutable-artifact",
+        &IngestionPolicy::default(),
+    )
+    .expect("fixture ingestion must succeed");
+    let identity = analyzer_identity();
+    let request = fixture_request(&identity, &artifact);
+
+    let unverified_egress = fixture_receipt(
+        &identity,
+        &artifact,
+        isolation_evidence(
+            termination(
+                WORKER_ID,
+                SandboxWorkerTerminationState::Exited { exit_code: 0 },
+            ),
+            isolation_state("unavailable", false),
+        ),
+    );
+    assert!(
+        matches!(
+            unverified_egress.validate_against(&request),
+            Err(AnalyzerWorkerContractError::IsolationBoundaryViolated {
+                field_name: "external_egress_denied"
+            })
+        ),
+        "worker receipt must not bypass an unverified Core egress control"
+    );
+
+    let ambient_credentials = fixture_receipt(
+        &identity,
+        &artifact,
+        isolation_evidence(
+            termination(
+                WORKER_ID,
+                SandboxWorkerTerminationState::Exited { exit_code: 0 },
+            ),
+            isolation_state("verified", true),
+        ),
+    );
+    assert!(
+        matches!(
+            ambient_credentials.validate_against(&request),
+            Err(AnalyzerWorkerContractError::IsolationBoundaryViolated {
+                field_name: "credentials_available"
+            })
+        ),
+        "worker receipt must reject ambient credentials reported by the canonical Core isolation state"
     );
 }
