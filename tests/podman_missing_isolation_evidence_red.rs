@@ -17,7 +17,7 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 const GOOD_TOP: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
@@ -143,11 +143,8 @@ fn launch(
     fixture: Fixture,
 ) -> Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError> {
     let (program, log) = write_fake_podman(&fixture);
-    let result = RootlessPodmanAdapter::new(program.clone()).launch_at(
-        &request(),
-        &policy(),
-        1_780_000_000,
-    );
+    let result =
+        RootlessPodmanAdapter::new(program.clone()).launch_at(&request(), &policy(), 1_780_000_000);
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     result
