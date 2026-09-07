@@ -15,6 +15,9 @@ use quarantine_sandbox_runtime::{
     RootlessPodmanAdapter, ServiceProtocol,
 };
 
+const FAKE_CONTAINER_ID: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
         policy_id: "runtime_boundary_regression_v1".to_owned(),
@@ -49,6 +52,22 @@ fn request(digest: &str) -> ApplicationServiceRequest {
     }
 }
 
+fn backend_info_json() -> &'static str {
+    r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#
+}
+
+fn container_inspection_json() -> &'static str {
+    r#"[{"Id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#
+}
+
+fn network_inspection_json() -> &'static str {
+    r#"[{"internal":true,"dns_enabled":false}]"#
+}
+
+fn process_security_output() -> &'static str {
+    "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n"
+}
+
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -79,10 +98,11 @@ fn digest_pinned_image_accepts_numeric_sha256() {
 
 #[test]
 fn slow_successful_backend_command_is_polled_until_exit() {
-    let program = write_executable(
-        "slow-podman",
-        "#!/bin/sh\nset -eu\ncase \"${1:-}\" in\n  info) sleep 0.03; printf 'true\\n' ;;\n  network) exit 21 ;;\n  *) exit 91 ;;\nesac\n",
+    let script = format!(
+        "#!/bin/sh\nset -eu\nif [ \"${{1:-}}\" = info ]; then\n  sleep 0.03\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) exit 21 ;;\n  *) exit 91 ;;\nesac\n",
+        backend_info_json()
     );
+    let program = write_executable("slow-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone())
         .with_command_timeout(Duration::from_millis(200));
 
@@ -100,8 +120,13 @@ fn slow_successful_backend_command_is_polled_until_exit() {
 fn non_utf8_port_output_fails_closed_and_cleans_every_created_resource() {
     let log = temporary_path("non-utf8-podman-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '\\377' ;;\n  stop) : ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display()
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '\\377' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        log.display(),
+        backend_info_json(),
+        network_inspection_json(),
+        FAKE_CONTAINER_ID,
+        container_inspection_json(),
+        process_security_output(),
     );
     let program = write_executable("non-utf8-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -129,9 +154,14 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
         .port();
     let log = temporary_path("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}\" in\n  info) printf 'true\\n' ;;\n  network) : ;;\n  create) printf 'fake-container-id\\n' ;;\n  start) : ;;\n  port) printf '127.0.0.1:{}\\n' ;;\n  stop) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
-        ready_port
+        backend_info_json(),
+        network_inspection_json(),
+        FAKE_CONTAINER_ID,
+        container_inspection_json(),
+        process_security_output(),
+        ready_port,
     );
     let program = write_executable("cleanup-output-limit-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone())
