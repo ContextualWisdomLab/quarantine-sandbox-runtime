@@ -64,6 +64,7 @@ FORBIDDEN_DATABASE_NAME = re.compile(
     re.IGNORECASE,
 )
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
+WORKFLOW_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+)")
 
 
 def main() -> int:
@@ -146,19 +147,41 @@ def main() -> int:
         if schema.get("additionalProperties") is not False:
             errors.append(f"top-level schema must fail closed: {schema_path.name}")
 
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    uses_lines = [
-        line.strip()
-        for line in workflow.splitlines()
-        if line.strip().startswith("uses:")
-    ]
-    for uses_line in uses_lines:
-        if "@" not in uses_line:
-            errors.append(f"workflow action is unpinned: {uses_line}")
+    workflow_root = ROOT / ".github/workflows"
+    try:
+        workflow_paths = sorted(
+            path
+            for path in workflow_root.iterdir()
+            if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}
+        )
+    except OSError as exc:
+        errors.append(f"workflow directory is unreadable: {exc}")
+        workflow_paths = []
+
+    if not workflow_paths:
+        errors.append("workflow directory contains no .yml or .yaml workflow files")
+
+    for workflow_path in workflow_paths:
+        try:
+            workflow = workflow_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(
+                f"workflow file is unreadable: {workflow_path.relative_to(ROOT)}: {exc}"
+            )
             continue
-        reference = uses_line.rsplit("@", maxsplit=1)[1].split()[0]
-        if not re.fullmatch(r"[0-9a-f]{40}", reference):
-            errors.append(f"workflow action is not pinned by commit SHA: {uses_line}")
+        for line in workflow.splitlines():
+            match = WORKFLOW_USES.match(line)
+            if match is None:
+                continue
+            uses_target = match.group(1)
+            if "@" not in uses_target:
+                errors.append(f"workflow action is unpinned: {uses_target}")
+                continue
+            reference = uses_target.rsplit("@", maxsplit=1)[1]
+            if not re.fullmatch(r"[0-9a-f]{40}", reference):
+                errors.append(
+                    f"workflow action is not pinned by commit SHA: {uses_target}"
+                )
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
