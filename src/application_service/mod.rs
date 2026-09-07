@@ -244,7 +244,7 @@ impl ApplicationServiceLease {
             policy_id: metadata.policy_id,
             policy_sha256: metadata.policy_sha256,
             endpoint,
-            started_at_epoch_seconds: metadata.started_at_epoch_seconds,
+            started_at_epoch_seconds,
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
             isolation_attestation: IsolationAttestation::p0(),
@@ -391,6 +391,19 @@ impl CleanupReceipt {
     }
 }
 
+/// Stable consumer-visible class for an OS process-spawn failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendInvocationFailureKind {
+    /// The configured backend executable does not exist at invocation time.
+    NotFound,
+    /// The operating system denied permission to execute the backend.
+    PermissionDenied,
+    /// Local process or memory pressure prevented process creation.
+    ResourceExhausted,
+    /// Another current or future OS spawn error occurred.
+    Other,
+}
+
 /// Fail-closed application-service validation or runtime error.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ApplicationServiceError {
@@ -436,7 +449,15 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
-    /// The configured Podman executable could not be invoked.
+    /// The backend process could not be spawned; the stable OS failure class is preserved.
+    #[error("backend process spawn failed during {operation}: {failure_kind:?}")]
+    BackendSpawnFailed {
+        /// Stable operation code.
+        operation: &'static str,
+        /// Bounded failure class; raw errno values and host paths are not exposed.
+        failure_kind: BackendInvocationFailureKind,
+    },
+    /// The configured Podman executable could not be invoked after process creation.
     #[error("Podman invocation failed during {operation}")]
     BackendInvocationFailed {
         /// Stable operation code.
