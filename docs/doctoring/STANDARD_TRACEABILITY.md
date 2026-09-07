@@ -1,0 +1,24 @@
+# Standard and Research Traceability
+
+| External source | Product decision | Implementation / contract | Verification evidence |
+| --- | --- | --- | --- |
+| NIST SP 800-86 | Artifact-analysis/forensic evidence supports incident response but does not replace the consumer incident-response program. | ADR 0001; `artifact_analysis`; consumer contract | Wardnet remains verdict/incident authority; runtime contract tests preserve evidence-only disposition. |
+| NIST SP 800-61r3 + CSF 2.0 | Preparation/detection/response/recovery remain organizational/SOC responsibilities outside this evidence runtime. | ADR 0001; Wardnet boundary | Consumer owner-path review; no incident state in runtime domain contracts. |
+| ISO/IEC 27037:2012 | Evidence identity/acquisition/preservation concerns stay distinct from later interpretation/verdict. | Immutable artifact SHA-256 identity; provenance/evidence contract | Artifact ingestion and deterministic evidence tests. |
+| OCI Runtime Specification 1.3.0 | Container backend semantics remain adapter-specific while consumer request/lease contracts stay backend-neutral. | `src/sandbox_execution/`, ADR 0005/0006 | Backend plan/process tests; future OCI/gVisor parity E2E. |
+| Podman rootless documentation | P0 Podman backend must run rootless; no silent privileged fallback. | `RootlessPodmanAdapter::launch_at` rootless probe | Fake process test now; real rootless Podman E2E required before release claim. |
+| Podman `network create --internal` / `--disable-dns` | P0 application network has no external route/DNS path and is per-sandbox. | Podman network-create argv in `src/sandbox_execution/podman.rs` | Launch-plan test; real reachability E2E required. |
+| Podman port publication documentation | Consumer service is host-loopback-only with random host port. | `--publish 127.0.0.1::<port>/tcp`; strict port parser | Contract/process tests; real external-bind negative E2E required. |
+| Podman create security/resource options | Standard profile is read-only, bounded-writable, capability-free, no-new-privileges, isolated namespace, non-root and resource limited. | Podman create plan + `IsolationPolicy`/`ResourceRequest` | Launch-plan tests; real effective-state E2E required. |
+| NIST SP 800-190 | Containers are a security boundary requiring image, runtime, host, orchestration, monitoring and vulnerability controls rather than a trust shortcut. | SECURITY/THREAT_MODEL; digest-pinned/no-pull/default-deny design; real-backend gate | Security tests, dependency/SBOM/provenance, real backend acceptance. |
+| gVisor documentation | Higher-risk workloads may use a stronger userspace-kernel OCI backend rather than changing consumer contracts. | Planned backend adapter behind `sandbox_execution`; ADR 0006 | Not yet implemented; no release claim. |
+| MITRE ATT&CK T1497 | Malware may alter behavior under virtualization/sandbox detection; dynamic analysis must support abstention/incompleteness. | `RuntimeDisposition::Inconclusive`; future detonation profile | Current dynamic-unavailable tests; future anti-evasion/repeat-run corpus. |
+| YARA-X / capa / Ghidra primary docs | Static engines are independent evidence producers and cannot claim observed runtime behavior. | `StaticAnalyzer`, `EvidenceKind`, analyzer failure attribution | Static analyzer contract tests; adapters still planned. |
+| JSON Schema Draft 2020-12 | Serialized consumer contracts fail closed on unknown fields and carry explicit versioning. | `schemas/*.schema.json`; serde `deny_unknown_fields` where applicable | `scripts/validate_repository.py`, contract tests. |
+| RFC 3339 / RFC 6838 / RFC 9694 | Bounded artifact submission context uses validated timestamps/media-type syntax without trusting transport declarations as content identity. | `artifact_analysis/contracts.rs` | Existing contract/property tests. |
+| SPDX 3.0.1 / SLSA 1.2 | Release artifacts require machine-readable SBOM/provenance; application digest identity is separated from trust/admission. | CI/release policy and SECURITY docs | Exact-head SBOM/provenance release gates. |
+| W3C PROV-O | Evidence/attestation design preserves producer/activity/artifact lineage and can later project to interoperable provenance. | Evidence bundle/lease/cleanup receipts | Current contract tests; durable provenance export planned. |
+
+## Evidence-state rule
+
+A reference may justify architecture, but it does not prove implementation. Each row distinguishes the external basis from current code and from the test evidence still needed. Command-plan tests are never cited as evidence that real container isolation succeeded.
