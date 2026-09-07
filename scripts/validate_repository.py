@@ -174,6 +174,8 @@ def main() -> int:
             if match is None:
                 continue
             uses_target = match.group(1)
+            if uses_target.startswith("$/"):
+                continue
             if "@" not in uses_target:
                 errors.append(f"workflow action is unpinned: {uses_target}")
                 continue
