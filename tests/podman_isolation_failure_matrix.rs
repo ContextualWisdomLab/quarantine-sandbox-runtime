@@ -21,6 +21,7 @@ use quarantine_sandbox_runtime::{
 use serde_json::{Value, json};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
+const GOOD_TOP: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "b".repeat(64))
@@ -72,207 +73,84 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
-fn base_info() -> Value {
-    json!({
-        "host": {
-            "security": {
-                "rootless": true,
-                "seccompEnabled": true,
-                "seccompProfilePath": "/usr/share/containers/seccomp.json",
-                "apparmorEnabled": true,
-                "selinuxEnabled": false
-            }
-        }
-    })
+#[derive(Clone)]
+struct Fixture {
+    info: Value,
+    container: Value,
+    network: Value,
+    process_top: String,
+    create_identifier: String,
+    info_output_override: Option<String>,
+    container_output_override: Option<String>,
+    network_output_override: Option<String>,
 }
 
-fn base_container() -> Value {
-    json!([{
-        "Id": "fake-container-id",
-        "AppArmorProfile": "containers-default",
-        "ProcessLabel": "",
-        "EffectiveCaps": [],
-        "BoundingCaps": [],
-        "Config": {"User": "65532:65532"},
-        "HostConfig": {
-            "ReadonlyRootfs": true,
-            "Privileged": false,
-            "SecurityOpt": ["no-new-privileges"],
-            "UsernsMode": "auto",
-            "PidMode": "private",
-            "IpcMode": "none",
-            "Memory": 268435456,
-            "NanoCpus": 1000000000_u64,
-            "PidsLimit": 32
+impl Default for Fixture {
+    fn default() -> Self {
+        Self {
+            info: json!({
+                "host": {
+                    "security": {
+                        "rootless": true,
+                        "seccompEnabled": true,
+                        "seccompProfilePath": "/usr/share/containers/seccomp.json",
+                        "apparmorEnabled": true,
+                        "selinuxEnabled": false
+                    }
+                }
+            }),
+            container: json!([{
+                "Id": "fake-container-id",
+                "AppArmorProfile": "containers-default",
+                "ProcessLabel": "",
+                "EffectiveCaps": [],
+                "BoundingCaps": [],
+                "Config": {"User": "65532:65532"},
+                "HostConfig": {
+                    "ReadonlyRootfs": true,
+                    "Privileged": false,
+                    "SecurityOpt": ["no-new-privileges"],
+                    "UsernsMode": "auto",
+                    "PidMode": "private",
+                    "IpcMode": "none",
+                    "Memory": 268435456,
+                    "NanoCpus": 1000000000_u64,
+                    "PidsLimit": 32
+                }
+            }]),
+            network: json!([{"internal": true, "dns_enabled": false}]),
+            process_top: GOOD_TOP.to_owned(),
+            create_identifier: "fake-container-id\n".to_owned(),
+            info_output_override: None,
+            container_output_override: None,
+            network_output_override: None,
         }
-    }])
-}
-
-fn base_network() -> Value {
-    json!([{"internal": true, "dns_enabled": false}])
-}
-
-fn fixtures(mode: &str) -> (String, String, String, String, String) {
-    let mut info = base_info();
-    let mut container = base_container();
-    let mut network = base_network();
-    let mut process =
-        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n"
-            .to_owned();
-    let mut create_identifier = "fake-container-id\n".to_owned();
-
-    match mode {
-        "info_rootless_false" => info["host"]["security"]["rootless"] = json!(false),
-        "info_seccomp_disabled" => info["host"]["security"]["seccompEnabled"] = json!(false),
-        "info_seccomp_profile_empty" => {
-            info["host"]["security"]["seccompProfilePath"] = json!("")
-        }
-        "info_lsm_disabled" => {
-            info["host"]["security"]["apparmorEnabled"] = json!(false);
-            info["host"]["security"]["selinuxEnabled"] = json!(false);
-        }
-        "container_id_mismatch" => container[0]["Id"] = json!("different-container-id"),
-        "read_only_false" => container[0]["HostConfig"]["ReadonlyRootfs"] = json!(false),
-        "privileged_true" => container[0]["HostConfig"]["Privileged"] = json!(true),
-        "effective_caps_present" => container[0]["EffectiveCaps"] = json!(["CAP_NET_RAW"]),
-        "bounding_caps_present" => container[0]["BoundingCaps"] = json!(["CAP_SYS_ADMIN"]),
-        "process_caps_present" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0x1 - - - - containers-default (enforce)\n".to_owned();
-        }
-        "no_new_privileges_missing" => container[0]["HostConfig"]["SecurityOpt"] = json!([]),
-        "no_new_privileges_true_variant" => {
-            container[0]["HostConfig"]["SecurityOpt"] = json!(["no-new-privileges=true"]);
-            network[0]["internal"] = json!(false);
-        }
-        "seccomp_unconfined_option" => {
-            container[0]["HostConfig"]["SecurityOpt"] =
-                json!(["no-new-privileges", "seccomp=unconfined"]);
-        }
-        "seccomp_process_invalid" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 disabled - - - - - containers-default (enforce)\n".to_owned();
-        }
-        "seccomp_strict" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 strict - - - - - containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "userns_wrong" => container[0]["HostConfig"]["UsernsMode"] = json!("host"),
-        "pid_wrong" => container[0]["HostConfig"]["PidMode"] = json!("host"),
-        "ipc_wrong" => container[0]["HostConfig"]["IpcMode"] = json!("host"),
-        "user_wrong" => container[0]["Config"]["User"] = json!("0:0"),
-        "memory_zero" => container[0]["HostConfig"]["Memory"] = json!(0),
-        "memory_high" => container[0]["HostConfig"]["Memory"] = json!(536_870_912_u64),
-        "cpu_zero" => container[0]["HostConfig"]["NanoCpus"] = json!(0),
-        "cpu_high" => container[0]["HostConfig"]["NanoCpus"] = json!(2_000_000_000_u64),
-        "pids_zero" => container[0]["HostConfig"]["PidsLimit"] = json!(0),
-        "pids_negative" => container[0]["HostConfig"]["PidsLimit"] = json!(-1),
-        "pids_high" => container[0]["HostConfig"]["PidsLimit"] = json!(64),
-        "lsm_runtime_empty" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - \n".to_owned();
-        }
-        "lsm_runtime_unconfined" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - unconfined\n".to_owned();
-        }
-        "apparmor_inspect_empty" => container[0]["AppArmorProfile"] = json!(""),
-        "apparmor_inspect_unconfined" => container[0]["AppArmorProfile"] = json!("unconfined"),
-        "apparmor_runtime_no_mode" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default\n".to_owned();
-        }
-        "apparmor_runtime_missing_paren" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce\n".to_owned();
-        }
-        "apparmor_runtime_empty_profile" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - -  (enforce)\n".to_owned();
-        }
-        "apparmor_runtime_complain" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (complain)\n".to_owned();
-        }
-        "apparmor_profile_mismatch" => container[0]["AppArmorProfile"] = json!("other-profile"),
-        "selinux_match" => {
-            info["host"]["security"]["apparmorEnabled"] = json!(false);
-            info["host"]["security"]["selinuxEnabled"] = json!(true);
-            container[0]["ProcessLabel"] = json!("system_u:system_r:container_t:s0:c1,c2");
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - system_u:system_r:container_t:s0:c1,c2\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "selinux_inspect_empty" | "selinux_inspect_unconfined" | "selinux_mismatch" => {
-            info["host"]["security"]["apparmorEnabled"] = json!(false);
-            info["host"]["security"]["selinuxEnabled"] = json!(true);
-            container[0]["ProcessLabel"] = match mode {
-                "selinux_inspect_empty" => json!(""),
-                "selinux_inspect_unconfined" => json!("unconfined"),
-                _ => json!("system_u:system_r:container_t:s0:c3,c4"),
-            };
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - system_u:system_r:container_t:s0:c1,c2\n".to_owned();
-        }
-        "network_not_internal" => network[0]["internal"] = json!(false),
-        "network_dns_enabled" => network[0]["dns_enabled"] = json!(true),
-        "create_identifier_empty" => create_identifier.clear(),
-        "create_identifier_whitespace" => create_identifier = "fake container id\n".to_owned(),
-        "create_identifier_control" => create_identifier = "fake\tid\n".to_owned(),
-        "create_identifier_long" => create_identifier = format!("{}\n", "a".repeat(129)),
-        "container_inspect_empty" => container = json!([]),
-        "container_inspect_many" => {
-            let duplicate = container[0].clone();
-            container = json!([duplicate.clone(), duplicate]);
-        }
-        "network_inspect_empty" => network = json!([]),
-        "network_inspect_many" => {
-            let duplicate = network[0].clone();
-            network = json!([duplicate.clone(), duplicate]);
-        }
-        "process_no_pid_one" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n2 filter - - - - - containers-default (enforce)\n".to_owned();
-        }
-        "process_short" => {
-            process = "PID SECCOMP CAPEFF\n1 filter -\n".to_owned();
-        }
-        "process_duplicate_pid_one" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n1 filter - - - - - containers-default (enforce)\n".to_owned();
-        }
-        "caps_none" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter none none none none none containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "caps_zero" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0 0 0 0 0 containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "caps_hex_zero" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0x0 0x0 0x0 0x0 0x0 containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "caps_zero_digits" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0000 0000 0000 0000 0000 containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        "caps_hex_zero_digits" => {
-            process = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0x0000 0x0000 0x0000 0x0000 0x0000 containers-default (enforce)\n".to_owned();
-            network[0]["internal"] = json!(false);
-        }
-        _ => {}
     }
-
-    (
-        info.to_string(),
-        container.to_string(),
-        network.to_string(),
-        process,
-        create_identifier,
-    )
 }
 
-fn write_fake_podman(mode: &str) -> (PathBuf, PathBuf) {
+fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let program = temporary_path("isolation-matrix-podman");
     let log = temporary_path("isolation-matrix-log");
-    let (info, container, network, process, create_identifier) = fixtures(mode);
+    let info = fixture
+        .info_output_override
+        .clone()
+        .unwrap_or_else(|| fixture.info.to_string());
+    let container = fixture
+        .container_output_override
+        .clone()
+        .unwrap_or_else(|| fixture.container.to_string());
+    let network = fixture
+        .network_output_override
+        .clone()
+        .unwrap_or_else(|| fixture.network.to_string());
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then\n    if [ \"$MODE\" = info_malformed_json ]; then printf '{{'; else printf '%s\\n' '{}'; fi\n  else\n    printf 'true\\n'\n  fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect)\n    if [ \"$MODE\" = network_inspect_malformed ]; then printf '['; else printf '%s\\n' '{}'; fi ;;\n  network:rm) : ;;\n  container:inspect)\n    if [ \"$MODE\" = container_inspect_malformed ]; then printf '['; else printf '%s\\n' '{}'; fi ;;\n  create:--name) printf '%s' '{}' ;;\n  start:*) : ;;\n  top:*)\n    if [ \"$MODE\" = process_non_utf8 ]; then printf '\\377\\n'; else printf '%s' '{}'; fi ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf '%s' '{}' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
         container,
-        create_identifier,
-        process,
+        fixture.create_identifier,
+        fixture.process_top,
     );
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -283,92 +161,108 @@ fn write_fake_podman(mode: &str) -> (PathBuf, PathBuf) {
     (program, log)
 }
 
-fn remove_fixture(program: PathBuf, log: PathBuf) {
+fn assert_fixture(fixture: Fixture, expected: ApplicationServiceError) {
+    let (program, log) = write_fake_podman(&fixture);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(expected)
+    );
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
 }
 
-fn assert_mode(mode: &str, expected: ApplicationServiceError) {
-    let (program, log) = write_fake_podman(mode);
-    let adapter = RootlessPodmanAdapter::new(program.clone());
-    assert_eq!(
-        adapter.launch_at(&request(), &policy(), 1_780_000_000),
-        Err(expected),
-        "mode {mode} must fail with its causal contract"
-    );
-    remove_fixture(program, log);
-}
-
 #[test]
 fn backend_info_validation_is_fail_closed() {
-    for (mode, expected) in [
-        ("info_rootless_false", ApplicationServiceError::BackendNotRootless),
-        (
-            "info_seccomp_disabled",
-            ApplicationServiceError::IsolationVerificationFailed {
-                control_name: "seccomp",
-            },
-        ),
-        (
-            "info_seccomp_profile_empty",
-            ApplicationServiceError::IsolationVerificationFailed {
-                control_name: "seccomp",
-            },
-        ),
-        (
-            "info_lsm_disabled",
-            ApplicationServiceError::IsolationVerificationFailed {
-                control_name: "lsm",
-            },
-        ),
-        (
-            "info_malformed_json",
-            ApplicationServiceError::MalformedIsolationInspection {
-                operation: "backend_security_info",
-            },
-        ),
+    let mut fixture = Fixture::default();
+    fixture.info["host"]["security"]["rootless"] = json!(false);
+    assert_fixture(fixture, ApplicationServiceError::BackendNotRootless);
+
+    for mutate in [
+        |value: &mut Value| value["host"]["security"]["seccompEnabled"] = json!(false),
+        |value: &mut Value| value["host"]["security"]["seccompProfilePath"] = json!(""),
     ] {
-        assert_mode(mode, expected);
+        let mut fixture = Fixture::default();
+        mutate(&mut fixture.info);
+        assert_fixture(
+            fixture,
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "seccomp",
+            },
+        );
     }
+
+    let mut fixture = Fixture::default();
+    fixture.info["host"]["security"]["apparmorEnabled"] = json!(false);
+    fixture.info["host"]["security"]["selinuxEnabled"] = json!(false);
+    assert_fixture(
+        fixture,
+        ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "lsm",
+        },
+    );
+
+    let fixture = Fixture {
+        info_output_override: Some("{".to_owned()),
+        ..Fixture::default()
+    };
+    assert_fixture(
+        fixture,
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: "backend_security_info",
+        },
+    );
 }
 
 #[test]
 fn backend_and_inspection_identity_parsing_is_fail_closed() {
-    for mode in [
-        "create_identifier_empty",
-        "create_identifier_whitespace",
-        "create_identifier_control",
-        "create_identifier_long",
+    for create_identifier in [
+        String::new(),
+        "fake container id\n".to_owned(),
+        "fake\tid\n".to_owned(),
+        format!("{}\n", "a".repeat(129)),
     ] {
-        assert_mode(
-            mode,
+        let fixture = Fixture {
+            create_identifier,
+            ..Fixture::default()
+        };
+        assert_fixture(
+            fixture,
             ApplicationServiceError::MalformedIsolationInspection {
                 operation: "container_create",
             },
         );
     }
 
-    for mode in [
-        "container_inspect_empty",
-        "container_inspect_many",
-        "container_inspect_malformed",
-        "container_id_mismatch",
-    ] {
-        assert_mode(
-            mode,
+    for container_output in ["[]", "[{},{}]", "["] {
+        let fixture = Fixture {
+            container_output_override: Some(container_output.to_owned()),
+            ..Fixture::default()
+        };
+        assert_fixture(
+            fixture,
             ApplicationServiceError::MalformedIsolationInspection {
                 operation: "container_inspect",
             },
         );
     }
 
-    for mode in [
-        "network_inspect_empty",
-        "network_inspect_many",
-        "network_inspect_malformed",
-    ] {
-        assert_mode(
-            mode,
+    let mut fixture = Fixture::default();
+    fixture.container[0]["Id"] = json!("different-container-id");
+    assert_fixture(
+        fixture,
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_inspect",
+        },
+    );
+
+    for network_output in ["[]", "[{},{}]", "["] {
+        let fixture = Fixture {
+            network_output_override: Some(network_output.to_owned()),
+            ..Fixture::default()
+        };
+        assert_fixture(
+            fixture,
             ApplicationServiceError::MalformedIsolationInspection {
                 operation: "network_inspect",
             },
@@ -378,29 +272,73 @@ fn backend_and_inspection_identity_parsing_is_fail_closed() {
 
 #[test]
 fn every_effective_container_isolation_control_fails_closed() {
-    for (mode, control_name) in [
-        ("read_only_false", "read_only_root_filesystem"),
-        ("privileged_true", "unprivileged_container"),
-        ("effective_caps_present", "all_capabilities_dropped"),
-        ("bounding_caps_present", "all_capabilities_dropped"),
-        ("process_caps_present", "all_capabilities_dropped"),
-        ("no_new_privileges_missing", "no_new_privileges"),
-        ("seccomp_unconfined_option", "seccomp"),
-        ("seccomp_process_invalid", "seccomp"),
-        ("userns_wrong", "isolated_user_namespace"),
-        ("pid_wrong", "isolated_pid_namespace"),
-        ("ipc_wrong", "isolated_ipc_namespace"),
-        ("user_wrong", "non_root_identity"),
-        ("memory_zero", "resource_limits"),
-        ("memory_high", "resource_limits"),
-        ("cpu_zero", "resource_limits"),
-        ("cpu_high", "resource_limits"),
-        ("pids_zero", "resource_limits"),
-        ("pids_negative", "resource_limits"),
-        ("pids_high", "resource_limits"),
-    ] {
-        assert_mode(
-            mode,
+    type Mutation = fn(&mut Fixture);
+    let cases: [(&str, Mutation); 19] = [
+        ("read_only_root_filesystem", |f| {
+            f.container[0]["HostConfig"]["ReadonlyRootfs"] = json!(false)
+        }),
+        ("unprivileged_container", |f| {
+            f.container[0]["HostConfig"]["Privileged"] = json!(true)
+        }),
+        ("all_capabilities_dropped", |f| {
+            f.container[0]["EffectiveCaps"] = json!(["CAP_NET_RAW"])
+        }),
+        ("all_capabilities_dropped", |f| {
+            f.container[0]["BoundingCaps"] = json!(["CAP_SYS_ADMIN"])
+        }),
+        ("all_capabilities_dropped", |f| {
+            f.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter 0x1 - - - - containers-default (enforce)\n".to_owned()
+        }),
+        ("no_new_privileges", |f| {
+            f.container[0]["HostConfig"]["SecurityOpt"] = json!([])
+        }),
+        ("seccomp", |f| {
+            f.container[0]["HostConfig"]["SecurityOpt"] =
+                json!(["no-new-privileges", "seccomp=unconfined"])
+        }),
+        ("seccomp", |f| {
+            f.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 disabled - - - - - containers-default (enforce)\n".to_owned()
+        }),
+        ("isolated_user_namespace", |f| {
+            f.container[0]["HostConfig"]["UsernsMode"] = json!("host")
+        }),
+        ("isolated_pid_namespace", |f| {
+            f.container[0]["HostConfig"]["PidMode"] = json!("host")
+        }),
+        ("isolated_ipc_namespace", |f| {
+            f.container[0]["HostConfig"]["IpcMode"] = json!("host")
+        }),
+        ("non_root_identity", |f| {
+            f.container[0]["Config"]["User"] = json!("0:0")
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["Memory"] = json!(0)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["Memory"] = json!(536_870_912_u64)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["NanoCpus"] = json!(0)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["NanoCpus"] = json!(2_000_000_000_u64)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["PidsLimit"] = json!(0)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["PidsLimit"] = json!(-1)
+        }),
+        ("resource_limits", |f| {
+            f.container[0]["HostConfig"]["PidsLimit"] = json!(64)
+        }),
+    ];
+
+    for (control_name, mutate) in cases {
+        let mut fixture = Fixture::default();
+        mutate(&mut fixture);
+        assert_fixture(
+            fixture,
             ApplicationServiceError::IsolationVerificationFailed { control_name },
         );
     }
@@ -408,36 +346,61 @@ fn every_effective_container_isolation_control_fails_closed() {
 
 #[test]
 fn process_security_and_lsm_evidence_is_fail_closed() {
-    for mode in [
-        "process_non_utf8",
-        "process_no_pid_one",
-        "process_short",
-        "process_duplicate_pid_one",
+    for process_top in [
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n2 filter - - - - - containers-default (enforce)\n",
+        "PID SECCOMP CAPEFF\n1 filter -\n",
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n1 filter - - - - - containers-default (enforce)\n",
     ] {
-        assert_mode(
-            mode,
+        let fixture = Fixture {
+            process_top: process_top.to_owned(),
+            ..Fixture::default()
+        };
+        assert_fixture(
+            fixture,
             ApplicationServiceError::MalformedIsolationInspection {
                 operation: "process_security_top",
             },
         );
     }
 
-    for mode in [
-        "lsm_runtime_empty",
-        "lsm_runtime_unconfined",
-        "apparmor_inspect_empty",
-        "apparmor_inspect_unconfined",
-        "apparmor_runtime_no_mode",
-        "apparmor_runtime_missing_paren",
-        "apparmor_runtime_empty_profile",
-        "apparmor_runtime_complain",
-        "apparmor_profile_mismatch",
-        "selinux_inspect_empty",
-        "selinux_inspect_unconfined",
-        "selinux_mismatch",
+    for process_top in [
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - unconfined\n",
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default\n",
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce\n",
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - (enforce)\n",
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (complain)\n",
     ] {
-        assert_mode(
-            mode,
+        let fixture = Fixture {
+            process_top: process_top.to_owned(),
+            ..Fixture::default()
+        };
+        assert_fixture(
+            fixture,
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "lsm",
+            },
+        );
+    }
+
+    for profile in ["", "unconfined", "other-profile"] {
+        let mut fixture = Fixture::default();
+        fixture.container[0]["AppArmorProfile"] = json!(profile);
+        assert_fixture(
+            fixture,
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "lsm",
+            },
+        );
+    }
+
+    for process_label in ["", "unconfined", "system_u:system_r:container_t:s0:c3,c4"] {
+        let mut fixture = Fixture::default();
+        fixture.info["host"]["security"]["apparmorEnabled"] = json!(false);
+        fixture.info["host"]["security"]["selinuxEnabled"] = json!(true);
+        fixture.container[0]["ProcessLabel"] = json!(process_label);
+        fixture.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - system_u:system_r:container_t:s0:c1,c2\n".to_owned();
+        assert_fixture(
+            fixture,
             ApplicationServiceError::IsolationVerificationFailed {
                 control_name: "lsm",
             },
@@ -446,24 +409,49 @@ fn process_security_and_lsm_evidence_is_fail_closed() {
 }
 
 #[test]
-fn accepted_capability_and_lsm_encodings_still_reach_network_fail_closed_gate() {
-    for mode in [
-        "no_new_privileges_true_variant",
-        "seccomp_strict",
-        "selinux_match",
-        "caps_none",
-        "caps_zero",
-        "caps_hex_zero",
-        "caps_zero_digits",
-        "caps_hex_zero_digits",
-        "network_not_internal",
-        "network_dns_enabled",
-    ] {
-        assert_mode(
-            mode,
+fn accepted_security_encodings_reach_external_egress_gate() {
+    let mut fixtures = Vec::new();
+
+    let mut fixture = Fixture::default();
+    fixture.container[0]["HostConfig"]["SecurityOpt"] = json!(["no-new-privileges=true"]);
+    fixtures.push(fixture);
+
+    let mut fixture = Fixture::default();
+    fixture.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 strict - - - - - containers-default (enforce)\n".to_owned();
+    fixtures.push(fixture);
+
+    let mut fixture = Fixture::default();
+    fixture.info["host"]["security"]["apparmorEnabled"] = json!(false);
+    fixture.info["host"]["security"]["selinuxEnabled"] = json!(true);
+    fixture.container[0]["ProcessLabel"] = json!("system_u:system_r:container_t:s0:c1,c2");
+    fixture.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - system_u:system_r:container_t:s0:c1,c2\n".to_owned();
+    fixtures.push(fixture);
+
+    for capability in ["none", "0", "0x0", "0000", "0x0000"] {
+        let mut fixture = Fixture::default();
+        fixture.process_top = format!(
+            "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter {0} {0} {0} {0} {0} containers-default (enforce)\n",
+            capability
+        );
+        fixtures.push(fixture);
+    }
+
+    for mut fixture in fixtures {
+        fixture.network[0]["internal"] = json!(false);
+        assert_fixture(
+            fixture,
             ApplicationServiceError::IsolationVerificationFailed {
                 control_name: "external_egress_denied",
             },
         );
     }
+
+    let mut fixture = Fixture::default();
+    fixture.network[0]["dns_enabled"] = json!(true);
+    assert_fixture(
+        fixture,
+        ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "external_egress_denied",
+        },
+    );
 }
