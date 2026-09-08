@@ -21,8 +21,6 @@ use crate::{
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
-const HTTP_READINESS_REQUEST: &[u8] =
-    b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -871,7 +869,7 @@ fn wait_for_readiness(
                 return Ok(());
             }
             let probe_timeout = poll.min(deadline.saturating_duration_since(Instant::now()));
-            if http_response_is_ready(&mut stream, probe_timeout) {
+            if http_response_is_ready(&mut stream, host_port, probe_timeout) {
                 return Ok(());
             }
         }
@@ -880,12 +878,21 @@ fn wait_for_readiness(
     }
 }
 
-fn http_response_is_ready(stream: &mut TcpStream, timeout: Duration) -> bool {
-    let mut status_prefix = [0_u8; 10];
+fn http_response_is_ready(stream: &mut TcpStream, host_port: u16, timeout: Duration) -> bool {
+    let request = format!(
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1:{host_port}\r\nConnection: close\r\n\r\n"
+    );
+    let mut status_prefix = [0_u8; 13];
     stream
         .set_read_timeout(Some(timeout))
         .and_then(|()| stream.set_write_timeout(Some(timeout)))
-        .and_then(|()| stream.write_all(HTTP_READINESS_REQUEST))
+        .and_then(|()| stream.write_all(request.as_bytes()))
         .and_then(|()| stream.read_exact(&mut status_prefix))
-        .is_ok_and(|()| status_prefix == *b"HTTP/1.1 2")
+        .is_ok_and(|()| {
+            status_prefix.starts_with(b"HTTP/1.1 ")
+                && status_prefix[9] == b'2'
+                && status_prefix[10].is_ascii_digit()
+                && status_prefix[11].is_ascii_digit()
+                && status_prefix[12] == b' '
+        })
 }
