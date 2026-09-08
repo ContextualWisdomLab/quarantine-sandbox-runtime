@@ -3,10 +3,8 @@
 //! Runtime-issued evidence constructors establish loopback, isolation and
 //! lifecycle invariants. Public deserialization must not bypass those invariants.
 
-use quarantine_sandbox_runtime::{
-    ApplicationServiceLease, IsolationAttestation, ServiceEndpoint,
-};
-use serde_json::{json, Value};
+use quarantine_sandbox_runtime::{ApplicationServiceLease, IsolationAttestation, ServiceEndpoint};
+use serde_json::{Value, json};
 
 fn valid_attestation() -> Value {
     json!({
