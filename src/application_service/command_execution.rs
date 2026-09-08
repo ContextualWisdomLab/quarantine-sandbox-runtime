@@ -344,6 +344,12 @@ pub enum CommandExecutionError {
         /// Stable, non-sensitive rejection reason.
         reason: &'static str,
     },
+    /// Retained workload output was not valid UTF-8 for the text-only result contract.
+    #[error("command-execution {stream} is not valid UTF-8")]
+    InvalidOutputEncoding {
+        /// Stable stream identifier (`stdout` or `stderr`); never includes workload bytes.
+        stream: &'static str,
+    },
     /// The operator isolation policy was invalid, a resource request exceeded
     /// it, or the backend could not establish or observe the sandbox.
     #[error(transparent)]
