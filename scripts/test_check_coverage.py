@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
+import pathlib
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest.mock import patch
 
 from scripts.check_coverage import (
     _source_region_counts,
     _uncovered_lines,
     _uncovered_segment_starts,
+    main,
 )
 
 
@@ -77,7 +84,7 @@ class SourceRegionCoverageTests(unittest.TestCase):
                 },
                 {
                     "filenames": ["/workspace/src/runtime.rs"],
-                    "regions": [[10, 5, 10, 20, 7, 0, 0, 0]],
+                    "regions": [[10, 5, 10, 20, 7, 0, 0, 0, 0]],
                 },
             ],
         }
@@ -119,6 +126,76 @@ class SourceRegionCoverageTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "source region denominator"):
             _source_region_counts(data)
+
+
+class CoverageAdmissionTests(unittest.TestCase):
+    """Gate source-region coverage without hiding LLVM's raw summary."""
+
+    @staticmethod
+    def _payload(file_region_count: int = 1) -> dict[str, object]:
+        return {
+            "data": [
+                {
+                    "totals": {
+                        "lines": {"count": 1, "covered": 1},
+                        "functions": {"count": 1, "covered": 1},
+                        "regions": {"count": 1, "covered": 0},
+                    },
+                    "files": [
+                        {
+                            "filename": "/workspace/src/runtime.rs",
+                            "summary": {
+                                "lines": {"count": 1, "covered": 1},
+                                "functions": {"count": 1, "covered": 1},
+                                "regions": {
+                                    "count": file_region_count,
+                                    "covered": 0,
+                                },
+                            },
+                            "segments": [],
+                        }
+                    ],
+                    "functions": [
+                        {
+                            "filenames": ["/workspace/src/runtime.rs"],
+                            "regions": [[10, 5, 10, 20, 0, 0, 0, 0]],
+                        },
+                        {
+                            "filenames": ["/workspace/src/runtime.rs"],
+                            "regions": [[10, 5, 10, 20, 7, 0, 0, 0, 0]],
+                        },
+                    ],
+                }
+            ]
+        }
+
+    def _run_main(self, payload: dict[str, object]) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "coverage.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                patch("sys.argv", ["check_coverage.py", str(path)]),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                result = main()
+        return result, stdout.getvalue(), stderr.getvalue()
+
+    def test_admission_uses_source_region_union_and_reports_raw_llvm_summary(self) -> None:
+        result, stdout, stderr = self._run_main(self._payload())
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("regions (LLVM raw): 0/1", stdout)
+        self.assertIn("regions: 1/1", stdout)
+
+    def test_admission_fails_closed_on_source_region_denominator_mismatch(self) -> None:
+        result, _stdout, stderr = self._run_main(self._payload(file_region_count=2))
+
+        self.assertEqual(result, 1)
+        self.assertIn("source region denominator", stderr)
 
 
 if __name__ == "__main__":
