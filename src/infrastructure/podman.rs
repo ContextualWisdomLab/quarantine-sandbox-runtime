@@ -555,26 +555,10 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output =
-            self.command_runner()
-                .run(&self.program, args)
-                .map_err(|error| match error {
-                    BoundedCommandError::Timeout => {
-                        ApplicationServiceError::BackendCommandTimedOut { operation }
-                    }
-                    BoundedCommandError::OutputLimit => {
-                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                    }
-                    BoundedCommandError::Spawn(error_kind) => {
-                        ApplicationServiceError::BackendSpawnFailed {
-                            operation,
-                            failure_kind: classify_spawn_failure(error_kind),
-                        }
-                    }
-                    BoundedCommandError::Wait | BoundedCommandError::Capture => {
-                        ApplicationServiceError::BackendInvocationFailed { operation }
-                    }
-                })?;
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| map_bounded_command_error(operation, error))?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -649,6 +633,25 @@ impl RootlessPodmanAdapter {
 impl Default for RootlessPodmanAdapter {
     fn default() -> Self {
         Self::new("podman")
+    }
+}
+
+fn map_bounded_command_error(
+    operation: &'static str,
+    error: BoundedCommandError,
+) -> ApplicationServiceError {
+    match error {
+        BoundedCommandError::Timeout => ApplicationServiceError::BackendCommandTimedOut { operation },
+        BoundedCommandError::OutputLimit => {
+            ApplicationServiceError::BackendOutputLimitExceeded { operation }
+        }
+        BoundedCommandError::Spawn(error_kind) => ApplicationServiceError::BackendSpawnFailed {
+            operation,
+            failure_kind: classify_spawn_failure(error_kind),
+        },
+        BoundedCommandError::Wait | BoundedCommandError::Capture => {
+            ApplicationServiceError::BackendInvocationFailed { operation }
+        }
     }
 }
 
@@ -891,8 +894,34 @@ fn wait_for_readiness(
 mod tests {
     use std::io::ErrorKind;
 
-    use super::classify_spawn_failure;
-    use crate::BackendInvocationFailureKind;
+    use super::{BoundedCommandError, classify_spawn_failure, map_bounded_command_error};
+    use crate::{ApplicationServiceError, BackendInvocationFailureKind};
+
+    #[test]
+    fn bounded_command_errors_keep_public_failure_classes() {
+        let operation = "runtime_inspection";
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::Timeout),
+            ApplicationServiceError::BackendCommandTimedOut { operation }
+        );
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::OutputLimit),
+            ApplicationServiceError::BackendOutputLimitExceeded { operation }
+        );
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::Spawn(ErrorKind::NotFound)),
+            ApplicationServiceError::BackendSpawnFailed {
+                operation,
+                failure_kind: BackendInvocationFailureKind::NotFound,
+            }
+        );
+        for error in [BoundedCommandError::Wait, BoundedCommandError::Capture] {
+            assert_eq!(
+                map_bounded_command_error(operation, error),
+                ApplicationServiceError::BackendInvocationFailed { operation }
+            );
+        }
+    }
 
     #[test]
     fn spawn_failure_classification_is_bounded_and_forward_compatible() {
