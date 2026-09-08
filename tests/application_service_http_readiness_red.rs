@@ -4,7 +4,7 @@
 
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
@@ -106,6 +106,49 @@ fn spawn_http_response(listener: TcpListener, response: &'static [u8]) -> thread
     })
 }
 
+fn spawn_http_response_capturing_request(
+    listener: TcpListener,
+    response: &'static [u8],
+) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("readiness probe should connect");
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 128];
+        while !request.ends_with(b"\r\n\r\n") {
+            let bytes_read = stream
+                .read(&mut chunk)
+                .expect("HTTP readiness request should be readable");
+            if bytes_read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..bytes_read]);
+            assert!(request.len() <= 1_024, "HTTP readiness request must stay bounded");
+        }
+        stream
+            .write_all(response)
+            .expect("HTTP response should be writable");
+        request
+    })
+}
+
+fn assert_malformed_http_status_is_not_ready(response: &'static [u8]) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener should expose its address")
+        .port();
+    let responder = spawn_http_response(listener, response);
+    let (program, log) = write_fake_podman(ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(ApplicationServiceError::ReadinessTimeout)
+    );
+    responder.join().expect("HTTP responder should finish");
+    remove_fixture(program, log);
+}
+
 #[test]
 fn http_service_does_not_become_ready_from_tcp_acceptance_alone() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
@@ -153,6 +196,48 @@ fn http_service_becomes_ready_after_a_bounded_success_response() {
         .terminate_at(&lease, 1_780_000_001)
         .expect("successful HTTP lease should remain cleanable");
     remove_fixture(program, log);
+}
+
+#[test]
+fn http_readiness_request_uses_the_selected_loopback_authority() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener should expose its address")
+        .port();
+    let responder = spawn_http_response_capturing_request(
+        listener,
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    let (program, log) = write_fake_podman(ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let lease = adapter
+        .launch_at(&request(), &policy(), 1_780_000_000)
+        .expect("valid HTTP response should establish protocol readiness");
+    let captured_request = responder.join().expect("HTTP responder should finish");
+    let captured_request = std::str::from_utf8(&captured_request)
+        .expect("HTTP readiness request should use ASCII header syntax");
+    assert!(captured_request.contains(&format!("\r\nHost: 127.0.0.1:{ready_port}\r\n")));
+
+    adapter
+        .terminate_at(&lease, 1_780_000_001)
+        .expect("successful HTTP lease should remain cleanable");
+    remove_fixture(program, log);
+}
+
+#[test]
+fn malformed_http_status_with_invalid_second_digit_is_not_readiness() {
+    assert_malformed_http_status_is_not_ready(
+        b"HTTP/1.1 2x0 Invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+}
+
+#[test]
+fn malformed_http_status_with_invalid_third_digit_is_not_readiness() {
+    assert_malformed_http_status_is_not_ready(
+        b"HTTP/1.1 20x Invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
 }
 
 #[test]
