@@ -53,7 +53,11 @@ fn published_schema_requires_one_supported_context_field_to_be_a_string() {
         let required = branch["required"]
             .as_array()
             .expect("each non-empty branch must require one supported field");
-        assert_eq!(required.len(), 1, "each branch must cover exactly one field");
+        assert_eq!(
+            required.len(),
+            1,
+            "each branch must cover exactly one field"
+        );
         let field_name = required[0]
             .as_str()
             .expect("required field name must be a string");
@@ -62,8 +66,7 @@ fn published_schema_requires_one_supported_context_field_to_be_a_string() {
             "anyOf must not introduce an unknown context field"
         );
         assert_eq!(
-            branch["properties"][field_name]["type"],
-            "string",
+            branch["properties"][field_name]["type"], "string",
             "a required-but-null field must not satisfy the non-empty invariant"
         );
         assert!(
