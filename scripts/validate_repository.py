@@ -68,11 +68,37 @@ BLOCK_SCALAR_START = re.compile(
     r"^\s*(?:-\s*)?(?:[A-Za-z_][A-Za-z0-9_.-]*|\"[^\"]+\"|'[^']+')"
     r"\s*:\s*[>|](?:[1-9]?[+-]?|[+-]?[1-9]?)\s*$"
 )
-WORKFLOW_USES_KEYS = frozenset({"uses", "'uses'", '"uses"'})
+
+
+def _normalize_workflow_mapping_key(raw_key: str) -> str:
+    """Normalize simple YAML mapping keys and reject ambiguous complex-key syntax."""
+
+    key = raw_key.strip()
+    if key.startswith("-"):
+        key = key[1:].strip()
+    if key.startswith("?"):
+        raise ValueError(f"unsupported explicit YAML mapping key: {key}")
+    if key.startswith(("!", "&", "*")):
+        raise ValueError(f"unsupported complex YAML mapping key: {key}")
+    if key.startswith('"'):
+        if not key.endswith('"'):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        try:
+            decoded = json.loads(key)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}") from exc
+        if not isinstance(decoded, str):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        return decoded
+    if key.startswith("'"):
+        if not key.endswith("'"):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        return key[1:-1].replace("''", "'")
+    return key
 
 
 def _workflow_uses_targets(workflow: str) -> list[str]:
-    """Return workflow `uses` values from block or YAML flow mappings."""
+    """Return admitted workflow `uses` values from block or YAML flow mappings."""
 
     targets: list[str] = []
     block_scalar_indent: int | None = None
@@ -150,16 +176,24 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
         if BLOCK_SCALAR_START.fullmatch(visible):
             block_scalar_indent = indent
 
+        structural_line = visible.lstrip()
+        if structural_line.startswith("-"):
+            structural_line = structural_line[1:].lstrip()
+        if structural_line.startswith("?"):
+            raise ValueError(
+                f"unsupported explicit YAML mapping key: {structural_line}"
+            )
+
         for colon in colons:
             if colon >= comment_at:
                 continue
             segment_start = max(
                 separator for separator in separators if separator <= colon
             )
-            key = visible[segment_start:colon].strip()
-            if key.startswith("-"):
-                key = key[1:].strip()
-            if key not in WORKFLOW_USES_KEYS:
+            key = _normalize_workflow_mapping_key(
+                visible[segment_start:colon]
+            )
+            if key != "uses":
                 continue
 
             remaining = visible[colon + 1 :].lstrip()
@@ -301,7 +335,15 @@ def main() -> int:
                 f"workflow file is unreadable: {workflow_path.relative_to(ROOT)}: {exc}"
             )
             continue
-        for uses_target in _workflow_uses_targets(workflow):
+        try:
+            uses_targets = _workflow_uses_targets(workflow)
+        except ValueError as exc:
+            errors.append(
+                "workflow dependency syntax is unsupported for fail-closed validation: "
+                f"{workflow_path.relative_to(ROOT)}: {exc}"
+            )
+            continue
+        for uses_target in uses_targets:
             if uses_target.startswith("$/"):
                 continue
             if "@" not in uses_target:
