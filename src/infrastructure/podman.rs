@@ -58,6 +58,8 @@ struct PodmanVersion {
 struct ContainerInspection {
     #[serde(rename = "Id")]
     id: String,
+    #[serde(default, rename = "ImageDigest")]
+    image_digest: Option<String>,
     #[serde(default, rename = "AppArmorProfile")]
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
@@ -861,6 +863,16 @@ impl RootlessPodmanAdapter {
             return Err(ApplicationServiceError::MalformedIsolationInspection {
                 operation: "container_inspect",
             });
+        }
+        if let Some(applied_image_digest) = container.image_digest.as_deref() {
+            let requested_image_digest = request
+                .image_reference
+                .rsplit_once('@')
+                .map(|(_, digest)| digest);
+            require_control(
+                "immutable_image_identity",
+                requested_image_digest == Some(applied_image_digest),
+            )?;
         }
 
         require_control(
