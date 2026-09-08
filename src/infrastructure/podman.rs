@@ -879,9 +879,8 @@ fn wait_for_readiness(
 }
 
 fn http_response_is_ready(stream: &mut TcpStream, host_port: u16, timeout: Duration) -> bool {
-    let request = format!(
-        "GET / HTTP/1.1\r\nHost: 127.0.0.1:{host_port}\r\nConnection: close\r\n\r\n"
-    );
+    let request =
+        format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{host_port}\r\nConnection: close\r\n\r\n");
     let mut status_prefix = [0_u8; 13];
     stream
         .set_read_timeout(Some(timeout))
