@@ -14,6 +14,7 @@ use crate::{
 use super::ingestion::ingest_bytes_with_optional_name;
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
+const RUNTIME_CORE_PRODUCER_ID: &str = "runtime_core";
 
 /// Analyzer-neutral finding before deterministic evidence identifiers are assigned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,7 +228,9 @@ impl AnalysisEngine {
         let mut analyzer_ids = BTreeSet::new();
         for analyzer in analyzers {
             let analyzer_id = analyzer.analyzer_id();
-            if !is_valid_engine_identifier(analyzer_id) {
+            if !is_valid_engine_identifier(analyzer_id)
+                || analyzer_id == RUNTIME_CORE_PRODUCER_ID
+            {
                 return Err(AnalysisError::InvalidAnalyzerIdentifier {
                     analyzer_id: analyzer_id.to_owned(),
                 });
@@ -298,7 +301,7 @@ impl AnalysisEngine {
             &mut records,
             &analysis_job_id,
             EvidenceKind::ArtifactIdentity,
-            "runtime_core",
+            RUNTIME_CORE_PRODUCER_ID,
             "Artifact identity established.",
             identity_attributes,
         );
@@ -370,7 +373,7 @@ impl AnalysisEngine {
             &mut records,
             &analysis_job_id,
             EvidenceKind::PolicyBoundary,
-            "runtime_core",
+            RUNTIME_CORE_PRODUCER_ID,
             "Foundation runtime performed no execution, network access, or credential use.",
             BTreeMap::from([
                 ("credentials_available".to_owned(), "false".to_owned()),
