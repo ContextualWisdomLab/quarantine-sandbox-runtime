@@ -210,6 +210,58 @@ class WorkflowActionPinPolicyTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertIn("workflow action is not pinned by commit SHA", stderr)
 
+    def test_escaped_quoted_uses_key_is_validated(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: escaped-key-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        '      - { "u\\u0073es": "actions/checkout@v4" }',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_explicit_mapping_key_syntax_fails_closed(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: explicit-key-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        "      - { ? uses : actions/checkout@v4 }",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("unsupported explicit YAML mapping key", stderr)
+
     def test_unpinned_action_in_second_yml_workflow_fails(self) -> None:
         temporary_directory, root = self.new_repository()
         with temporary_directory:
