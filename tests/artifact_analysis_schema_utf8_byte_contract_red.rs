@@ -77,7 +77,10 @@ fn published_schema_does_not_silently_accept_request_id_beyond_runtime_byte_boun
     );
 
     assert_eq!(schema["$schema"].as_str(), Some(CWL_DIALECT));
-    assert_ne!(schema["$schema"].as_str(), Some(STOCK_DRAFT_2020_12_DIALECT));
+    assert_ne!(
+        schema["$schema"].as_str(),
+        Some(STOCK_DRAFT_2020_12_DIALECT)
+    );
 
     let dialect = cwl_contract_dialect();
     assert_eq!(
