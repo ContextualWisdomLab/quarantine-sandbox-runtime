@@ -68,10 +68,10 @@ case "${1:-}:${2:-}" in
     done
 
     # Keep the acceptance token canonical so malformed strings cannot
-    # false-GREEN this RED. Podman documents max-size with integer values and
-    # optional b/k/m/g-style units (for example, 10mb).
+    # false-GREEN this RED. Podman size syntax accepts bytes with no unit or
+    # b/B, and k/m/g units with an optional trailing b/B.
     [ "$bounded_log_count" -eq 1 ] || exit 86
-    printf '%s\n' "$bounded_log" | grep -Eq '^[1-9][0-9]*([kKmMgG]([bB])?)?$' || exit 86
+    printf '%s\n' "$bounded_log" | grep -Eq '^[1-9][0-9]*([bB]|[kKmMgG]([bB])?)?$' || exit 86
 
     printf 'fake-command-container-id\n'
     ;;
