@@ -156,6 +156,34 @@ class WorkflowActionPinPolicyTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertIn("workflow action is not pinned by commit SHA", stderr)
 
+    def test_unpinned_action_in_multiline_flow_style_step_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: multiline-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        "      - {",
+                        "          name: checkout, uses: actions/checkout@v4",
+                        "        }",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
     def test_quoted_uses_key_in_flow_style_step_is_validated(self) -> None:
         temporary_directory, root = self.new_repository()
         with temporary_directory:
