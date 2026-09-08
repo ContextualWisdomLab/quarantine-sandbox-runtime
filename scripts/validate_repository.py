@@ -76,6 +76,8 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
 
     targets: list[str] = []
     block_scalar_indent: int | None = None
+    flow_mapping_depth = 0
+    in_expression = False
 
     for raw_line in workflow.splitlines():
         if not raw_line.strip():
@@ -90,7 +92,7 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
         in_single_quote = False
         in_double_quote = False
         escaped = False
-        curly_depth = 0
+        curly_depth = flow_mapping_depth
         comment_at = len(raw_line)
         separators = [0]
         colons: list[int] = []
@@ -98,6 +100,13 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
 
         while index < len(raw_line):
             character = raw_line[index]
+            if in_expression:
+                if raw_line.startswith("}}", index):
+                    in_expression = False
+                    index += 2
+                else:
+                    index += 1
+                continue
             if in_single_quote:
                 if character == "'":
                     if index + 1 < len(raw_line) and raw_line[index + 1] == "'":
@@ -114,6 +123,10 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
                 elif character == '"':
                     in_double_quote = False
                 index += 1
+                continue
+            if raw_line.startswith("${{", index):
+                in_expression = True
+                index += 3
                 continue
             if character == "#":
                 comment_at = index
@@ -180,6 +193,8 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
                 value.append(character)
                 cursor += 1
             targets.append("".join(value))
+
+        flow_mapping_depth = curly_depth
 
     return targets
 
