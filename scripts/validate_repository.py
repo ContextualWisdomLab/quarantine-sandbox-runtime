@@ -64,7 +64,124 @@ FORBIDDEN_DATABASE_NAME = re.compile(
     re.IGNORECASE,
 )
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
-WORKFLOW_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+)")
+BLOCK_SCALAR_START = re.compile(
+    r"^\s*(?:-\s*)?(?:[A-Za-z_][A-Za-z0-9_.-]*|\"[^\"]+\"|'[^']+')"
+    r"\s*:\s*[>|](?:[1-9]?[+-]?|[+-]?[1-9]?)\s*$"
+)
+WORKFLOW_USES_KEYS = frozenset({"uses", "'uses'", '"uses"'})
+
+
+def _workflow_uses_targets(workflow: str) -> list[str]:
+    """Return workflow `uses` values from block or YAML flow mappings."""
+
+    targets: list[str] = []
+    block_scalar_indent: int | None = None
+
+    for raw_line in workflow.splitlines():
+        if not raw_line.strip():
+            continue
+
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if block_scalar_indent is not None:
+            if indent > block_scalar_indent:
+                continue
+            block_scalar_indent = None
+
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+        curly_depth = 0
+        comment_at = len(raw_line)
+        separators = [0]
+        colons: list[int] = []
+        index = 0
+
+        while index < len(raw_line):
+            character = raw_line[index]
+            if in_single_quote:
+                if character == "'":
+                    if index + 1 < len(raw_line) and raw_line[index + 1] == "'":
+                        index += 2
+                        continue
+                    in_single_quote = False
+                index += 1
+                continue
+            if in_double_quote:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_double_quote = False
+                index += 1
+                continue
+            if character == "#":
+                comment_at = index
+                break
+            if character == "'":
+                in_single_quote = True
+            elif character == '"':
+                in_double_quote = True
+            elif character == "{":
+                curly_depth += 1
+                separators.append(index + 1)
+            elif character == "}":
+                curly_depth = max(0, curly_depth - 1)
+            elif character == "," and curly_depth > 0:
+                separators.append(index + 1)
+            elif character == ":":
+                colons.append(index)
+            index += 1
+
+        visible = raw_line[:comment_at]
+        if BLOCK_SCALAR_START.fullmatch(visible):
+            block_scalar_indent = indent
+
+        for colon in colons:
+            if colon >= comment_at:
+                continue
+            segment_start = max(
+                separator for separator in separators if separator <= colon
+            )
+            key = visible[segment_start:colon].strip()
+            if key.startswith("-"):
+                key = key[1:].strip()
+            if key not in WORKFLOW_USES_KEYS:
+                continue
+
+            remaining = visible[colon + 1 :].lstrip()
+            if not remaining:
+                targets.append("")
+                continue
+            if remaining[0] not in {"'", '"'}:
+                targets.append(re.split(r"[\s,}]", remaining, maxsplit=1)[0])
+                continue
+
+            quote = remaining[0]
+            value: list[str] = []
+            cursor = 1
+            while cursor < len(remaining):
+                character = remaining[cursor]
+                if quote == "'" and character == "'":
+                    if cursor + 1 < len(remaining) and remaining[cursor + 1] == "'":
+                        value.append("'")
+                        cursor += 2
+                        continue
+                    break
+                if quote == '"' and character == "\\":
+                    if cursor + 1 >= len(remaining):
+                        value.append("\\")
+                        break
+                    value.append(remaining[cursor + 1])
+                    cursor += 2
+                    continue
+                if character == quote:
+                    break
+                value.append(character)
+                cursor += 1
+            targets.append("".join(value))
+
+    return targets
 
 
 def main() -> int:
@@ -169,11 +286,7 @@ def main() -> int:
                 f"workflow file is unreadable: {workflow_path.relative_to(ROOT)}: {exc}"
             )
             continue
-        for line in workflow.splitlines():
-            match = WORKFLOW_USES.match(line)
-            if match is None:
-                continue
-            uses_target = match.group(1)
+        for uses_target in _workflow_uses_targets(workflow):
             if uses_target.startswith("$/"):
                 continue
             if "@" not in uses_target:
