@@ -14,7 +14,8 @@ const STOCK_DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12
 
 fn analysis_request_schema() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/analysis-request.schema.json");
-    let text = fs::read_to_string(path).expect("published analysis-request schema must be readable");
+    let text =
+        fs::read_to_string(path).expect("published analysis-request schema must be readable");
     serde_json::from_str(&text).expect("published analysis-request schema must be valid JSON")
 }
 
@@ -40,7 +41,8 @@ fn published_schema_does_not_silently_accept_request_id_beyond_runtime_byte_boun
     let request_id_schema = &schema["properties"]["request_id"];
     let maximum_utf8_bytes = request_id_schema["x-cwl-maxUtf8Bytes"]
         .as_u64()
-        .expect("request_id must publish its UTF-8 byte bound") as usize;
+        .expect("request_id must publish its UTF-8 byte bound")
+        as usize;
 
     let request_id = "é".repeat(65);
     assert_eq!(request_id.chars().count(), 65);
