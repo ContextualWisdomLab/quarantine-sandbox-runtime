@@ -10,7 +10,10 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -21,6 +24,7 @@ use quarantine_sandbox_runtime::{
 use serde_json::{Value, json};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
+static PROCESS_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
 const GOOD_TOP: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
 
 fn digest_image() -> String {
@@ -162,6 +166,9 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
 }
 
 fn assert_fixture(fixture: Fixture, expected: ApplicationServiceError) {
+    let _process_fixture_guard = PROCESS_FIXTURE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (program, log) = write_fake_podman(&fixture);
     let adapter = RootlessPodmanAdapter::new(program.clone());
     assert_eq!(
@@ -416,8 +423,10 @@ fn accepted_security_encodings_reach_external_egress_gate() {
     fixture.container[0]["HostConfig"]["SecurityOpt"] = json!(["no-new-privileges=true"]);
     fixtures.push(fixture);
 
-    let mut fixture = Fixture::default();
-    fixture.process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 strict - - - - - containers-default (enforce)\n".to_owned();
+    let fixture = Fixture {
+        process_top: "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 strict - - - - - containers-default (enforce)\n".to_owned(),
+        ..Fixture::default()
+    };
     fixtures.push(fixture);
 
     let mut fixture = Fixture::default();
@@ -428,11 +437,13 @@ fn accepted_security_encodings_reach_external_egress_gate() {
     fixtures.push(fixture);
 
     for capability in ["none", "0", "0x0", "0000", "0x0000"] {
-        let mut fixture = Fixture::default();
-        fixture.process_top = format!(
-            "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter {0} {0} {0} {0} {0} containers-default (enforce)\n",
-            capability
-        );
+        let fixture = Fixture {
+            process_top: format!(
+                "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter {0} {0} {0} {0} {0} containers-default (enforce)\n",
+                capability
+            ),
+            ..Fixture::default()
+        };
         fixtures.push(fixture);
     }
 

@@ -515,21 +515,21 @@ fn registry_repository_is_safe(repository: &str) -> bool {
         return false;
     }
 
-    let mut components = repository.split('/');
-    let Some(first_component) = components.next() else {
-        return false;
-    };
+    let first_component = repository
+        .split_once('/')
+        .map_or(repository, |(component, _)| component);
     if !registry_authority_or_name_is_safe(first_component) {
         return false;
     }
-    components.all(|component| {
-        !component.is_empty() && component != "." && component != ".." && !component.contains(':')
-    })
+    repository
+        .split('/')
+        .skip(1)
+        .all(|component| component != "." && component != ".." && !component.contains(':'))
 }
 
 fn registry_authority_or_name_is_safe(component: &str) -> bool {
     let Some((host, port)) = component.rsplit_once(':') else {
-        return !component.is_empty();
+        return true;
     };
     !host.is_empty() && !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())
 }

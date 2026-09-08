@@ -70,6 +70,15 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
+fn make_executable(program: &PathBuf, script: String) {
+    fs::write(program, script).expect("fake Podman should be writable");
+    let mut permissions = fs::metadata(program)
+        .expect("fake Podman metadata should exist")
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(program, permissions).expect("fake Podman should be executable");
+}
+
 fn fake_podman(process_top_command: &str, port_output: &str) -> PathBuf {
     let program = temporary_path("root-coverage-edge-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
@@ -79,20 +88,27 @@ fn fake_podman(process_top_command: &str, port_output: &str) -> PathBuf {
         "#!/bin/sh\nset -eu\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) {} ;;\n  port:*) printf '%s\\n' '{}' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         info, network, container, process_top_command, port_output,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    make_executable(&program, script);
     program
 }
 
-fn launch_with_fake(
-    process_top_command: &str,
-    port_output: &str,
+fn fake_podman_failure(failure_operation: &str) -> PathBuf {
+    let program = temporary_path("root-coverage-failure-podman");
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let network = r#"[{"internal":true,"dns_enabled":false}]"#;
+    let good_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n";
+    let script = format!(
+        "#!/bin/sh\nset -eu\nfailure='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then\n    if [ \"$failure\" = backend_security_info ]; then exit 17; fi\n    printf '%s\\n' '{}'\n  else\n    printf 'true\\n'\n  fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) if [ \"$failure\" = network_inspect ]; then exit 17; else printf '%s\\n' '{}'; fi ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name)\n    if [ \"$failure\" = non_utf8_identifier ]; then printf '\\377\\n';\n    elif [ \"$failure\" = malformed_identifier_cleanup_failure ]; then printf 'bad id\\n';\n    else printf 'fake-container-id\\n'; fi ;;\n  start:*) : ;;\n  top:*) if [ \"$failure\" = process_security_top ]; then exit 17; else printf '{}'; fi ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) if [ \"$failure\" = malformed_identifier_cleanup_failure ]; then exit 17; else :; fi ;;\n  *) exit 91 ;;\nesac\n",
+        failure_operation, info, network, container, good_top,
+    );
+    make_executable(&program, script);
+    program
+}
+
+fn launch_with_program(
+    program: PathBuf,
 ) -> Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError> {
-    let program = fake_podman(process_top_command, port_output);
     let result = RootlessPodmanAdapter::new(program.clone()).launch_at(
         &request(format!("localhost/cwl/tool@sha256:{}", digest())),
         &policy(),
@@ -100,6 +116,13 @@ fn launch_with_fake(
     );
     let _ = fs::remove_file(program);
     result
+}
+
+fn launch_with_fake(
+    process_top_command: &str,
+    port_output: &str,
+) -> Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError> {
+    launch_with_program(fake_podman(process_top_command, port_output))
 }
 
 #[test]
@@ -118,6 +141,12 @@ fn repository_validation_rejects_reachable_path_and_registry_edges() {
             request(image_reference).validate(&policy()),
             Err(ApplicationServiceError::ImageReferenceNotDigestPinned)
         );
+    }
+    for image_reference in [
+        format!("registry.example.com/tool@sha256:{digest}"),
+        format!("registry.example.com:5000/repo/tool@sha256:{digest}"),
+    ] {
+        assert_eq!(request(image_reference).validate(&policy()), Ok(()));
     }
 }
 
@@ -141,6 +170,45 @@ fn non_utf8_process_security_output_is_malformed_evidence() {
             operation: "process_security_top",
         })
     );
+}
+
+#[test]
+fn backend_failures_and_identifier_bytes_remain_typed() {
+    for (failure_operation, expected) in [
+        (
+            "backend_security_info",
+            ApplicationServiceError::BackendCommandFailed {
+                operation: "backend_security_info",
+            },
+        ),
+        (
+            "process_security_top",
+            ApplicationServiceError::BackendCommandFailed {
+                operation: "process_security_top",
+            },
+        ),
+        (
+            "network_inspect",
+            ApplicationServiceError::BackendCommandFailed {
+                operation: "network_inspect",
+            },
+        ),
+        (
+            "non_utf8_identifier",
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create",
+            },
+        ),
+        (
+            "malformed_identifier_cleanup_failure",
+            ApplicationServiceError::CleanupFailed,
+        ),
+    ] {
+        assert_eq!(
+            launch_with_program(fake_podman_failure(failure_operation)),
+            Err(expected)
+        );
+    }
 }
 
 #[test]
