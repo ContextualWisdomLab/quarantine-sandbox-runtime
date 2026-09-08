@@ -881,13 +881,11 @@ fn wait_for_readiness(
 }
 
 fn http_response_is_ready(stream: &mut TcpStream, timeout: Duration) -> bool {
-    if timeout.is_zero()
-        || stream.set_read_timeout(Some(timeout)).is_err()
-        || stream.set_write_timeout(Some(timeout)).is_err()
-        || stream.write_all(HTTP_READINESS_REQUEST).is_err()
-    {
-        return false;
-    }
     let mut status_prefix = [0_u8; 10];
-    stream.read_exact(&mut status_prefix).is_ok() && status_prefix == *b"HTTP/1.1 2"
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .and_then(|()| stream.write_all(HTTP_READINESS_REQUEST))
+        .and_then(|()| stream.read_exact(&mut status_prefix))
+        .is_ok_and(|()| status_prefix == *b"HTTP/1.1 2")
 }
