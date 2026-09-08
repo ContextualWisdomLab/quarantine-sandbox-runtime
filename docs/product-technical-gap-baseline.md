@@ -79,3 +79,7 @@ The first immutable release remains blocked until one unchanged integrated prote
 5. Continue #19/#21/#23 application-service REDs without bypassing their owner paths and keep #36 separately RED-driven from #33.
 6. Merge only after one unchanged exact candidate satisfies review, security, coverage, real runtime and positive-LSM gates; then verify native CI on the exact protected integration SHA.
 7. Publish the first immutable runtime release only from that integrated protected authority and hand released version/digest pinning to consumer owner paths.
+
+## 2026-09-08 contract-consistency addendum
+
+Issue #95 / Draft #96 on artifact-analysis parent #18 exact `c0647152ec052d82969b2ae078891e25e6d4d69a` owns the published `analysis-request-1.0.0` all-null `bounded_source_context` mismatch. Rust already rejects a present context whose five optional fields are all absent as `EmptyBoundedSourceContext`, while the schema's `minProperties: 1` still allows a present object containing one or more supported properties set only to `null`. Test-only `d383b9b1d69864341b97734d0d1b23c1db984b82` preserves top-level context optionality and individual field nullability while requiring one supported field to establish semantic presence as a string. Doctoring `6d31a4c978dc1c55e2a97be8a17673fb1616ee1f` records the Draft 2020-12 `anyOf` decision and rejected alternatives. Production Rust and the JSON Schema are intentionally unchanged until the exact #96 RED executes for this cause; no predecessor evidence transfers after this ledger movement.
