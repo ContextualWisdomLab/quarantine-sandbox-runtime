@@ -2,63 +2,51 @@
 
 ## Decision status
 
-Proposed security-policy repair. The original hardened RED executed causally, but exact-source review of the first minimum repair found a false-positive boundary for GitHub's same-repository, same-commit `$/...` references. Production/policy commit `eeec132cc61fbc86a07c09f75be828afc4d566c3` therefore remains an incomplete candidate rather than GREEN.
+Proposed security-policy repair. The original hardened RED executed causally, the same-repository `$/...` false-positive RED executed causally, and a later exact-source review found a second false-negative: the line-oriented matcher did not inspect YAML flow mappings that contain `uses`. Current minimum implementation is a candidate only; every moved exact head still requires fresh CI/security/review evidence.
 
 ## Problem and live authority
 
-Root PR #1 exact `78281e244c530dcafb3368b9f1d9896e846206a9` keeps `scripts/validate_repository.py` as the repository-local policy gate. Exact-source review found two original false-negative paths in its action-pin check.
+Root PR #1 keeps `scripts/validate_repository.py` as the repository-local policy gate. The repository-local validator is defense in depth for checked-in workflows; organization/reusable-workflow policy remains owned by `ContextualWisdomLab/.github`.
 
-First, the validator read only `.github/workflows/ci.yml`; a second `.yml` or `.yaml` workflow was outside the scan. If `ci.yml` was absent, `read_text()` raised instead of returning a deterministic policy failure.
+The first review found that the original validator read only `.github/workflows/ci.yml`, missed normal sequence-step `- uses: ...` syntax, and raised when the workflow surface was absent. Those findings produced the initial multi-workflow RED and repair.
 
-Second, it collected only lines for which `line.strip().startswith("uses:")`. The repository's real workflow steps use normal YAML sequence syntax such as `- uses: actions/checkout@<sha>`. After stripping whitespace those lines still begin with `- uses:`, so the validator did not inspect even the existing `ci.yml` action references. Review `5134484233` records this broader false-negative.
+The next review found an opposite error: GitHub's same-repository `$/...` references are bound to the running workflow commit and cannot carry an `@ref`, but the first minimum repair classified them as unpinned external dependencies. That RED executed before the bounded `$/` exemption was added.
 
-This is repository security-policy validation, not `sandbox_execution`, `application_service`, or `artifact_analysis` domain behavior. Organization/reusable-workflow policy remains owned by `ContextualWisdomLab/.github`; this repository-local validator is defense in depth for checked-in workflows.
+Current-root-restacked predecessor `c5f365da755ec7ff003034c5ab9f17af4a7d2b5e` still used `^\s*(?:-\s*)?uses:`. YAML 1.2.2 defines a flow mapping written with `{ ... }` as the same mapping data model expressed in flow style, and GitHub defines workflow files as YAML with `jobs.<job_id>.steps[*].uses` carrying action dependencies. A valid step such as `- { name: checkout, uses: actions/checkout@v4 }` therefore contains the same mutable external dependency but bypasses the anchored matcher entirely. Review `5139715214` records this false-negative.
 
-## Executed RED
+## Executed predecessor REDs
 
-Initial test-bearing commit `f67bcb452f8002ed7eda13eb8e1988c0b1e035ed` added multi-workflow/missing-workflow fixtures. CI-harness `1de70ec9ee07a09b4e1964052746ffbd99646ae4` made them executable in verify. Hardened RED `54138900896cc7aa319fe2066c62ce8209f87ca3` added a primary-`ci.yml` case using the repository's admitted `- uses:` syntax. Gap-ledger head `54299dd50748cb5237530299ed6e1fa6e3845781` preserved zero production change.
+Initial test-bearing commit `f67bcb452f8002ed7eda13eb8e1988c0b1e035ed` added multi-workflow/missing-workflow fixtures. CI-harness `1de70ec9ee07a09b4e1964052746ffbd99646ae4` made them executable in verify. Hardened RED `54138900896cc7aa319fe2066c62ce8209f87ca3` added the primary `ci.yml` `- uses:` case. Exact `54299dd50748cb5237530299ed6e1fa6e3845781`, native CI `34150580702`, verify `101831850483` failed at the dedicated repository-policy tests for those intended causes.
 
-Native CI `34150580702` on exact `54299dd...` executed the RED. Verify job `101831850483` passed exact checkout, dependency lock, and the existing repository-policy command, then failed at `Test repository policy validator`. A local exact-source reproduction separates the four intended failing cases: primary `ci.yml` `- uses:` was accepted, unpinned second `.yml` and `.yaml` workflows were accepted, and a missing workflow directory raised `FileNotFoundError`; the fully SHA-pinned multi-workflow control remained valid. The local reproduction is diagnostic detail; the GitHub job is the causal gate.
+Review `5134607273` then added same-repository positive controls. Exact `8f33668cc7d3481070474220522b67858c694aca`, native CI `34152437247`, verify `101837316739` reproduced that focused RED: `$/.github/actions/runtime-policy` and `$/.github/workflows/reusable.yml` were rejected by the blanket external-reference rule while the other focused cases passed.
 
-## First minimum repair
+## Flow-mapping RED and minimum repair
 
-Production/policy commit `eeec132cc61fbc86a07c09f75be828afc4d566c3` changes only workflow action discovery/admission:
+Test-only commit `2712a12dda219d6350e05b678f076a4715c39b75` adds `test_unpinned_action_in_flow_style_step_fails`. The preceding validator's anchored regex does not match the fixture line even though a standards-conforming YAML parser resolves it to a step mapping whose `uses` value is `actions/checkout@v4`. This is the new causal contract defect; exact hosted execution is still required before the GitHub check itself is called RED evidence.
 
-1. enumerate regular direct `.yml` and `.yaml` files under `.github/workflows` in deterministic order;
-2. convert an unreadable/missing/empty workflow surface into explicit policy errors;
-3. recognize both sequence-step `- uses: ...` and job-level `uses: ...` forms through one bounded line matcher;
-4. apply the pre-existing exact 40-character lowercase hexadecimal SHA requirement to every discovered `uses` target;
-5. retain every existing required-file, DDD, ADR, schema, placeholder, and database-name check.
+Minimum candidate `8f85baaed852b835174f6f2a4cff5473cb2bb908` removes the one-line matcher and adds a dependency-free lexical extractor scoped to workflow dependency keys. It recognizes block mappings and YAML flow mappings, including quoted `uses` keys, preserves `$/` self-repository semantics, and skips indented block-scalar bodies so shell text such as `printf 'uses: actions/checkout@v4'` is not mistaken for a dependency.
 
-The original five focused cases pass locally after this commit. That does not make the repair complete because the blanket fourth rule also classifies same-repository commit-bound references as external mutable dependencies.
-
-## Review repair: same-repository commit-bound references
-
-Review `5134607273` found the first repair over-broad. GitHub's current workflow syntax defines `$/path/to/action` and `$/.github/workflows/{filename}` as references to the same repository at the exact commit executing the workflow. An `@ref` suffix is forbidden for this syntax. The current validator nevertheless captures the target and rejects it at `"@" not in uses_target` as "unpinned".
-
-Test-only commit `c4173ec8211debaaa753de3b027e677c2b73dbf4` adds two positive controls: a same-repository action referenced as `$/.github/actions/runtime-policy`, and a same-repository reusable workflow referenced as `$/.github/workflows/reusable.yml`. Both must remain admissible because their identity is already bound to the running workflow commit. External `owner/repository[/path]@reference` dependencies remain subject to the exact 40-character lowercase hexadecimal SHA rule; no tag, branch, or mutable external exception is introduced.
-
-This RED is checked in but is not yet causal execution evidence. The current production validator is intentionally unchanged after the finding. The minimum follow-up GREEN, only after exact-head execution reaches the focused test for this cause, is to recognize the bounded `$/` self-repository form before applying the external-reference SHA rule. The weaker workspace-relative `./` form is not added by this slice.
+Test hardening `1c97a75969fc122cdecb1234e515e659bcfbcbf0` adds a quoted flow-key negative case, a full-SHA flow-style positive control, and a block-scalar script control. The repair does not add PyYAML or another mutable validator dependency; repository policy remains executable with the Python standard library already used by the gate.
 
 ## Alternatives considered
 
 **Scan only `ci.yml`.** Rejected because repository policy must cover the workflow set, not one historical filename.
 
-**Add multi-file enumeration but keep `startswith("uses:")`.** Rejected because the repository's admitted sequence-step syntax would remain unvalidated.
+**Keep the anchored line regex and document block-style YAML only.** Rejected because the policy claim is about immutable external dependencies, while GitHub consumes YAML semantics. An equivalent mapping spelling must not silently change the security result.
 
-**Require `@<sha>` even for `$/*`.** Rejected because GitHub defines `$/` as the running repository commit and explicitly forbids an `@ref` suffix. The resulting policy would reject the platform's commit-bound self-reference form rather than strengthen it.
+**Add PyYAML without an explicit pinned toolchain contract.** Rejected because that would make a security admission gate depend on an undeclared interpreter package and would move the problem into environment reproducibility.
 
-**Allow `./` and `$/*` interchangeably.** Rejected for this focused repair. GitHub recommends `$/` for same-repository actions because it binds directly to the workflow commit without depending on a checked-out mutable workspace. A separate requirement can evaluate `./` if a genuine compatibility case appears.
+**Search every raw line for `uses:`.** Rejected because block-scalar `run: |` bodies can legitimately contain arbitrary text. A security validator that turns shell/script text into dependency declarations creates false positives and incentives to bypass the gate.
 
-**Rely only on organization GitHub Actions policy.** Rejected as the sole repository check; it does not make the checked-in validator truthful or portable to forks/local review.
+**Require `@<sha>` even for `$/*`.** Rejected because GitHub defines `$/` as the running repository commit and forbids an `@ref` suffix.
 
-**Allow tags from trusted publishers.** Rejected because the existing local contract intentionally requires immutable commit identities for external dependencies.
+**Allow `./` and `$/*` interchangeably.** Rejected for this slice. GitHub recommends `$/` because it resolves directly against the running workflow repository/commit; `./` resolves against the checked-out workspace and has different trust semantics.
 
-**Silently accept no workflow directory.** Rejected because this repository requires CI/release evidence.
+**Allow tags from trusted publishers.** Rejected because the repository contract intentionally requires immutable full commit identities for external dependencies.
 
 ## Security rationale
 
-GitHub's Secure use reference states that pinning an external action to a full-length commit SHA is the only way to consume that external action as an immutable release. GitHub's workflow syntax separately defines `$/` self-repository references as resolving to the exact running workflow commit, with no `@ref` suffix. The validator must preserve both properties: external dependencies are full-SHA pinned, while commit-bound self-references are not falsely rejected.
+GitHub documents commit SHA as the safest external action reference and defines `$/` as a same-repository reference resolved at the running workflow commit. GitHub also defines workflows as YAML. YAML 1.2.2 states that flow mappings written with curly braces are a representation of mappings, not a different data type. Repository pin admission therefore has to operate on the dependency key independent of block-versus-flow spelling while keeping script scalar content out of the dependency surface.
 
 ## References
 
@@ -70,6 +58,8 @@ GitHub. (2026). *Managing GitHub Actions settings for a repository*. GitHub Docs
 
 Open Source Security Foundation. (n.d.). *Scorecard FAQ: Pinned dependencies*. https://github.com/ossf/scorecard/blob/main/docs/faq.md
 
+YAML Language Development Team. (2021). *YAML Ain't Markup Language (YAML™) version 1.2.2*. https://yaml.org/spec/1.2.2/
+
 ## Completion boundary
 
-The executed original RED, first minimum candidate, and checked-in self-reference RED do not transfer root production coverage, security scanning, positive LSM, review, protected-integration, SBOM/provenance, reproducibility, rollback, or immutable-release evidence. Every head movement requires fresh exact-head gates.
+Current #92 exact head is `1c97a75969fc122cdecb1234e515e659bcfbcbf0` on root `5c6a44bb2b35eb17d0315d72db242f4488c3c426`. The flow-mapping candidate and focused local lexical checks are not exact-head GitHub GREEN. Fresh repository-policy tests, fmt/tests/Clippy/rustdoc, complete owned-production coverage, review/thread/security gates, positive effective-LSM, protected integration, SBOM/provenance, reproducibility, rollback, and immutable release evidence remain independent requirements. Predecessor checks never transfer across head movement.
