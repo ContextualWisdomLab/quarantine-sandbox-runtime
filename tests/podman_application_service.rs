@@ -12,8 +12,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
-    RootlessPodmanAdapter, ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, BackendInvocationFailureKind,
+    IsolationPolicy, ResourceRequest, RootlessPodmanAdapter, ServiceProtocol,
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -181,8 +181,9 @@ fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created(
     let missing = RootlessPodmanAdapter::new(temporary_path("missing-podman"));
     assert_eq!(
         missing.launch_at(&request(), &policy(50), 1_780_000_000),
-        Err(ApplicationServiceError::BackendInvocationFailed {
+        Err(ApplicationServiceError::BackendSpawnFailed {
             operation: "rootless_probe",
+            failure_kind: BackendInvocationFailureKind::NotFound,
         })
     );
 
