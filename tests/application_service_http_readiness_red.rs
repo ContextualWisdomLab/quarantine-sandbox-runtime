@@ -122,7 +122,10 @@ fn spawn_http_response_capturing_request(
                 break;
             }
             request.extend_from_slice(&chunk[..bytes_read]);
-            assert!(request.len() <= 1_024, "HTTP readiness request must stay bounded");
+            assert!(
+                request.len() <= 1_024,
+                "HTTP readiness request must stay bounded"
+            );
         }
         stream
             .write_all(response)
