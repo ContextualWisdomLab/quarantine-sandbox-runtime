@@ -294,6 +294,7 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy_sha256={}",
                 policy.effective_policy_sha256()
             ),
+            "--".to_owned(),
             request.image_reference.clone(),
         ];
         container_create_args.extend(request.command.iter().cloned());
