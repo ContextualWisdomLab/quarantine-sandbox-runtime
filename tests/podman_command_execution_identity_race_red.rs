@@ -1,14 +1,15 @@
-//! RED regression for one-shot command sandbox resource identity.
+//! Regression for one-shot command sandbox resource identity.
 //!
 //! `CommandExecutionRequest::request_id` is consumer correlation metadata, not
 //! an idempotency/resource key. Two legitimate command invocations may reuse it
 //! in the same supplied start second. Each invocation must still receive an
-//! independent runtime-owned sandbox identity so cleanup can never target a
-//! sibling invocation's container.
+//! independent runtime-owned sandbox identity.
 //!
-//! Runtime uniqueness also needs enough retained collision resistance. A
-//! 128-bit execution nonce that is hashed and then truncated to a 64-bit
-//! resource name does not preserve the security margin the runtime generated.
+//! Post-create lifecycle authority is the exact container ID returned by the
+//! runtime, not the generated correlation name. The fixture therefore records
+//! create names, acquired IDs, and removal IDs independently, using one marker
+//! file per fact so concurrent fake-runtime processes cannot lose trace lines
+//! through a shared append log.
 
 #![cfg(target_os = "linux")]
 
@@ -16,7 +17,7 @@ use std::{
     collections::BTreeSet,
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{SystemTime, UNIX_EPOCH},
@@ -49,6 +50,16 @@ fn write_executable(name: &str, script: &str) -> PathBuf {
     permissions.set_mode(0o700);
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
     program
+}
+
+fn marker_values(directory: &Path, prefix: &str) -> BTreeSet<String> {
+    fs::read_dir(directory)
+        .expect("marker directory should be readable")
+        .filter_map(|entry| {
+            let file_name = entry.ok()?.file_name().into_string().ok()?;
+            file_name.strip_prefix(prefix).map(str::to_owned)
+        })
+        .collect()
 }
 
 fn policy() -> IsolationPolicy {
@@ -102,10 +113,11 @@ fn assert_runtime_identity_retains_128_bits(sandbox_id: &str) {
 
 #[test]
 fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resources() {
-    let call_log = temporary_path("calls");
+    let marker_directory = temporary_path("markers");
+    fs::create_dir(&marker_directory).expect("marker directory should be creatable");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '[{{\"Id\":\"fake-command-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
+        "#!/bin/sh\nset -eu\nMARKERS='{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    sandbox_name=\"${{3:?missing sandbox name}}\"\n    sandbox_suffix=\"${{sandbox_name#qsr-cmd-}}\"\n    owned_id=\"owned-${{sandbox_suffix}}\"\n    : > \"$MARKERS/create-$sandbox_name\"\n    : > \"$MARKERS/acquired-$owned_id\"\n    printf '%s\\n' \"$owned_id\"\n    ;;\n  start:*) : ;;\n  container:inspect)\n    container_id=\"${{5:?missing container id}}\"\n    printf '[{{\"Id\":\"%s\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\"}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]\\n' \"$container_id\"\n    ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force)\n    container_id=\"${{4:?missing cleanup container id}}\"\n    : > \"$MARKERS/remove-$container_id\"\n    ;;\n  *) exit 91 ;;\nesac\n",
+        marker_directory.display(),
     );
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -139,44 +151,35 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
     assert_runtime_identity_retains_128_bits(first.sandbox_id());
     assert_runtime_identity_retains_128_bits(second.sandbox_id());
 
-    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    let create_names = calls
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            (fields.next() == Some("create") && fields.next() == Some("--name"))
-                .then(|| fields.next().map(str::to_owned))
-                .flatten()
+    let create_names = marker_values(&marker_directory, "create-");
+    let acquired_ids = marker_values(&marker_directory, "acquired-");
+    let remove_ids = marker_values(&marker_directory, "remove-");
+    let result_names = BTreeSet::from([
+        first.sandbox_id().to_owned(),
+        second.sandbox_id().to_owned(),
+    ]);
+    let expected_acquired_ids = create_names
+        .iter()
+        .map(|name| {
+            format!(
+                "owned-{}",
+                name.strip_prefix("qsr-cmd-")
+                    .expect("create marker must retain the command sandbox prefix")
+            )
         })
-        .collect::<Vec<_>>();
-    let remove_names = calls
-        .lines()
-        .filter_map(|line| {
-            let fields = line.split_whitespace().collect::<Vec<_>>();
-            (fields.first() == Some(&"rm")
-                && fields.get(1) == Some(&"--force")
-                && fields.get(2) == Some(&"--ignore"))
-            .then(|| fields.get(3).map(|value| (*value).to_owned()))
-            .flatten()
-        })
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
 
     assert_eq!(create_names.len(), 2);
-    assert_eq!(remove_names.len(), 2);
-    assert_eq!(
-        create_names.iter().cloned().collect::<BTreeSet<_>>().len(),
-        2
-    );
-    assert_eq!(
-        remove_names.iter().cloned().collect::<BTreeSet<_>>().len(),
-        2
-    );
-    assert_eq!(
-        create_names.iter().cloned().collect::<BTreeSet<_>>(),
-        remove_names.iter().cloned().collect::<BTreeSet<_>>(),
-        "cleanup must remain scoped to the exact runtime-owned resource identity"
+    assert_eq!(acquired_ids.len(), 2);
+    assert_eq!(remove_ids.len(), 2);
+    assert_eq!(create_names, result_names);
+    assert_eq!(acquired_ids, expected_acquired_ids);
+    assert_eq!(remove_ids, acquired_ids);
+    assert!(
+        create_names.is_disjoint(&remove_ids),
+        "post-create cleanup must use acquired container IDs, not correlation names"
     );
 
     let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    let _ = fs::remove_dir_all(marker_directory);
 }
