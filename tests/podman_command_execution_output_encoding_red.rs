@@ -9,7 +9,8 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    CommandExecutionError, CommandExecutionRequest, IsolationPolicy, ResourceRequest,
+    RootlessPodmanAdapter,
 };
 
 #[derive(Clone, Copy)]
@@ -110,10 +111,17 @@ fn assert_invalid_output_is_rejected(invalid_stream: InvalidStream, request_id: 
     let adapter = RootlessPodmanAdapter::new(&program);
     let result = adapter.run_command_at(&request(request_id), &policy(), 1_780_000_000);
     let cleanup_observed = cleanup_marker.exists();
+    let expected_stream = match invalid_stream {
+        InvalidStream::Stdout => "stdout",
+        InvalidStream::Stderr => "stderr",
+    };
 
-    assert!(
-        result.is_err(),
-        "invalid UTF-8 workload output must not become a successful result through replacement-character decoding"
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::InvalidOutputEncoding {
+            stream: expected_stream,
+        }),
+        "invalid UTF-8 workload output must fail closed with a non-sensitive typed stream error"
     );
     assert!(
         cleanup_observed,
