@@ -24,7 +24,7 @@ fn valid_lease() -> Value {
         "schema_version": "1.1.0",
         "request_id": "lease_deserialization_request",
         "image_reference": format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
-        "backend_id": "rootless_podman",
+        "backend_id": "rootless_podman2",
         "sandbox_id": "qsr-app-0123456789abcdef",
         "network_id": "qsr-net-0123456789abcdef",
         "policy_id": "application_policy_v1",
