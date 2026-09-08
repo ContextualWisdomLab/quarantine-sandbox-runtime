@@ -743,6 +743,12 @@ impl RootlessPodmanAdapter {
             ));
         }
 
+        let stdout = String::from_utf8(logs_outcome.stdout).map_err(|_| {
+            CommandExecutionError::InvalidOutputEncoding { stream: "stdout" }
+        })?;
+        let stderr = String::from_utf8(logs_outcome.stderr).map_err(|_| {
+            CommandExecutionError::InvalidOutputEncoding { stream: "stderr" }
+        })?;
         let finished_at_epoch_seconds = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
@@ -755,9 +761,9 @@ impl RootlessPodmanAdapter {
                 sandbox_id: sandbox_name,
                 exit_code,
                 timed_out,
-                stdout: String::from_utf8_lossy(&logs_outcome.stdout).into_owned(),
+                stdout,
                 stdout_truncated: logs_outcome.stdout_truncated,
-                stderr: String::from_utf8_lossy(&logs_outcome.stderr).into_owned(),
+                stderr,
                 stderr_truncated: logs_outcome.stderr_truncated,
                 started_at_epoch_seconds,
                 finished_at_epoch_seconds,
