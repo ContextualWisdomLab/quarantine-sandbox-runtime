@@ -1,9 +1,8 @@
-//! Causal RED for the published analysis-request UTF-8 byte-bound contract.
+//! Regression contract for the published analysis-request UTF-8 byte bound.
 //!
-//! Draft 2020-12 `maxLength` counts JSON-string characters. This witness stays
-//! within that standard assertion while exceeding the runtime's documented
-//! UTF-8 byte budget. An unknown `x-cwl-*` keyword must not be treated as if it
-//! were a stock Draft 2020-12 assertion.
+//! Draft 2020-12 `maxLength` counts JSON-string characters. The CWL dialect
+//! therefore requires an explicit vocabulary for UTF-8 byte assertions so an
+//! implementation that does not understand those semantics must fail closed.
 
 use std::{fs, path::Path};
 
@@ -11,12 +10,22 @@ use quarantine_sandbox_runtime::{AnalysisProfile, AnalysisRequest, ContractError
 use serde_json::Value;
 
 const STOCK_DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+const CWL_DIALECT: &str = "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const CWL_BYTE_VOCABULARY: &str =
+    "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0";
+
+fn schema(path: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+    let text = fs::read_to_string(path).expect("published schema must be readable");
+    serde_json::from_str(&text).expect("published schema must be valid JSON")
+}
 
 fn analysis_request_schema() -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/analysis-request.schema.json");
-    let text =
-        fs::read_to_string(path).expect("published analysis-request schema must be readable");
-    serde_json::from_str(&text).expect("published analysis-request schema must be valid JSON")
+    schema("schemas/analysis-request.schema.json")
+}
+
+fn cwl_contract_dialect() -> Value {
+    schema("schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json")
 }
 
 fn stock_request_id_assertions_accept(property: &Value, value: &str) -> bool {
@@ -67,11 +76,18 @@ fn published_schema_does_not_silently_accept_request_id_beyond_runtime_byte_boun
         })
     );
 
-    let advertises_only_stock_dialect =
-        schema["$schema"].as_str() == Some(STOCK_DRAFT_2020_12_DIALECT);
-    assert!(
-        !advertises_only_stock_dialect
-            || !stock_request_id_assertions_accept(request_id_schema, &request.request_id),
-        "stock Draft 2020-12 accepts the witness because maxLength counts characters; the published contract must either make the CWL byte vocabulary required/fail-closed or use another executable validation path that rejects the same wire value"
+    assert_eq!(schema["$schema"].as_str(), Some(CWL_DIALECT));
+    assert_ne!(schema["$schema"].as_str(), Some(STOCK_DRAFT_2020_12_DIALECT));
+
+    let dialect = cwl_contract_dialect();
+    assert_eq!(
+        dialect["$schema"].as_str(),
+        Some(STOCK_DRAFT_2020_12_DIALECT),
+        "the CWL dialect itself must be defined using the stock Draft 2020-12 meta-schema"
+    );
+    assert_eq!(
+        dialect["$vocabulary"][CWL_BYTE_VOCABULARY].as_bool(),
+        Some(true),
+        "UTF-8 byte semantics must be a required vocabulary so unsupported validators fail closed"
     );
 }
