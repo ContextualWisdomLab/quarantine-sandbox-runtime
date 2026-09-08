@@ -1,6 +1,7 @@
 //! Rootless Podman infrastructure adapter for isolated application services.
 
 use std::{
+    io::{Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::PathBuf,
     process::Output,
@@ -14,12 +15,14 @@ use sha2::{Digest, Sha256};
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationPolicy, ServiceEndpoint, sandbox_execution::RuntimeLeaseMetadata,
+    IsolationPolicy, ServiceEndpoint, ServiceProtocol, sandbox_execution::RuntimeLeaseMetadata,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+const HTTP_READINESS_REQUEST: &[u8] =
+    b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -365,7 +368,7 @@ impl RootlessPodmanAdapter {
                 }
             };
 
-        if wait_for_readiness(host_port, policy).is_err() {
+        if wait_for_readiness(host_port, request.protocol, policy).is_err() {
             self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
@@ -851,6 +854,7 @@ fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
 
 fn wait_for_readiness(
     host_port: u16,
+    protocol: ServiceProtocol,
     policy: &IsolationPolicy,
 ) -> Result<(), ApplicationServiceError> {
     let deadline = Instant::now() + Duration::from_millis(policy.readiness_timeout_millis);
@@ -862,10 +866,28 @@ fn wait_for_readiness(
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
         let remaining = deadline.saturating_duration_since(now);
-        if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
-            return Ok(());
+        if let Ok(mut stream) = TcpStream::connect_timeout(&address.into(), poll.min(remaining)) {
+            if protocol == ServiceProtocol::Tcp {
+                return Ok(());
+            }
+            let probe_timeout = poll.min(deadline.saturating_duration_since(Instant::now()));
+            if http_response_is_ready(&mut stream, probe_timeout) {
+                return Ok(());
+            }
         }
         let after_probe = Instant::now();
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
     }
+}
+
+fn http_response_is_ready(stream: &mut TcpStream, timeout: Duration) -> bool {
+    if timeout.is_zero()
+        || stream.set_read_timeout(Some(timeout)).is_err()
+        || stream.set_write_timeout(Some(timeout)).is_err()
+        || stream.write_all(HTTP_READINESS_REQUEST).is_err()
+    {
+        return false;
+    }
+    let mut status_prefix = [0_u8; 10];
+    stream.read_exact(&mut status_prefix).is_ok() && status_prefix == *b"HTTP/1.1 2"
 }

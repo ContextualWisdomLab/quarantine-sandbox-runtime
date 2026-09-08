@@ -1,13 +1,15 @@
-//! RED for protocol-level HTTP readiness above the application-service P0 boundary.
+//! Protocol-level HTTP readiness tests for the application-service boundary.
 
 #![cfg(target_os = "linux")]
 
 use std::{
     fs,
+    io::Write,
     net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -95,10 +97,17 @@ fn remove_fixture(program: PathBuf, log: PathBuf) {
     let _ = fs::remove_file(log);
 }
 
+fn spawn_http_response(listener: TcpListener, response: &'static [u8]) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("readiness probe should connect");
+        stream
+            .write_all(response)
+            .expect("HTTP response should be writable");
+    })
+}
+
 #[test]
 fn http_service_does_not_become_ready_from_tcp_acceptance_alone() {
-    // Keep a TCP listener open but intentionally provide no HTTP response. The
-    // current adapter treats connect(2) success as sufficient even for `Http`.
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -116,4 +125,58 @@ fn http_service_does_not_become_ready_from_tcp_acceptance_alone() {
     assert!(calls.contains("stop --time 2"));
     assert!(calls.contains("rm --force"));
     assert!(calls.contains("network rm --force"));
+}
+
+#[test]
+fn http_service_becomes_ready_after_a_bounded_success_response() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener should expose its address")
+        .port();
+    let responder = spawn_http_response(
+        listener,
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    let (program, log) = write_fake_podman(ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let lease = adapter
+        .launch_at(&request(), &policy(), 1_780_000_000)
+        .expect("valid HTTP response should establish protocol readiness");
+    responder.join().expect("HTTP responder should finish");
+    assert_eq!(lease.endpoint().protocol(), ServiceProtocol::Http);
+    assert_eq!(lease.endpoint().host(), "127.0.0.1");
+    assert_eq!(lease.endpoint().port(), ready_port);
+
+    adapter
+        .terminate_at(&lease, 1_780_000_001)
+        .expect("successful HTTP lease should remain cleanable");
+    remove_fixture(program, log);
+}
+
+#[test]
+fn http_server_error_is_not_readiness() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener should expose its address")
+        .port();
+    let responder = spawn_http_response(
+        listener,
+        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    let (program, log) = write_fake_podman(ready_port);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.launch_at(&request(), &policy(), 1_780_000_000),
+        Err(ApplicationServiceError::ReadinessTimeout)
+    );
+    responder.join().expect("HTTP responder should finish");
+    let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
+    assert!(calls.contains("stop --time 2"));
+    assert!(calls.contains("rm --force"));
+    assert!(calls.contains("network rm --force"));
+    remove_fixture(program, log);
 }
