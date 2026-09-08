@@ -154,7 +154,7 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
                 in_expression = True
                 index += 3
                 continue
-            if character == "#":
+            if character == "#" and (index == 0 or raw_line[index - 1].isspace()):
                 comment_at = index
                 break
             if character == "'":
@@ -190,9 +190,7 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
             segment_start = max(
                 separator for separator in separators if separator <= colon
             )
-            key = _normalize_workflow_mapping_key(
-                visible[segment_start:colon]
-            )
+            key = _normalize_workflow_mapping_key(visible[segment_start:colon])
             if key != "uses":
                 continue
 
