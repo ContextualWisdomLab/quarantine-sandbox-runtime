@@ -230,6 +230,13 @@ fn http_readiness_request_uses_the_selected_loopback_authority() {
 }
 
 #[test]
+fn malformed_http_protocol_prefix_is_not_readiness() {
+    assert_malformed_http_status_is_not_ready(
+        b"NOTP/1.1 204 Invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+}
+
+#[test]
 fn malformed_http_status_with_invalid_second_digit_is_not_readiness() {
     assert_malformed_http_status_is_not_ready(
         b"HTTP/1.1 2x0 Invalid\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
