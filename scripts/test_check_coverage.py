@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.check_coverage import _uncovered_lines, _uncovered_segment_starts
+from scripts.check_coverage import (
+    _source_region_counts,
+    _uncovered_lines,
+    _uncovered_segment_starts,
+)
 
 
 class UncoveredLineAttributionTests(unittest.TestCase):
@@ -51,6 +55,70 @@ class UncoveredLineAttributionTests(unittest.TestCase):
         }
 
         self.assertEqual(_uncovered_segment_starts(file_record), [(11, 5), (13, 2)])
+
+
+class SourceRegionCoverageTests(unittest.TestCase):
+    """Measure source regions once even when LLVM exports multiple instantiations."""
+
+    @staticmethod
+    def _file_record(region_count: int) -> dict[str, object]:
+        return {
+            "filename": "/workspace/src/runtime.rs",
+            "summary": {"regions": {"count": region_count, "covered": region_count}},
+        }
+
+    def test_mixed_instantiations_cover_one_shared_source_region(self) -> None:
+        data = {
+            "files": [self._file_record(1)],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, 7, 0, 0, 0]],
+                },
+            ],
+        }
+
+        self.assertEqual(_source_region_counts(data), (1, 1))
+
+    def test_source_region_is_uncovered_when_every_instance_is_zero(self) -> None:
+        data = {
+            "files": [
+                {
+                    "filename": "/workspace/src/runtime.rs",
+                    "summary": {"regions": {"count": 1, "covered": 0}},
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[20, 3, 20, 18, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[20, 3, 20, 18, 0, 0, 0, 0]],
+                },
+            ],
+        }
+
+        self.assertEqual(_source_region_counts(data), (1, 0))
+
+    def test_region_denominator_must_match_production_file_summaries(self) -> None:
+        data = {
+            "files": [self._file_record(2)],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[30, 1, 30, 9, 1, 0, 0, 0]],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "source region denominator"):
+            _source_region_counts(data)
 
 
 if __name__ == "__main__":
