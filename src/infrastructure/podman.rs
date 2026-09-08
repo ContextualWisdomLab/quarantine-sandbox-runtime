@@ -23,6 +23,7 @@ use crate::{
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+const DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -574,8 +575,13 @@ impl RootlessPodmanAdapter {
             "--restart=no".to_owned(),
             // Unlike the service profile's `--log-driver=none`: bounded
             // command output is retrieved after the fact with `podman logs`,
-            // which needs a log driver that actually retains output.
+            // which needs a log driver that actually retains output. Keep the
+            // runtime-owned host file finite as a separate resource boundary;
+            // #31 still requires log-flood E2E and explicit incompleteness
+            // evidence before this cap is release-grade output attestation.
             "--log-driver=k8s-file".to_owned(),
+            "--log-opt".to_owned(),
+            format!("max-size={DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES}b"),
             "--network".to_owned(),
             "none".to_owned(),
             "--timeout".to_owned(),
