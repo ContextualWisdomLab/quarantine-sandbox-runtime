@@ -39,12 +39,8 @@ fn ingestion_rejects_names_that_are_not_leaf_file_names() {
 
 #[test]
 fn accepted_unicode_leaf_name_produces_a_valid_descriptor() {
-    let artifact = ingest_bytes(
-        "검증-자료.bin",
-        b"x",
-        &IngestionPolicy::default(),
-    )
-    .expect("valid Unicode leaf name within the UTF-8 byte bound must be accepted");
+    let artifact = ingest_bytes("검증-자료.bin", b"x", &IngestionPolicy::default())
+        .expect("valid Unicode leaf name within the UTF-8 byte bound must be accepted");
 
     artifact
         .descriptor()
