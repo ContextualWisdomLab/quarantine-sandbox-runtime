@@ -260,6 +260,7 @@ impl AnalysisRequest {
 
 /// Immutable identity and foundation classification of an artifact.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ArtifactDescriptor {
     /// Stable display name used by the foundation ingestion API.
     pub artifact_name: String,
@@ -304,6 +305,7 @@ impl ArtifactDescriptor {
 
 /// One normalized and attributable evidence record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvidenceRecord {
     /// Deterministic evidence identifier.
     pub evidence_id: String,
@@ -355,6 +357,7 @@ impl EvidenceRecord {
 
 /// Runtime identity and security-boundary attestation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeManifest {
     /// Runtime product name.
     pub runtime_name: String,
@@ -405,6 +408,7 @@ impl RuntimeManifest {
 
 /// Deterministic evidence output consumed by a verdict authority.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvidenceBundle {
     /// Contract version, currently `1.0.0`.
     pub schema_version: String,
