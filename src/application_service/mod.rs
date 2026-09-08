@@ -457,8 +457,8 @@ pub enum ApplicationServiceError {
         /// Bounded failure class; raw errno values and host paths are not exposed.
         failure_kind: BackendInvocationFailureKind,
     },
-    /// The configured Podman executable could not be invoked after process creation.
-    #[error("Podman invocation failed during {operation}")]
+    /// The configured backend could not complete an invocation after process creation.
+    #[error("backend invocation failed during {operation}")]
     BackendInvocationFailed {
         /// Stable operation code.
         operation: &'static str,
