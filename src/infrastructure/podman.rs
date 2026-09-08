@@ -1539,7 +1539,7 @@ fn command_sandbox_identity(
     hasher.update(started_at_epoch_seconds.to_be_bytes());
     hasher.update(execution_nonce);
     let digest = format!("{:x}", hasher.finalize());
-    Ok(digest[..16].to_owned())
+    Ok(digest[..32].to_owned())
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {
