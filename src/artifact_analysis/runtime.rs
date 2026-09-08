@@ -228,9 +228,7 @@ impl AnalysisEngine {
         let mut analyzer_ids = BTreeSet::new();
         for analyzer in analyzers {
             let analyzer_id = analyzer.analyzer_id();
-            if !is_valid_engine_identifier(analyzer_id)
-                || analyzer_id == RUNTIME_CORE_PRODUCER_ID
-            {
+            if !is_valid_engine_identifier(analyzer_id) || analyzer_id == RUNTIME_CORE_PRODUCER_ID {
                 return Err(AnalysisError::InvalidAnalyzerIdentifier {
                     analyzer_id: analyzer_id.to_owned(),
                 });
