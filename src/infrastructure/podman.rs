@@ -613,8 +613,17 @@ impl RootlessPodmanAdapter {
             create_args.push("--workdir".to_owned());
             create_args.push("/workspace".to_owned());
         }
+        let command_entrypoint = serde_json::Value::Array(
+            request
+                .command
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        )
+        .to_string();
+        create_args.push(format!("--entrypoint={command_entrypoint}"));
         create_args.push(request.image_reference.clone());
-        create_args.extend(request.command.iter().cloned());
 
         let create_output = match self.checked_output("container_create", &create_args) {
             Ok(output) => output,
