@@ -190,7 +190,9 @@ def _workflow_uses_targets(workflow: str) -> list[str]:
             segment_start = max(
                 separator for separator in separators if separator <= colon
             )
-            key = _normalize_workflow_mapping_key(visible[segment_start:colon])
+            key = _normalize_workflow_mapping_key(
+                visible[segment_start:colon]
+            )
             if key != "uses":
                 continue
 
