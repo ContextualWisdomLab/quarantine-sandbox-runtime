@@ -528,9 +528,9 @@ pub enum ApplicationServiceError {
 fn cleanup_receipt_resource_identifier_is_valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_CLEANUP_RESOURCE_IDENTIFIER_BYTES
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn is_digest_pinned_image_reference(value: &str) -> bool {
