@@ -33,7 +33,10 @@ fn consumer_image_and_command_are_after_the_podman_option_terminator() {
         image_reference: image_reference.clone(),
         container_port: 8_080,
         protocol: ServiceProtocol::Tcp,
-        command: vec!["--consumer-command".to_owned(), "value with spaces".to_owned()],
+        command: vec![
+            "--consumer-command".to_owned(),
+            "value with spaces".to_owned(),
+        ],
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
             cpu_millicores: 1_000,
@@ -51,9 +54,13 @@ fn consumer_image_and_command_are_after_the_podman_option_terminator() {
         .position(|argument| argument == &image_reference)
         .expect("the exact consumer image must remain a positional operand");
 
-    assert!(image_index > 0, "the image must not be the first create argument");
+    assert!(
+        image_index > 0,
+        "the image must not be the first create argument"
+    );
     assert_eq!(
-        create_args[image_index - 1], "--",
+        create_args[image_index - 1],
+        "--",
         "Podman option parsing must terminate immediately before consumer image data"
     );
     assert_eq!(
