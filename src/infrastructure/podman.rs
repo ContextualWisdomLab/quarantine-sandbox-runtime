@@ -922,6 +922,10 @@ impl RootlessPodmanAdapter {
             "resource_limits",
             resource_limits_match(&container.host_config, &request.resources),
         )?;
+        require_control(
+            "command_mount_set",
+            container.mounts.len() == usize::from(request.source_artifact.is_some()),
+        )?;
         if request.source_artifact.is_some() {
             let source_mount = container
                 .mounts
