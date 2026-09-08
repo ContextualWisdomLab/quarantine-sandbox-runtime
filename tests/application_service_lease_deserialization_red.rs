@@ -6,7 +6,7 @@
 use quarantine_sandbox_runtime::{
     ApplicationServiceLease, IsolationAttestation, ServiceEndpoint,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn valid_attestation() -> Value {
     json!({
