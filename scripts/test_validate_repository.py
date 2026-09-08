@@ -67,6 +67,27 @@ def write_workflow_uses_target(root: pathlib.Path, name: str, uses_target: str) 
     )
 
 
+def write_flow_style_workflow(root: pathlib.Path, name: str, uses_target: str) -> None:
+    """Write a valid YAML flow-style step containing an action reference."""
+    workflow_path = root / ".github" / "workflows" / name
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: workflow-pin-flow-style-fixture",
+                "on: push",
+                "jobs:",
+                "  verify:",
+                "    runs-on: ubuntu-24.04",
+                "    steps:",
+                f"      - {{ name: checkout, uses: {uses_target} }}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def write_workflow(root: pathlib.Path, name: str, action_reference: str) -> None:
     """Write one minimal workflow containing a single external action reference."""
     write_workflow_uses_target(root, name, f"actions/checkout@{action_reference}")
@@ -119,6 +140,16 @@ class WorkflowActionPinPolicyTests(unittest.TestCase):
         temporary_directory, root = self.new_repository()
         with temporary_directory:
             write_workflow(root, "ci.yml", "v1")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_unpinned_action_in_flow_style_step_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_flow_style_workflow(root, "ci.yml", "actions/checkout@v4")
 
             result, stderr = run_validator(root)
 
