@@ -25,10 +25,7 @@ fn concrete_child_spawn_failure_is_typed() {
         .run(Path::new("/definitely-missing-qsr-command"), &[])
         .err();
 
-    assert_eq!(
-        error,
-        Some(BoundedCommandError::Spawn(ErrorKind::NotFound))
-    );
+    assert_eq!(error, Some(BoundedCommandError::Spawn(ErrorKind::NotFound)));
 }
 
 #[test]
