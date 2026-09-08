@@ -221,8 +221,8 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
         top_output(),
     );
     let program = write_executable("logs-timeout-and-cleanup-fail", &script);
-    let adapter = RootlessPodmanAdapter::new(program.clone())
-        .with_command_timeout(Duration::from_secs(2));
+    let adapter =
+        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(2));
 
     let error = adapter
         .run_command_at(&request(), &policy(), 1_780_000_000)
