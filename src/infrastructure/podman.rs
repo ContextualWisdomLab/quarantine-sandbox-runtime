@@ -654,14 +654,19 @@ impl RootlessPodmanAdapter {
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
-                return Err(self.cleanup_or_report(
-                    &sandbox_name,
-                    CommandExecutionError::Backend(
-                        ApplicationServiceError::MalformedIsolationInspection {
-                            operation: "container_create",
-                        },
-                    ),
-                ));
+                let original = CommandExecutionError::Backend(
+                    ApplicationServiceError::MalformedIsolationInspection {
+                        operation: "container_create",
+                    },
+                );
+                let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                    .map_err(CommandExecutionError::Backend)?;
+                return match owned_container_id {
+                    Some(container_id) => {
+                        Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                    }
+                    None => Err(original),
+                };
             }
         };
 
@@ -1014,26 +1019,6 @@ impl RootlessPodmanAdapter {
         Ok(())
     }
 
-    fn cleanup_created_command_container(
-        &self,
-        sandbox_name: &str,
-    ) -> Result<(), ApplicationServiceError> {
-        // This name-based helper is used only when create output is malformed
-        // before a trustworthy acquired ID is available. Every path after a
-        // successful ID parse is bound to `cleanup_owned_command_container`.
-        let remove_args = [
-            "rm".to_owned(),
-            "--force".to_owned(),
-            "--ignore".to_owned(),
-            sandbox_name.to_owned(),
-        ];
-        if self.command_succeeded(&remove_args) {
-            Ok(())
-        } else {
-            Err(ApplicationServiceError::CleanupFailed)
-        }
-    }
-
     fn cleanup_owned_command_container(
         &self,
         container_id: &str,
@@ -1057,20 +1042,6 @@ impl RootlessPodmanAdapter {
         original: CommandExecutionError,
     ) -> CommandExecutionError {
         match self.cleanup_owned_command_container(container_id) {
-            Ok(()) => original,
-            Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
-        }
-    }
-
-    /// Attempt cleanup before a trustworthy post-create ID exists and return
-    /// the error to surface. Once an ID has been acquired, callers must use
-    /// `cleanup_owned_command_container_or_report` instead.
-    fn cleanup_or_report(
-        &self,
-        sandbox_name: &str,
-        original: CommandExecutionError,
-    ) -> CommandExecutionError {
-        match self.cleanup_created_command_container(sandbox_name) {
             Ok(()) => original,
             Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
         }
