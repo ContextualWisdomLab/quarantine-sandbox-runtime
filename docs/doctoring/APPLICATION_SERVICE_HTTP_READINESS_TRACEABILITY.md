@@ -44,6 +44,20 @@ Commit `236d1a67eb90f6d7c10c4714dd2d1d55faee72c6` is the minimum causal repair. 
 
 The ordinary coverage lane on `59cc738...` separately reproduced `BackendInvocationFailed { operation: "rootless_probe" }` in `root_coverage_edges`, before its intended `network_inspect` failure. That repeated process-invocation class is owned by Issue #71 / Draft #72. #104 must not hide it with retries, mutexes, environment workarounds, or weakened expectations.
 
+## Review-driven protocol-integrity RED and minimum repair
+
+Code review of hosted-GREEN predecessor `d098385045cefd8b337ba2bd0069107a01756b81` found two acceptance defects in the probe itself. The request used a fixed `Host: 127.0.0.1` even though the actual runtime authority is the dynamically selected `127.0.0.1:<mapped-port>`. The response check read only `HTTP/1.1 2`, so malformed status codes whose first character was `2` could be promoted to readiness.
+
+Test-only exact `32972162bfee95112b2f79a3427ebe4815e24b39` made both findings causal. Native CI `34267331198`, branch-coverage job `102199888859`, reached `tests/application_service_http_readiness_red.rs` and failed exactly three focused controls: the captured request omitted the selected port from `Host`, and malformed `HTTP/1.1 2x0 ...` / `HTTP/1.1 20x ...` responses both produced `Ok(ApplicationServiceLease)` instead of `ReadinessTimeout`. Existing TCP-only timeout, valid HTTP 204, and HTTP 503 controls remained GREEN in the same test binary.
+
+Minimum descendant `b481086cbd13a1e94cf8df09d49efb9fa3200e85` changes only `src/infrastructure/podman.rs`:
+
+- the fixed request constant is replaced by a request generated from the already-validated runtime-selected loopback port, producing `Host: 127.0.0.1:<mapped-port>`;
+- the probe reads a bounded 13-byte HTTP/1.1 status prefix and requires `HTTP/1.1 `, a literal `2`, two ASCII decimal digits, and the required following space;
+- existing bounded read/write timeout chaining, fixed `/` path, TCP connect-only readiness, cleanup, and consumer-neutral ownership remain unchanged.
+
+RFC 9110 section 7.2 defines `Host = uri-host [ ":" port ]` as target authority information. RFC 9112 requires an HTTP/1.1 `Host` field consistent with the target URI authority and defines the status line as HTTP-version, space, a three-digit status code, space, and optional reason phrase. The repair therefore tightens the probe to the protocol grammar without adding application authentication semantics.
+
 ## DDD and security decision
 
 `application_service` owns the consumer-neutral meaning of an HTTP-ready leased service. `sandbox_execution` owns bounded readiness/lifecycle and cleanup truth. `infrastructure` performs concrete socket/HTTP I/O against only the runtime-generated loopback endpoint. Podman, Docker/Colima-compatible OCI execution, gVisor/containerd, or Kubernetes adapters must not alter the readiness domain contract merely because the backend changes.
@@ -59,6 +73,8 @@ This lane is not release authority until its final exact head reacquires reposit
 ## References
 
 Fielding, R., Nottingham, M., & Reschke, J. (2022). *HTTP semantics (RFC 9110).* RFC Editor. https://www.rfc-editor.org/rfc/rfc9110.html
+
+Thomson, M., & Nottingham, M. (2022). *HTTP/1.1 (RFC 9112).* RFC Editor. https://www.rfc-editor.org/rfc/rfc9112.html
 
 Rust Project Developers. (2026). *TcpStream in std::net*. Rust standard library documentation. https://doc.rust-lang.org/std/net/struct.TcpStream.html
 
