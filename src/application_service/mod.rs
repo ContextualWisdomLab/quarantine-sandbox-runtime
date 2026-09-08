@@ -12,6 +12,9 @@ const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 64;
 const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
+const MAX_LEASE_BACKEND_IDENTIFIER_BYTES: usize = 64;
+const MAX_LEASE_RUNTIME_IDENTIFIER_BYTES: usize = 64;
+const MAX_LEASE_POLICY_IDENTIFIER_BYTES: usize = 128;
 const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.1.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
@@ -98,12 +101,36 @@ impl ApplicationServiceRequest {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServiceEndpointWire {
+    host: String,
+    port: u16,
+    protocol: ServiceProtocol,
+}
+
 /// Loopback-only endpoint returned to an authorized consumer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ServiceEndpointWire")]
 pub struct ServiceEndpoint {
     host: String,
     port: u16,
     protocol: ServiceProtocol,
+}
+
+impl TryFrom<ServiceEndpointWire> for ServiceEndpoint {
+    type Error = &'static str;
+
+    fn try_from(wire: ServiceEndpointWire) -> Result<Self, Self::Error> {
+        if wire.host != "127.0.0.1" || wire.port == 0 {
+            return Err("invalid application-service loopback endpoint");
+        }
+        Ok(Self {
+            host: wire.host,
+            port: wire.port,
+            protocol: wire.protocol,
+        })
+    }
 }
 
 impl ServiceEndpoint {
@@ -134,8 +161,22 @@ impl ServiceEndpoint {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IsolationAttestationWire {
+    rootless: bool,
+    read_only_root_filesystem: bool,
+    all_capabilities_dropped: bool,
+    no_new_privileges: bool,
+    isolated_user_namespace: bool,
+    external_egress_denied: bool,
+    loopback_only_publication: bool,
+    credentials_available: bool,
+}
+
 /// Security-boundary facts guaranteed by the P0 application-service profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "IsolationAttestationWire")]
 pub struct IsolationAttestation {
     rootless: bool,
     read_only_root_filesystem: bool,
@@ -145,6 +186,25 @@ pub struct IsolationAttestation {
     external_egress_denied: bool,
     loopback_only_publication: bool,
     credentials_available: bool,
+}
+
+impl TryFrom<IsolationAttestationWire> for IsolationAttestation {
+    type Error = &'static str;
+
+    fn try_from(wire: IsolationAttestationWire) -> Result<Self, Self::Error> {
+        if !wire.rootless
+            || !wire.read_only_root_filesystem
+            || !wire.all_capabilities_dropped
+            || !wire.no_new_privileges
+            || !wire.isolated_user_namespace
+            || !wire.external_egress_denied
+            || !wire.loopback_only_publication
+            || wire.credentials_available
+        {
+            return Err("invalid application-service P0 isolation attestation");
+        }
+        Ok(Self::p0())
+    }
 }
 
 impl IsolationAttestation {
@@ -210,8 +270,27 @@ impl IsolationAttestation {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationServiceLeaseWire {
+    schema_version: String,
+    request_id: String,
+    image_reference: String,
+    backend_id: String,
+    sandbox_id: String,
+    network_id: String,
+    policy_id: String,
+    policy_sha256: String,
+    endpoint: ServiceEndpoint,
+    started_at_epoch_seconds: u64,
+    expires_at_epoch_seconds: u64,
+    shutdown_grace_seconds: u32,
+    isolation_attestation: IsolationAttestation,
+}
+
 /// Attested lease for one ready isolated application service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ApplicationServiceLeaseWire")]
 pub struct ApplicationServiceLease {
     schema_version: String,
     request_id: String,
@@ -226,6 +305,56 @@ pub struct ApplicationServiceLease {
     expires_at_epoch_seconds: u64,
     shutdown_grace_seconds: u32,
     isolation_attestation: IsolationAttestation,
+}
+
+impl TryFrom<ApplicationServiceLeaseWire> for ApplicationServiceLease {
+    type Error = &'static str;
+
+    fn try_from(wire: ApplicationServiceLeaseWire) -> Result<Self, Self::Error> {
+        if wire.schema_version != APPLICATION_SERVICE_LEASE_SCHEMA_VERSION {
+            return Err("unsupported application-service lease schema version");
+        }
+        if !lease_request_identifier_is_valid(&wire.request_id) {
+            return Err("invalid application-service lease request identifier");
+        }
+        if !is_digest_pinned_image_reference(&wire.image_reference) {
+            return Err("invalid application-service lease image reference");
+        }
+        if !lease_backend_identifier_is_valid(&wire.backend_id) {
+            return Err("invalid application-service lease backend identifier");
+        }
+        if !lease_runtime_identifier_is_valid(&wire.sandbox_id)
+            || !lease_runtime_identifier_is_valid(&wire.network_id)
+        {
+            return Err("invalid application-service lease runtime identifier");
+        }
+        if !lease_policy_identifier_is_valid(&wire.policy_id) {
+            return Err("invalid application-service lease policy identifier");
+        }
+        if !lowercase_sha256_is_valid(&wire.policy_sha256) {
+            return Err("invalid application-service lease policy digest");
+        }
+        if wire.shutdown_grace_seconds == 0
+            || wire.expires_at_epoch_seconds <= wire.started_at_epoch_seconds
+        {
+            return Err("invalid application-service lease lifecycle bounds");
+        }
+        Ok(Self {
+            schema_version: wire.schema_version,
+            request_id: wire.request_id,
+            image_reference: wire.image_reference,
+            backend_id: wire.backend_id,
+            sandbox_id: wire.sandbox_id,
+            network_id: wire.network_id,
+            policy_id: wire.policy_id,
+            policy_sha256: wire.policy_sha256,
+            endpoint: wire.endpoint,
+            started_at_epoch_seconds: wire.started_at_epoch_seconds,
+            expires_at_epoch_seconds: wire.expires_at_epoch_seconds,
+            shutdown_grace_seconds: wire.shutdown_grace_seconds,
+            isolation_attestation: wire.isolation_attestation,
+        })
+    }
 }
 
 impl ApplicationServiceLease {
@@ -486,6 +615,42 @@ pub enum ApplicationServiceError {
     CleanupFailed,
 }
 
+fn lease_request_identifier_is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_REQUEST_IDENTIFIER_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn lease_backend_identifier_is_valid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (2..=MAX_LEASE_BACKEND_IDENTIFIER_BYTES).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
+}
+
+fn lease_runtime_identifier_is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_LEASE_RUNTIME_IDENTIFIER_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn lease_policy_identifier_is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_LEASE_POLICY_IDENTIFIER_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn lowercase_sha256_is_valid(value: &str) -> bool {
+    value.len() == 64
+        && value.bytes().all(|byte| {
+            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+        })
+}
+
 fn is_digest_pinned_image_reference(value: &str) -> bool {
     if value.is_empty()
         || value.len() > MAX_IMAGE_REFERENCE_BYTES
@@ -498,11 +663,7 @@ fn is_digest_pinned_image_reference(value: &str) -> bool {
     let Some((repository, digest)) = value.rsplit_once("@sha256:") else {
         return false;
     };
-    registry_repository_is_safe(repository)
-        && digest.len() == 64
-        && digest.bytes().all(|byte| {
-            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
-        })
+    registry_repository_is_safe(repository) && lowercase_sha256_is_valid(digest)
 }
 
 fn registry_repository_is_safe(repository: &str) -> bool {
