@@ -14,7 +14,6 @@ use crate::{
 use super::ingestion::ingest_bytes_with_optional_name;
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
-const RUNTIME_CORE_PRODUCER_ID: &str = "runtime_core";
 
 /// Analyzer-neutral finding before deterministic evidence identifiers are assigned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,9 +227,7 @@ impl AnalysisEngine {
         let mut analyzer_ids = BTreeSet::new();
         for analyzer in analyzers {
             let analyzer_id = analyzer.analyzer_id();
-            if !is_valid_engine_identifier(analyzer_id)
-                || analyzer_id == RUNTIME_CORE_PRODUCER_ID
-            {
+            if !is_valid_engine_identifier(analyzer_id) {
                 return Err(AnalysisError::InvalidAnalyzerIdentifier {
                     analyzer_id: analyzer_id.to_owned(),
                 });
@@ -301,7 +298,7 @@ impl AnalysisEngine {
             &mut records,
             &analysis_job_id,
             EvidenceKind::ArtifactIdentity,
-            RUNTIME_CORE_PRODUCER_ID,
+            "runtime_core",
             "Artifact identity established.",
             identity_attributes,
         );
@@ -373,7 +370,7 @@ impl AnalysisEngine {
             &mut records,
             &analysis_job_id,
             EvidenceKind::PolicyBoundary,
-            RUNTIME_CORE_PRODUCER_ID,
+            "runtime_core",
             "Foundation runtime performed no execution, network access, or credential use.",
             BTreeMap::from([
                 ("credentials_available".to_owned(), "false".to_owned()),
@@ -487,11 +484,278 @@ fn push_record(
 ) {
     let sequence_number = records.len() + 1;
     records.push(EvidenceRecord {
-        evidence_id: format!("{analysis_job_id}:evidence:{sequence_number}"),
-        analysis_job_id: analysis_job_id.to_owned(),
+        evidence_id: format!("{analysis_job_id}:evidence:{sequence_number:04}"),
+        sequence_number,
         evidence_kind,
         producer_id: producer_id.to_owned(),
         summary: summary.to_owned(),
         attributes,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(profile: AnalysisProfile) -> AnalysisRequest {
+        AnalysisRequest {
+            schema_version: "1.0.0".to_owned(),
+            request_id: "runtime_internal_fixture".to_owned(),
+            profile,
+            bounded_source_context: None,
+        }
+    }
+
+    fn trusted_fixture_engine(analyzers: Vec<Box<dyn StaticAnalyzer>>) -> AnalysisEngine {
+        let ingestion_policy = IngestionPolicy::default();
+        AnalysisEngine::validate_configuration(
+            &ingestion_policy,
+            "foundation_policy_v1",
+            "unit_test",
+            &analyzers,
+        )
+        .expect("private unit fixture must satisfy engine configuration");
+
+        AnalysisEngine {
+            ingestion_policy,
+            policy_id: "foundation_policy_v1".to_owned(),
+            source_revision: "unit_test".to_owned(),
+            analyzers,
+            analyzer_execution_path: AnalyzerExecutionPath::BundledRuntime,
+        }
+    }
+
+    struct SuccessfulAnalyzer;
+
+    impl StaticAnalyzer for SuccessfulAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "successful_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Ok(vec![AnalyzerFinding {
+                evidence_kind: EvidenceKind::StaticCapability,
+                summary: "Fixture capability detected.".to_owned(),
+                attributes: BTreeMap::from([("capability_code".to_owned(), "test".to_owned())]),
+            }])
+        }
+    }
+
+    struct FailingAnalyzer;
+
+    impl StaticAnalyzer for FailingAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "failing_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Err(AnalyzerFailure::new(
+                "reported_failure_analyzer",
+                "fixture_failure",
+            ))
+        }
+    }
+
+    struct EmptyAnalyzer;
+
+    impl StaticAnalyzer for EmptyAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "empty_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct InvalidFindingAnalyzer;
+
+    impl StaticAnalyzer for InvalidFindingAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "invalid_finding_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Ok(vec![AnalyzerFinding {
+                evidence_kind: EvidenceKind::StaticCapability,
+                summary: String::new(),
+                attributes: BTreeMap::new(),
+            }])
+        }
+    }
+
+    struct DisallowedEvidenceAnalyzer;
+
+    impl StaticAnalyzer for DisallowedEvidenceAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "disallowed_evidence_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Ok(vec![AnalyzerFinding {
+                evidence_kind: EvidenceKind::RuntimeBehavior,
+                summary: "A static analyzer must not claim runtime behavior.".to_owned(),
+                attributes: BTreeMap::new(),
+            }])
+        }
+    }
+
+    struct AlternateEmptyAnalyzer;
+
+    impl StaticAnalyzer for AlternateEmptyAnalyzer {
+        fn analyzer_id(&self) -> &'static str {
+            "alternate_empty_analyzer"
+        }
+
+        fn analyze(
+            &self,
+            _artifact: &IngestedArtifact,
+        ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn default_bundled_configuration_remains_valid() {
+        let ingestion_policy = IngestionPolicy::default();
+        let analyzers: Vec<Box<dyn StaticAnalyzer>> = vec![Box::new(FormatAnalyzer)];
+        assert_eq!(
+            AnalysisEngine::validate_configuration(
+                &ingestion_policy,
+                "foundation_policy_v1",
+                "development",
+                &analyzers,
+            ),
+            Ok(())
+        );
+
+        let engine = AnalysisEngine::default();
+        assert_eq!(engine.policy_id, "foundation_policy_v1");
+        assert_eq!(engine.source_revision, "development");
+        assert_eq!(
+            engine.analyzer_execution_path,
+            AnalyzerExecutionPath::BundledRuntime
+        );
+        assert_eq!(engine.analyzers.len(), 1);
+        assert_eq!(engine.analyzers[0].analyzer_id(), "format_analyzer");
+    }
+
+    #[test]
+    fn private_bundled_fixture_preserves_findings_and_failure_attribution() {
+        let engine = trusted_fixture_engine(vec![
+            Box::new(SuccessfulAnalyzer),
+            Box::new(FailingAnalyzer),
+        ]);
+        let bundle = engine
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"safe text")
+            .expect("private fixture normalization must complete");
+
+        assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
+        assert!(
+            bundle
+                .evidence
+                .iter()
+                .any(|record| record.evidence_kind == EvidenceKind::StaticCapability)
+        );
+        let failure = bundle
+            .evidence
+            .iter()
+            .find(|record| record.evidence_kind == EvidenceKind::ToolFailure)
+            .expect("failure evidence must be preserved");
+        assert_eq!(failure.producer_id, "failing_analyzer");
+        assert_eq!(
+            failure.attributes.get("failure_code"),
+            Some(&"fixture_failure".to_owned())
+        );
+        assert_eq!(
+            failure.attributes.get("reported_analyzer_id"),
+            Some(&"reported_failure_analyzer".to_owned())
+        );
+        assert!(
+            bundle
+                .limitations
+                .contains(&"static_analyzer_failure".to_owned())
+        );
+    }
+
+    #[test]
+    fn private_bundled_fixture_covers_empty_invalid_and_disallowed_findings() {
+        let empty = trusted_fixture_engine(vec![Box::new(EmptyAnalyzer)])
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
+            .expect("empty analyzer output is valid");
+        assert_eq!(empty.disposition, RuntimeDisposition::Completed);
+        assert_eq!(empty.evidence.len(), 2);
+
+        let invalid = trusted_fixture_engine(vec![Box::new(InvalidFindingAnalyzer)])
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc");
+        assert_eq!(
+            invalid,
+            Err(AnalysisError::Contract(ContractError::EmptyField {
+                field_name: "summary",
+            }))
+        );
+
+        let disallowed = trusted_fixture_engine(vec![Box::new(DisallowedEvidenceAnalyzer)])
+            .analyze_bytes(&request(AnalysisProfile::LinuxDynamic), b"abc")
+            .expect("disallowed evidence must become attributable failure evidence");
+        assert_eq!(disallowed.disposition, RuntimeDisposition::Inconclusive);
+        assert!(
+            disallowed
+                .limitations
+                .contains(&"dynamic_analysis_not_configured".to_owned())
+        );
+        let failure = disallowed
+            .evidence
+            .iter()
+            .find(|record| record.evidence_kind == EvidenceKind::ToolFailure)
+            .expect("disallowed evidence must become ToolFailure");
+        assert_eq!(
+            failure.attributes.get("failure_code"),
+            Some(&"disallowed_evidence_kind".to_owned())
+        );
+        assert_eq!(
+            failure.attributes.get("reported_evidence_kind"),
+            Some(&"runtime_behavior".to_owned())
+        );
+        assert!(
+            disallowed
+                .evidence
+                .iter()
+                .all(|record| record.evidence_kind != EvidenceKind::RuntimeBehavior)
+        );
+    }
+
+    #[test]
+    fn private_bundled_fixture_keeps_deterministic_identity_sensitive_to_analyzer_set() {
+        let first_engine = trusted_fixture_engine(vec![Box::new(EmptyAnalyzer)]);
+        let second_engine = trusted_fixture_engine(vec![Box::new(AlternateEmptyAnalyzer)]);
+        let first = first_engine
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
+            .expect("first private fixture analysis must complete");
+        let first_repeat = first_engine
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
+            .expect("repeat private fixture analysis must complete");
+        let second = second_engine
+            .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
+            .expect("second private fixture analysis must complete");
+
+        assert_eq!(first.analysis_job_id, first_repeat.analysis_job_id);
+        assert_eq!(first.evidence, first_repeat.evidence);
+        assert_ne!(first.analysis_job_id, second.analysis_job_id);
+    }
 }
