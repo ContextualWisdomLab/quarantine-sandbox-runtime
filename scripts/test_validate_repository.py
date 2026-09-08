@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""Regression tests for repository workflow action pin validation."""
+
+from __future__ import annotations
+
+import contextlib
+import importlib.util
+import io
+import json
+import pathlib
+import tempfile
+import unittest
+
+VALIDATOR_PATH = pathlib.Path(__file__).with_name("validate_repository.py")
+DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
+PINNED_SHA = "a" * 40
+
+
+def load_validator():
+    """Load a fresh validator module so each test can replace its repository root."""
+    spec = importlib.util.spec_from_file_location("qsr_validate_repository", VALIDATOR_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("repository validator module must be loadable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def write_required_repository(root: pathlib.Path, validator) -> None:
+    """Create the smallest repository tree that satisfies non-workflow policy checks."""
+    schema_files = set(validator.SCHEMA_FILES)
+    for relative_path in validator.REQUIRED_FILES:
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if relative_path in schema_files:
+            path.write_text(
+                json.dumps(
+                    {
+                        "$schema": DRAFT_2020_12,
+                        "additionalProperties": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+        else:
+            path.write_text("", encoding="utf-8")
+
+
+def write_workflow_uses_target(root: pathlib.Path, name: str, uses_target: str) -> None:
+    """Write one minimal workflow containing the supplied action or workflow reference."""
+    workflow_path = root / ".github" / "workflows" / name
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: workflow-pin-policy-fixture",
+                "on: push",
+                "jobs:",
+                "  verify:",
+                "    runs-on: ubuntu-24.04",
+                "    steps:",
+                f"      - uses: {uses_target}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_flow_style_workflow(root: pathlib.Path, name: str, uses_target: str) -> None:
+    """Write a valid YAML flow-style step containing an action reference."""
+    workflow_path = root / ".github" / "workflows" / name
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: workflow-pin-flow-style-fixture",
+                "on: push",
+                "jobs:",
+                "  verify:",
+                "    runs-on: ubuntu-24.04",
+                "    steps:",
+                f"      - {{ name: checkout, uses: {uses_target} }}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_workflow(root: pathlib.Path, name: str, action_reference: str) -> None:
+    """Write one minimal workflow containing a single external action reference."""
+    write_workflow_uses_target(root, name, f"actions/checkout@{action_reference}")
+
+
+def write_reusable_workflow(root: pathlib.Path, name: str) -> None:
+    """Write a same-repository reusable workflow with no external action dependency."""
+    workflow_path = root / ".github" / "workflows" / name
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(
+        "\n".join(
+            [
+                "name: reusable-policy-fixture",
+                "on:",
+                "  workflow_call:",
+                "jobs:",
+                "  verify:",
+                "    runs-on: ubuntu-24.04",
+                "    steps:",
+                "      - run: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def run_validator(root: pathlib.Path) -> tuple[int, str]:
+    """Run repository validation against an isolated fixture root."""
+    validator = load_validator()
+    validator.ROOT = root
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        result = validator.main()
+    return result, stderr.getvalue()
+
+
+class WorkflowActionPinPolicyTests(unittest.TestCase):
+    """Require immutable action pins across every workflow file."""
+
+    def new_repository(self) -> tuple[tempfile.TemporaryDirectory[str], pathlib.Path]:
+        """Return a temporary repository with all unrelated policy prerequisites present."""
+        temporary_directory = tempfile.TemporaryDirectory()
+        root = pathlib.Path(temporary_directory.name)
+        validator = load_validator()
+        write_required_repository(root, validator)
+        return temporary_directory, root
+
+    def test_unpinned_action_in_primary_ci_workflow_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow(root, "ci.yml", "v1")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_unpinned_action_in_flow_style_step_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_flow_style_workflow(root, "ci.yml", "actions/checkout@v4")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_unpinned_action_in_multiline_flow_style_step_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: multiline-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        "      - {",
+                        "          name: checkout, uses: actions/checkout@v4",
+                        "        }",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_quoted_uses_key_in_flow_style_step_is_validated(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: quoted-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        '      - { "uses": "actions/checkout@v4" }',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_escaped_quoted_uses_key_is_validated(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: escaped-key-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        '      - { "u\\u0073es": "actions/checkout@v4" }',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_explicit_mapping_key_syntax_fails_closed(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: explicit-key-flow-style-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        "      - { ? uses : actions/checkout@v4 }",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("unsupported explicit YAML mapping key", stderr)
+
+    def test_attached_hash_suffix_is_part_of_plain_uses_value(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow_uses_target(
+                root,
+                "ci.yml",
+                f"actions/checkout@{PINNED_SHA}#mutable",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_whitespace_separated_hash_remains_a_yaml_comment(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: separated-comment-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        f"      - uses: actions/checkout@{PINNED_SHA} # immutable pin",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_unpinned_action_in_second_yml_workflow_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow(root, "ci.yml", PINNED_SHA)
+            write_workflow(root, "secondary.yml", "v1")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_unpinned_action_in_yaml_workflow_fails(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow(root, "ci.yml", PINNED_SHA)
+            write_workflow(root, "security.yaml", "v2")
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow action is not pinned by commit SHA", stderr)
+
+    def test_missing_workflow_directory_is_a_policy_failure(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            try:
+                result, stderr = run_validator(root)
+            except OSError as exc:
+                self.fail(f"missing workflows must return a policy failure, not raise {exc!r}")
+
+            self.assertEqual(result, 1)
+            self.assertIn("workflow", stderr.lower())
+
+    def test_same_repository_action_at_running_commit_remains_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow_uses_target(
+                root,
+                "ci.yml",
+                "$/.github/actions/runtime-policy",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_same_repository_reusable_workflow_at_running_commit_remains_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_reusable_workflow(root, "reusable.yml")
+            caller_path = root / ".github" / "workflows" / "ci.yml"
+            caller_path.write_text(
+                "\n".join(
+                    [
+                        "name: local-reusable-workflow-policy-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    uses: $/.github/workflows/reusable.yml",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_sha_pinned_action_in_flow_style_step_remains_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_flow_style_workflow(
+                root,
+                "ci.yml",
+                f"actions/checkout@{PINNED_SHA}",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_uses_text_inside_run_block_scalar_is_not_a_dependency(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            workflow_path = root / ".github" / "workflows" / "ci.yml"
+            workflow_path.parent.mkdir(parents=True, exist_ok=True)
+            workflow_path.write_text(
+                "\n".join(
+                    [
+                        "name: run-block-scalar-fixture",
+                        "on: push",
+                        "jobs:",
+                        "  verify:",
+                        "    runs-on: ubuntu-24.04",
+                        "    steps:",
+                        "      - run: |",
+                        "          printf '%s\\n' 'uses: actions/checkout@v4'",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+    def test_multiple_sha_pinned_workflows_remain_valid(self) -> None:
+        temporary_directory, root = self.new_repository()
+        with temporary_directory:
+            write_workflow(root, "ci.yml", PINNED_SHA)
+            write_workflow(root, "security.yaml", "b" * 40)
+
+            result, stderr = run_validator(root)
+
+            self.assertEqual(result, 0, stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
