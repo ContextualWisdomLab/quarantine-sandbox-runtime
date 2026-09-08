@@ -147,10 +147,10 @@ The immutable image reference is appended before application argv, so applicatio
 5. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
 6. Query the requested port mapping only after isolation verification succeeds.
 7. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
-8. Poll bounded TCP readiness using operator timeout/poll policy.
+8. Poll protocol-aware readiness within the operator-owned timeout/poll budget: `tcp` requires a successful loopback TCP connection; `http` sends a bounded HTTP/1.1 request to the runtime-derived loopback endpoint and requires a final 2xx status-class response before readiness is accepted.
 9. Return a lease only after effective-isolation checks and readiness succeed.
 
-P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplied health path is accepted yet. A future typed HTTP health contract may refine this without accepting arbitrary URLs.
+P0 HTTP readiness never accepts a caller-supplied URL, origin, host, or arbitrary health path. The probe is fixed to `/` on the runtime-owned loopback mapping, so consumer-specific authentication or bootstrap semantics remain outside this bounded context. A future typed application-specific health contract may version this boundary without turning arbitrary network destinations into runtime authority.
 
 ### Cleanup
 
