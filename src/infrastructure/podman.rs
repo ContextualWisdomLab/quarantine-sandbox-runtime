@@ -138,6 +138,10 @@ struct ContainerHostConfig {
     ipc_mode: String,
     #[serde(default, rename = "NetworkMode")]
     network_mode: String,
+    #[serde(default, rename = "UTSMode")]
+    uts_mode: Option<String>,
+    #[serde(default, rename = "CgroupMode")]
+    cgroup_mode: Option<String>,
     #[serde(rename = "Memory")]
     memory: u64,
     #[serde(rename = "NanoCpus")]
@@ -908,6 +912,22 @@ impl RootlessPodmanAdapter {
         require_control(
             "isolated_ipc_namespace",
             container.host_config.ipc_mode == "none",
+        )?;
+        require_control(
+            "isolated_uts_namespace",
+            container
+                .host_config
+                .uts_mode
+                .as_deref()
+                .is_none_or(|mode| mode == "private"),
+        )?;
+        require_control(
+            "isolated_cgroup_namespace",
+            container
+                .host_config
+                .cgroup_mode
+                .as_deref()
+                .is_none_or(|mode| mode == "private"),
         )?;
         require_control(
             "external_egress_denied",
