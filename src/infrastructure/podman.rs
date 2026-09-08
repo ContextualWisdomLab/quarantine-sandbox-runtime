@@ -665,42 +665,43 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        // Once a command container might exist, every later failure must attempt
-        // cleanup. If cleanup cannot be proven, leak risk takes precedence over
-        // the earlier backend/isolation/log error and the call fails closed with
-        // `CleanupFailed`.
+        // Once create returns an acquired long ID, that immutable identity is
+        // the sole lifecycle/destructive authority. The generated name remains
+        // correlation/result metadata only; re-resolving it would reopen a
+        // same-principal name-rebinding TOCTOU window (#36).
         if let Err(error) = self.checked_output(
             "container_start",
-            &["start".to_owned(), sandbox_name.clone()],
+            &["start".to_owned(), container_id.clone()],
         ) {
-            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
 
         if let Err(error) = self.verify_command_isolation(
-            &sandbox_name,
             request,
             policy,
             &info,
             &container_id,
             staged_source.as_ref().map(|staged| staged.path()),
         ) {
-            return Err(self.cleanup_or_report(&sandbox_name, error.into()));
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
 
-        let (exit_code, timed_out) = match self.wait_for_command(&sandbox_name, request) {
+        let (exit_code, timed_out) = match self.wait_for_command(&container_id, request) {
             Ok(outcome) => outcome,
-            Err(error) => return Err(self.cleanup_or_report(&sandbox_name, error)),
+            Err(error) => {
+                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));
+            }
         };
 
         let logs_runner =
             BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
         let logs_outcome = match logs_runner
-            .run_to_completion(&self.program, &["logs".to_owned(), sandbox_name.clone()])
+            .run_to_completion(&self.program, &["logs".to_owned(), container_id.clone()])
         {
             Ok(outcome) => outcome,
             Err(_) => {
-                return Err(self.cleanup_or_report(
-                    &sandbox_name,
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
                     CommandExecutionError::Backend(
                         ApplicationServiceError::BackendInvocationFailed {
                             operation: "container_logs",
@@ -713,8 +714,8 @@ impl RootlessPodmanAdapter {
             // The log driver failing to hand back already-written output
             // promptly is an infrastructure fault, not a fact about the
             // workload (whose own timeout is already captured above).
-            return Err(self.cleanup_or_report(
-                &sandbox_name,
+            return Err(self.cleanup_owned_command_container_or_report(
+                &container_id,
                 CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
                     operation: "container_logs",
                 }),
@@ -726,29 +727,24 @@ impl RootlessPodmanAdapter {
         // log driver or container state is broken) and is an infrastructure
         // fault, not empty workload output.
         if !logs_outcome.status.is_none_or(|status| status.success()) {
-            return Err(self.cleanup_or_report(
-                &sandbox_name,
+            return Err(self.cleanup_owned_command_container_or_report(
+                &container_id,
                 CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
                     operation: "container_logs",
                 }),
             ));
         }
 
-        let cleanup_ok = self
-            .cleanup_created_command_container(&sandbox_name)
-            .is_ok();
-        if !cleanup_ok {
+        if self.cleanup_owned_command_container(&container_id).is_err() {
             return Err(CommandExecutionError::Backend(
                 ApplicationServiceError::CleanupFailed,
             ));
         }
 
-        let stdout = String::from_utf8(logs_outcome.stdout).map_err(|_| {
-            CommandExecutionError::InvalidOutputEncoding { stream: "stdout" }
-        })?;
-        let stderr = String::from_utf8(logs_outcome.stderr).map_err(|_| {
-            CommandExecutionError::InvalidOutputEncoding { stream: "stderr" }
-        })?;
+        let stdout = String::from_utf8(logs_outcome.stdout)
+            .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stdout" })?;
+        let stderr = String::from_utf8(logs_outcome.stderr)
+            .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stderr" })?;
         let finished_at_epoch_seconds = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
@@ -785,13 +781,13 @@ impl RootlessPodmanAdapter {
     /// failure, never a workload exit status.
     fn wait_for_command(
         &self,
-        sandbox_name: &str,
+        container_id: &str,
         request: &CommandExecutionRequest,
     ) -> Result<(i32, bool), CommandExecutionError> {
         let run_timeout = Duration::from_secs(u64::from(request.resources.lease_seconds));
         let wait_runner = BoundedCommandRunner::new(run_timeout, self.command_output_limit_bytes);
         let wait_outcome = wait_runner
-            .run_to_completion(&self.program, &["wait".to_owned(), sandbox_name.to_owned()])
+            .run_to_completion(&self.program, &["wait".to_owned(), container_id.to_owned()])
             .map_err(|_| {
                 CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
                     operation: "command_wait",
@@ -831,11 +827,11 @@ impl RootlessPodmanAdapter {
         }
 
         // Best effort: the container may already be exiting on its own.
-        let _ = self.command_succeeded(&["kill".to_owned(), sandbox_name.to_owned()]);
+        let _ = self.command_succeeded(&["kill".to_owned(), container_id.to_owned()]);
         let post_kill = self
             .checked_output(
                 "command_wait_after_kill",
-                &["wait".to_owned(), sandbox_name.to_owned()],
+                &["wait".to_owned(), container_id.to_owned()],
             )
             .map_err(CommandExecutionError::Backend)?;
         Ok((
@@ -858,7 +854,6 @@ impl RootlessPodmanAdapter {
     /// backend primitive), not a static-only attestation fallback.
     fn verify_command_isolation(
         &self,
-        sandbox_name: &str,
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
         info: &PodmanInfo,
@@ -870,7 +865,7 @@ impl RootlessPodmanAdapter {
             "inspect".to_owned(),
             "--format".to_owned(),
             "json".to_owned(),
-            sandbox_name.to_owned(),
+            container_id.to_owned(),
         ];
         let container_output = self.checked_output("container_inspect", &container_args)?;
         let container: ContainerInspection =
@@ -980,7 +975,7 @@ impl RootlessPodmanAdapter {
 
         let process_args = [
             "top".to_owned(),
-            sandbox_name.to_owned(),
+            container_id.to_owned(),
             "pid".to_owned(),
             "seccomp".to_owned(),
             "capeff".to_owned(),
@@ -1023,9 +1018,9 @@ impl RootlessPodmanAdapter {
         &self,
         sandbox_name: &str,
     ) -> Result<(), ApplicationServiceError> {
-        // This name-based helper is retained only for post-success paths until
-        // #36 binds the complete lifecycle to the acquired long container ID.
-        // A failed create with no owned receipt must never reach this helper.
+        // This name-based helper is used only when create output is malformed
+        // before a trustworthy acquired ID is available. Every path after a
+        // successful ID parse is bound to `cleanup_owned_command_container`.
         let remove_args = [
             "rm".to_owned(),
             "--force".to_owned(),
@@ -1067,10 +1062,9 @@ impl RootlessPodmanAdapter {
         }
     }
 
-    /// Attempt cleanup for a failed command-execution attempt and return the
-    /// error to surface: a failed cleanup means a container is leaked, which
-    /// must never be hidden behind `original`, the earlier backend error
-    /// that triggered this cleanup in the first place.
+    /// Attempt cleanup before a trustworthy post-create ID exists and return
+    /// the error to surface. Once an ID has been acquired, callers must use
+    /// `cleanup_owned_command_container_or_report` instead.
     fn cleanup_or_report(
         &self,
         sandbox_name: &str,
