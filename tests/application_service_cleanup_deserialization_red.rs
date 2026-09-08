@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 fn valid_cleanup_wire() -> Value {
     json!({
         "schema_version": "1.0.0",
-        "sandbox_id": "qsr-app-cleanup-red",
-        "network_id": "qsr-net-cleanup-red",
+        "sandbox_id": "qsr-app-cleanup-red-01",
+        "network_id": "qsr-net-cleanup-red-01",
         "container_removed": true,
         "network_removed": true,
         "terminated_at_epoch_seconds": 1_780_000_123_u64
@@ -30,8 +30,8 @@ fn schema_valid_cleanup_receipt_still_deserializes() {
         .expect("schema-valid cleanup receipt should remain wire-compatible");
 
     assert_eq!(receipt.schema_version(), "1.0.0");
-    assert_eq!(receipt.sandbox_id(), "qsr-app-cleanup-red");
-    assert_eq!(receipt.network_id(), "qsr-net-cleanup-red");
+    assert_eq!(receipt.sandbox_id(), "qsr-app-cleanup-red-01");
+    assert_eq!(receipt.network_id(), "qsr-net-cleanup-red-01");
     assert!(receipt.container_removed());
     assert!(receipt.network_removed());
     assert_eq!(receipt.terminated_at_epoch_seconds(), 1_780_000_123);

@@ -12,6 +12,7 @@ const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 64;
 const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
+const MAX_CLEANUP_RESOURCE_IDENTIFIER_BYTES: usize = 64;
 const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.1.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
@@ -328,8 +329,20 @@ impl ApplicationServiceLease {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CleanupReceiptWire {
+    schema_version: String,
+    sandbox_id: String,
+    network_id: String,
+    container_removed: bool,
+    network_removed: bool,
+    terminated_at_epoch_seconds: u64,
+}
+
 /// Evidence that runtime-owned isolation resources were removed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "CleanupReceiptWire")]
 pub struct CleanupReceipt {
     schema_version: String,
     sandbox_id: String,
@@ -337,6 +350,32 @@ pub struct CleanupReceipt {
     container_removed: bool,
     network_removed: bool,
     terminated_at_epoch_seconds: u64,
+}
+
+impl TryFrom<CleanupReceiptWire> for CleanupReceipt {
+    type Error = &'static str;
+
+    fn try_from(wire: CleanupReceiptWire) -> Result<Self, Self::Error> {
+        if wire.schema_version != CONTRACT_SCHEMA_VERSION {
+            return Err("unsupported cleanup receipt schema version");
+        }
+        if !cleanup_receipt_resource_identifier_is_valid(&wire.sandbox_id)
+            || !cleanup_receipt_resource_identifier_is_valid(&wire.network_id)
+        {
+            return Err("invalid cleanup receipt runtime identifier");
+        }
+        if !wire.container_removed || !wire.network_removed {
+            return Err("cleanup receipt does not prove complete removal");
+        }
+        Ok(Self {
+            schema_version: wire.schema_version,
+            sandbox_id: wire.sandbox_id,
+            network_id: wire.network_id,
+            container_removed: wire.container_removed,
+            network_removed: wire.network_removed,
+            terminated_at_epoch_seconds: wire.terminated_at_epoch_seconds,
+        })
+    }
 }
 
 impl CleanupReceipt {
@@ -484,6 +523,14 @@ pub enum ApplicationServiceError {
     /// Cleanup could not prove removal of all runtime-owned resources.
     #[error("sandbox cleanup failed")]
     CleanupFailed,
+}
+
+fn cleanup_receipt_resource_identifier_is_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_CLEANUP_RESOURCE_IDENTIFIER_BYTES
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+        })
 }
 
 fn is_digest_pinned_image_reference(value: &str) -> bool {
