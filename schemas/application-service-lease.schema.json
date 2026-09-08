@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.1.0.schema.json",
+  "title": "Isolated Application Service Lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "image_reference",
+    "backend_id",
+    "sandbox_id",
+    "network_id",
+    "policy_id",
+    "policy_sha256",
+    "endpoint",
+    "started_at_epoch_seconds",
+    "expires_at_epoch_seconds",
+    "shutdown_grace_seconds",
+    "isolation_attestation"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.1.0" },
+    "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "image_reference": {
+      "type": "string",
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F-\\u009F]+@sha256:[0-9a-f]{64}$",
+      "maxLength": 512
+    },
+    "backend_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,63}$"
+    },
+    "sandbox_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,64}$"
+    },
+    "network_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,64}$"
+    },
+    "policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "protocol"],
+      "properties": {
+        "host": { "const": "127.0.0.1" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "enum": ["tcp", "http"] }
+      }
+    },
+    "started_at_epoch_seconds": { "type": "integer", "minimum": 0 },
+    "expires_at_epoch_seconds": { "type": "integer", "minimum": 1 },
+    "shutdown_grace_seconds": { "type": "integer", "minimum": 1 },
+    "isolation_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootless",
+        "read_only_root_filesystem",
+        "all_capabilities_dropped",
+        "no_new_privileges",
+        "isolated_user_namespace",
+        "external_egress_denied",
+        "loopback_only_publication",
+        "credentials_available"
+      ],
+      "properties": {
+        "rootless": { "const": true },
+        "read_only_root_filesystem": { "const": true },
+        "all_capabilities_dropped": { "const": true },
+        "no_new_privileges": { "const": true },
+        "isolated_user_namespace": { "const": true },
+        "external_egress_denied": { "const": true },
+        "loopback_only_publication": { "const": true },
+        "credentials_available": { "const": false }
+      }
+    }
+  }
+}
