@@ -641,7 +641,9 @@ fn map_bounded_command_error(
     error: BoundedCommandError,
 ) -> ApplicationServiceError {
     match error {
-        BoundedCommandError::Timeout => ApplicationServiceError::BackendCommandTimedOut { operation },
+        BoundedCommandError::Timeout => {
+            ApplicationServiceError::BackendCommandTimedOut { operation }
+        }
         BoundedCommandError::OutputLimit => {
             ApplicationServiceError::BackendOutputLimitExceeded { operation }
         }
