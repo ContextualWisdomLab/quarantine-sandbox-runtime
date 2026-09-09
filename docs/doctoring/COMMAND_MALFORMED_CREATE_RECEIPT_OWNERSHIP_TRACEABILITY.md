@@ -62,13 +62,25 @@ Production commit `4f7a670fcec0663ef13a04c6e2ea42e4505df86a` applies the minimum
 5. if the receipt itself is unreadable or malformed, surface its typed receipt-evidence failure;
 6. remove the command-specific generated-name cleanup helpers so the unsafe fallback cannot be selected accidentally.
 
-Commit `cb2c046c6d2d36accaa003996176a6576763d114` updates the pre-existing malformed-success/no-receipt regression so it now proves that `--cidfile` is provisioned and that no `rm --force <generated-name>` call occurs when neither stdout nor cidfile provides trustworthy ownership evidence. This complements the #105 regression, which proves successful cleanup by the admitted acquired ID when the receipt exists.
+Commit `cb2c046c6d2d36accaa003996176a6576763d114` updates the pre-existing malformed-success/no-receipt regression so it proves that `--cidfile` is provisioned and that no `rm --force <generated-name>` call occurs when neither stdout nor cidfile provides trustworthy ownership evidence. This complements the #105 regression, which proves successful cleanup by the admitted acquired ID when the receipt exists.
 
 No public enum, schema, application-service behavior, analyzer behavior, retry policy, timeout, or provider-specific vocabulary changes.
 
+## Exact-head stale-contract RED and repair
+
+Commit `32a9f05b1a0f41ad75efff0e3ec8ccf7b1590210` first adopted the current root CI checkout hardening without changing runtime semantics. Native verify job `102286539612` proved the adoption itself was active (`actions/checkout` logged `persist-credentials: false`) and then reached a deterministic stale test contract: `tests/podman_command_execution_malformed_create_cleanup_red.rs::cleanup_failure_is_not_hidden_behind_malformed_container_identifier` expected `CleanupFailed`, while production correctly returned `MalformedIsolationInspection { operation: "container_create" }`.
+
+That old regression encoded the retired generated-name cleanup rule: its fake `create` emitted malformed stdout, never wrote the runtime-owned cidfile, then made `rm --force` fail. Under the #105 ownership model there is no admitted concrete container identity in that fixture, so attempting name-based removal would itself be the defect. The correct invariant is therefore to preserve the malformed-create error and prove that no destructive `rm --force <generated-name>` occurs.
+
+Test-only commit `6bd7fec4299c888d87b3476cc6c0b64851aa1b79` repairs that stale contract. It keeps malformed successful stdout and an absent cidfile, requires the create invocation to contain `--cidfile=`, expects the original malformed-create typed failure, and asserts that no `rm --force` call occurs. Production Rust is unchanged. The acquired-ID cleanup case remains independently covered by the #105 regression where the cidfile contains a valid 64-lowerhex ID.
+
+## CI credential adoption
+
+The predecessor command-runtime workflow still let `actions/checkout` persist its token in the local Git configuration. Current root #1 already disables that behavior. Commit `32a9f05b1a0f41ad75efff0e3ec8ccf7b1590210` adopts the canonical root `.github/workflows/ci.yml` blob exactly: five checkout steps now set `persist-credentials: false`, with action SHA, exact-head ref, runner labels, toolchains and job commands unchanged. The verify log confirms the credential file is removed immediately after checkout before repository validation or Rust execution.
+
 ## Verification and release gates
 
-`cb2c046c6d2d36accaa003996176a6576763d114` is a candidate GREEN head, not yet release or merge authority. The unchanged exact integrated head must pass repository validation, rustfmt, full workspace tests, Clippy, rustdoc, complete owned-production statement/function/region/branch coverage, qualifying review/security gates, hosted negative confinement and dedicated positive effective-LSM evidence. Real rootless runtime evidence remains required for any release claim about actual isolation. Only protected integration followed by immutable version/package/tag/release, SBOM, provenance, reproducibility and rollback evidence can become consumer authority.
+`6bd7fec4299c888d87b3476cc6c0b64851aa1b79` is a test-repair head, not merge or release authority. A fresh unchanged exact head containing production `4f7a670f...`, no-receipt coverage, the stale-test repair and credential-free checkout must pass repository validation, rustfmt, full workspace tests, Clippy, rustdoc, complete owned-production statement/function/region/branch coverage, qualifying review/security gates, hosted negative confinement and dedicated positive effective-LSM evidence. Real rootless runtime evidence remains required for any release claim about actual isolation. Only protected integration followed by immutable version/package/tag/release, SBOM, provenance, reproducibility and rollback evidence can become consumer authority.
 
 ## References
 
