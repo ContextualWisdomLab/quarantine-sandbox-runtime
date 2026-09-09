@@ -674,10 +674,9 @@ impl RootlessPodmanAdapter {
         // the sole lifecycle/destructive authority. The generated name remains
         // correlation/result metadata only; re-resolving it would reopen a
         // same-principal name-rebinding TOCTOU window (#36).
-        if let Err(error) = self.checked_output(
-            "container_init",
-            &["init".to_owned(), container_id.clone()],
-        ) {
+        if let Err(error) =
+            self.checked_output("container_init", &["init".to_owned(), container_id.clone()])
+        {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
 
@@ -1326,8 +1325,7 @@ fn verify_command_container_configuration(
     )?;
     require_control(
         "non_root_identity",
-        container.config.user
-            == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+        container.config.user == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
     )?;
     require_control(
         "resource_limits",
