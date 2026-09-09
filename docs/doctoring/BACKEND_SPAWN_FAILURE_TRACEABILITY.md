@@ -33,19 +33,43 @@ Rejected alternatives:
 - Treat missing output pipes as Spawn: a child already exists, so this falsifies lifecycle phase.
 - Copy or merge the old #72 tree wholesale: it predates multiple #14 lifecycle, ENTRYPOINT, image-integrity, and cleanup-ownership repairs and would violate the canonical owner/single-writer boundary.
 
+## Exact-head fixture RCA after the taxonomy became observable
+
+Exact `40b923c61e1a4727fac67cbfd0e1304d91eff956`, native CI `34335710292`, proved that the typed discriminator was working rather than merely compiling. The public Spawn regression, the concrete `BoundedCommandError::Spawn(ErrorKind::NotFound)` case, application-service missing-backend test, command-runtime unit suite, and checkout-credential contract all passed. The broad hosted lanes then exposed three distinct precondition failures before their intended leaf scenarios:
+
+- verify `102414488634`: `podman_command_execution_cleanup_red::cleanup_failure_is_not_hidden_behind_effective_isolation_failure` returned `BackendSpawnFailed { operation: "backend_security_info", failure_kind: Other }` before reaching isolation verification or cleanup;
+- branch coverage `102414488420`: `application_service_ownership::failed_launch_releases_idempotency_reservation_for_retry` returned the same bounded Spawn/Other class before the retry contract could execute;
+- coverage `102414488537`: `podman_command_execution_cleanup_red::cleanup_failure_is_not_hidden_behind_container_start_failure` returned the same Spawn/Other class before container start or cleanup.
+
+Sibling tests in those files passed, and the failures rotated across different hosted workers. The leaf cleanup, isolation, start, and idempotency assertions therefore were not weakened. The diagnostic contract had narrowed the failure to process creation itself.
+
+Those tests shared a test-infrastructure pattern that is unsafe under concurrent Unix process creation: they created fake executable scripts at runtime with `fs::write`, and the ownership retry case rewrote the same executable path between phases. Rust upstream documents a Unix `Command::spawn` race in which spawning a newly written executable can fail with `ETXTBSY`; Rust's public `Command::spawn` contract also explicitly permits process-creation failures before a child is successfully started. The exact hosted jobs expose only the intentionally bounded public class `Other`, so this record does **not** claim that their raw OS error was observed to be `ETXTBSY`. It records that the repository fixture architecture matched a known upstream hazard exactly and removes that hazard structurally rather than guessing the hidden errno.
+
+Test-only structural repair:
+
+- `0d0173727cd600533ab9291ed2c42040f65be259` adds checked-in executable `tests/fixtures/fake_podman.sh`. The executable inode is immutable during a test run; each invocation reads a per-test, data-only `${0}.config` sidecar for mode, port, and log path.
+- `b12360435341b61c16851ed93ce0efc1b2aa2860` converts the five command cleanup regressions to unique symlinks targeting that immutable executable and preserves every existing semantic expectation.
+- `f9f3d87509ea9c9ee633fb2f76b2b9b4091b7442` converts application-service ownership fixtures to the same model. The failed-launch retry now changes only data configuration, never the executable inode.
+
+No retry, sleep, mutex, lowered assertion, production-error remapping, or broadened public error surface was introduced. The fixture repair is test infrastructure only. Exact CI `34336860327` is the first native run for `f9f3d87509ea9c9ee633fb2f76b2b9b4091b7442`; its result must be evaluated without transferring any predecessor GREEN.
+
 ## CI credential boundary discovered during the same owner sweep
 
 The exact #14 workflow still used the default checkout credential persistence, while the integration-root contract had already disabled it. The prior exact job logs showed checkout configuring persisted credentials. Test-only `ba0826c6b4739a3cafb5c955fac00688a690ded4` adopts the root regression `every_checkout_discards_persisted_credentials`; `4b6f7ff121dfdd671decfafd45413b5c7bc4814d` applies `persist-credentials: false` to all five read-only checkout steps. This is CI security hardening and does not alter production runtime semantics.
 
 ## Evidence linkage and release gate
 
-Primary files and APIs: `src/infrastructure/bounded_command.rs`, `src/infrastructure/podman.rs`, `src/application_service/mod.rs`, `src/lib.rs`, and `tests/backend_spawn_failure_classification_red.rs`. The final exact branch head must newly pass repository policy, rustfmt, full Rust tests, Clippy, rustdoc, complete owned-production statement/function/region/branch coverage, hosted negative confinement, dedicated positive effective-LSM, qualifying review, and central security/dependency gates. Predecessor GREEN does not transfer.
+Primary files and APIs: `src/infrastructure/bounded_command.rs`, `src/infrastructure/podman.rs`, `src/application_service/mod.rs`, `src/lib.rs`, `tests/backend_spawn_failure_classification_red.rs`, `tests/fixtures/fake_podman.sh`, `tests/podman_command_execution_cleanup_red.rs`, and `tests/application_service_ownership.rs`. The final exact branch head must newly pass repository policy, rustfmt, full Rust tests, Clippy, rustdoc, complete owned-production statement/function/region/branch coverage, hosted negative confinement, dedicated positive effective-LSM, qualifying review, and central security/dependency gates. Predecessor GREEN does not transfer.
 
 The typed discriminator is diagnostic authority, not proof that every previously rotating `backend_security_info` specimen was a Spawn failure. When those tests re-run on an unchanged head, `BackendSpawnFailed` authorizes Spawn-specific RCA; a remaining generic error narrows RCA to Wait/Capture. No errno may be inferred before that evidence exists.
 
 ## References
 
+Rust Project. (2026). *Command in std::process*. The Rust Standard Library. https://doc.rust-lang.org/std/process/struct.Command.html
+
 Rust Project. (2026). *ErrorKind in std::io*. The Rust Standard Library. https://doc.rust-lang.org/std/io/enum.ErrorKind.html
+
+SabrinaJewson. (2023, August 6). *`Command::spawn` on a newly-written file can fail with ETXTBSY due to racing with itself on Unix* (Issue #114554) [GitHub issue]. rust-lang/rust. https://github.com/rust-lang/rust/issues/114554
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 
