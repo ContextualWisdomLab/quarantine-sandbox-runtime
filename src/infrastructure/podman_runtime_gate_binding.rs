@@ -87,6 +87,7 @@ impl RuntimeGatePodmanAdapter {
         request.validate(policy)?;
         let release_token = runtime_gate_release_token()?;
         let mut container_create_binding_args = vec![
+            "--interactive".to_owned(),
             "--volume".to_owned(),
             format!(
                 "{}:{RUNTIME_GATE_CONTAINER_PATH}:ro",
