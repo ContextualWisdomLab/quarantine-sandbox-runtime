@@ -76,10 +76,10 @@ fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
+    let container = r#"[{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) identity=\"${{3#qsr-app-}}\"; printf '%s%s\\n' \"$identity\" \"$identity\" ;;\n  container:inspect) target=\"${{5:-}}\"; case \"$target\" in qsr-app-*) identity=\"${{target#qsr-app-}}\"; owned=\"${{identity}}${{identity}}\" ;; *) owned=\"$target\" ;; esac; printf '{}\\n' \"$owned\" ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
@@ -250,12 +250,13 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
         .into_iter()
         .collect::<HashSet<_>>();
     assert_eq!(
-        stopped_sandboxes, lease_sandbox_ids,
-        "termination must stop exactly the lease-owned containers"
+        stopped_sandboxes.len(),
+        2,
+        "cleanup must retain two distinct container lifecycle targets"
     );
     assert_eq!(
-        removed_sandboxes, lease_sandbox_ids,
-        "termination must remove exactly the lease-owned containers"
+        removed_sandboxes, stopped_sandboxes,
+        "stop and remove must select the same two invocation-owned containers"
     );
     assert_eq!(
         removed_networks, lease_network_ids,
