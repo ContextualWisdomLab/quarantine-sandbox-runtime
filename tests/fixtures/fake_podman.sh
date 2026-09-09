@@ -69,5 +69,23 @@ case "$MODE" in
       *) exit 91 ;;
     esac
     ;;
+  command_owned_lifecycle)
+    mark_foreign() { printf 'foreign-container-touched' > "$FOREIGN_MARKER"; }
+    require_owned() {
+      [ "${1:-}" = "$OWNED_CONTAINER_ID" ] || { mark_foreign; exit 97; }
+    }
+    case "${1:-}:${2:-}" in
+      info:--format) printf '%s\n' "$COMMAND_INFO" ;;
+      create:--name) : > "$OWNED_MARKER"; printf '%s\n' "$OWNED_CONTAINER_ID" ;;
+      start:*) require_owned "${2:-}" ;;
+      container:inspect) require_owned "${5:-}"; printf '%s\n' "$OWNED_CONTAINER_INSPECT" ;;
+      top:*) require_owned "${2:-}"; printf '%s\n' "$COMMAND_TOP" ;;
+      wait:*) require_owned "${2:-}"; printf '0\n' ;;
+      logs:*) require_owned "${2:-}"; printf 'owned stdout\n' ;;
+      kill:*) require_owned "${2:-}" ;;
+      rm:--force) require_owned "${3:-}"; rm -f "$OWNED_MARKER" ;;
+      *) exit 91 ;;
+    esac
+    ;;
   *) exit 92 ;;
 esac
