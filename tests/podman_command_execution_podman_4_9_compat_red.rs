@@ -94,6 +94,9 @@ case "${1:-}:${2:-}" in
     done
     printf '%s\n' 'fake-command-container-id'
     ;;
+  init:*)
+    :
+    ;;
   start:*)
     :
     ;;
