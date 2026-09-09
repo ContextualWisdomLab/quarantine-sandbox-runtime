@@ -3,7 +3,8 @@
 //! The Podman adapter cannot safely bind a held gate until the host artifact has a bounded,
 //! immutable staging contract: the expected release digest must match, the executable architecture
 //! must match the current host, symlink sources must be rejected, and the staged bind source must be
-//! read-only. Static-linking and real rootless execution remain separate acceptance evidence.
+//! read-only while remaining readable/executable after Podman's user-namespace mapping. Static
+//! linking and real rootless execution remain separate acceptance evidence.
 
 #![cfg(target_os = "linux")]
 
@@ -43,7 +44,11 @@ fn runtime_gate_artifact_is_digest_bound_architecture_matched_and_staged_read_on
         .permissions()
         .mode();
     assert_eq!(mode & 0o222, 0, "staged gate must not be writable");
-    assert_ne!(mode & 0o111, 0, "staged gate must remain executable");
+    assert_eq!(
+        mode & 0o555,
+        0o555,
+        "the read-only gate must remain readable and executable for the remapped container user"
+    );
 }
 
 #[test]
