@@ -494,19 +494,23 @@ impl RootlessPodmanAdapter {
     /// egress denial than the service profile's internal, DNS-disabled
     /// network and needs no separate network object to create or clean up.
     ///
-    /// The sandbox is started detached, not attached (unlike a plain
-    /// `podman run`/`start --attach`), because `Self::verify_command_isolation`
-    /// must inspect the container's *running* process (`podman top`, which
-    /// errors on a not-yet-started container) before this method trusts it
-    /// enough to let the requested command actually execute. Completion is
-    /// observed with `podman wait` (bounded by the requested lease) and
-    /// output with `podman logs` against a `k8s-file`-backed log driver,
-    /// rather than by attaching to the workload's live pipes: a detached
-    /// `podman start --attach` on an already-running container does not
-    /// reliably mirror the container's own exit code (observed directly
-    /// against Podman 6.1.0), while `podman wait`'s stdout is the
-    /// authoritative post-exit code for both the ordinary and the
-    /// forcibly-killed-on-timeout path.
+    /// After creation, the exact acquired container is initialized with
+    /// `podman init` without releasing the consumer payload. Static/configured
+    /// controls that can already disprove the requested P0 policy are checked
+    /// while the container is still held. Only then is the payload started.
+    /// The existing live `podman top` verifier remains authoritative for
+    /// effective per-process seccomp/LSM/capability evidence after start; this
+    /// pre-start slice does not relabel configured state as effective evidence
+    /// and therefore does not, by itself, close issue #25's full hold/attest/
+    /// release requirement.
+    ///
+    /// Completion is observed with `podman wait` (bounded by the requested
+    /// lease) and output with `podman logs` against a `k8s-file`-backed log
+    /// driver, rather than by attaching to the workload's live pipes: a
+    /// detached `podman start --attach` on an already-running container does
+    /// not reliably mirror the container's own exit code (observed directly
+    /// against Podman 6.1.0), while `podman wait`'s stdout is the authoritative
+    /// post-exit code for both the ordinary and forcibly-killed-on-timeout path.
     ///
     /// # Errors
     ///
@@ -670,6 +674,22 @@ impl RootlessPodmanAdapter {
         // the sole lifecycle/destructive authority. The generated name remains
         // correlation/result metadata only; re-resolving it would reopen a
         // same-principal name-rebinding TOCTOU window (#36).
+        if let Err(error) = self.checked_output(
+            "container_init",
+            &["init".to_owned(), container_id.clone()],
+        ) {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if let Err(error) = self.verify_command_prestart_configuration(
+            request,
+            policy,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
         if let Err(error) = self.checked_output(
             "container_start",
             &["start".to_owned(), container_id.clone()],
@@ -841,6 +861,47 @@ impl RootlessPodmanAdapter {
         ))
     }
 
+    /// Verify configuration evidence while the exact acquired command container
+    /// is initialized but still held before the consumer payload is released.
+    ///
+    /// This rejects configured state that already disproves required controls;
+    /// it is deliberately not effective-process attestation. Seccomp mode,
+    /// capability sets and the LSM label remain subject to the post-start live
+    /// verifier until a stronger runtime-owned hold/attest/release primitive is
+    /// proven for issue #25.
+    fn verify_command_prestart_configuration(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        container_id: &str,
+        staged_source_path: Option<&Path>,
+    ) -> Result<(), ApplicationServiceError> {
+        let container = self.inspect_command_container(container_id)?;
+        verify_command_container_configuration(request, policy, &container, staged_source_path)
+    }
+
+    fn inspect_command_container(
+        &self,
+        container_id: &str,
+    ) -> Result<ContainerInspection, ApplicationServiceError> {
+        let container_args = [
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            container_id.to_owned(),
+        ];
+        let container_output = self.checked_output("container_inspect", &container_args)?;
+        let container: ContainerInspection =
+            parse_single_inspection("container_inspect", &container_output.stdout)?;
+        if container.id != container_id {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_inspect",
+            });
+        }
+        Ok(container)
+    }
+
     /// Verify the same P0 isolation invariants as [`Self::verify_effective_isolation`]
     /// for a command-execution sandbox, minus the network/port controls that
     /// do not apply to a `--network none` one-shot command.
@@ -861,118 +922,13 @@ impl RootlessPodmanAdapter {
         container_id: &str,
         staged_source_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
-        let container_args = [
-            "container".to_owned(),
-            "inspect".to_owned(),
-            "--format".to_owned(),
-            "json".to_owned(),
-            container_id.to_owned(),
-        ];
-        let container_output = self.checked_output("container_inspect", &container_args)?;
-        let container: ContainerInspection =
-            parse_single_inspection("container_inspect", &container_output.stdout)?;
-        if container.id != container_id {
-            return Err(ApplicationServiceError::MalformedIsolationInspection {
-                operation: "container_inspect",
-            });
-        }
-        if let Some(applied_image_digest) = container.image_digest.as_deref() {
-            let requested_image_digest = request
-                .image_reference
-                .rsplit_once('@')
-                .map(|(_, digest)| digest);
-            require_control(
-                "immutable_image_identity",
-                requested_image_digest == Some(applied_image_digest),
-            )?;
-        }
-
-        require_control(
-            "read_only_root_filesystem",
-            container.host_config.readonly_rootfs,
-        )?;
-        require_control("unprivileged_container", !container.host_config.privileged)?;
+        let container = self.inspect_command_container(container_id)?;
+        verify_command_container_configuration(request, policy, &container, staged_source_path)?;
         let security_options = container
             .host_config
             .security_opt
             .as_deref()
             .unwrap_or_default();
-        require_control(
-            "no_new_privileges",
-            security_options
-                .iter()
-                .any(|option| option == "no-new-privileges" || option == "no-new-privileges=true"),
-        )?;
-        require_control(
-            "isolated_user_namespace",
-            isolated_user_namespace_verified(&container.host_config),
-        )?;
-        require_control(
-            "isolated_pid_namespace",
-            container.host_config.pid_mode == "private",
-        )?;
-        require_control(
-            "isolated_ipc_namespace",
-            container.host_config.ipc_mode == "none",
-        )?;
-        require_control(
-            "isolated_uts_namespace",
-            container
-                .host_config
-                .uts_mode
-                .as_deref()
-                .is_none_or(|mode| mode == "private"),
-        )?;
-        require_control(
-            "isolated_cgroup_namespace",
-            container
-                .host_config
-                .cgroup_mode
-                .as_deref()
-                .is_none_or(|mode| mode == "private"),
-        )?;
-        require_control(
-            "external_egress_denied",
-            container.host_config.network_mode == "none",
-        )?;
-        require_control(
-            "non_root_identity",
-            container.config.user
-                == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
-        )?;
-        require_control(
-            "resource_limits",
-            resource_limits_match(&container.host_config, &request.resources),
-        )?;
-        require_control(
-            "command_mount_set",
-            container.mounts.len() == usize::from(request.source_artifact.is_some()),
-        )?;
-        if request.source_artifact.is_some() {
-            let source_mount = container
-                .mounts
-                .iter()
-                .find(|mount| mount.destination == "/workspace");
-            require_control(
-                "source_artifact_read_only",
-                source_mount.is_some_and(|mount| !mount.read_write),
-            )?;
-            require_control(
-                "source_artifact_bind_source",
-                source_mount.is_some_and(|mount| {
-                    mount.mount_type == "bind"
-                        && staged_source_path.is_some_and(|expected| mount.source == expected)
-                }),
-            )?;
-            for required_option in ["noexec", "nosuid", "nodev"] {
-                require_control(
-                    "source_artifact_mount_options",
-                    source_mount.is_some_and(|mount| {
-                        mount.options.iter().any(|option| option == required_option)
-                    }),
-                )?;
-            }
-        }
 
         let process_args = [
             "top".to_owned(),
@@ -1301,6 +1257,112 @@ impl Default for RootlessPodmanAdapter {
     fn default() -> Self {
         Self::new("podman")
     }
+}
+
+fn verify_command_container_configuration(
+    request: &CommandExecutionRequest,
+    policy: &IsolationPolicy,
+    container: &ContainerInspection,
+    staged_source_path: Option<&Path>,
+) -> Result<(), ApplicationServiceError> {
+    if let Some(applied_image_digest) = container.image_digest.as_deref() {
+        let requested_image_digest = request
+            .image_reference
+            .rsplit_once('@')
+            .map(|(_, digest)| digest);
+        require_control(
+            "immutable_image_identity",
+            requested_image_digest == Some(applied_image_digest),
+        )?;
+    }
+
+    require_control(
+        "read_only_root_filesystem",
+        container.host_config.readonly_rootfs,
+    )?;
+    require_control("unprivileged_container", !container.host_config.privileged)?;
+    let security_options = container
+        .host_config
+        .security_opt
+        .as_deref()
+        .unwrap_or_default();
+    require_control(
+        "no_new_privileges",
+        security_options
+            .iter()
+            .any(|option| option == "no-new-privileges" || option == "no-new-privileges=true"),
+    )?;
+    require_control(
+        "isolated_user_namespace",
+        isolated_user_namespace_verified(&container.host_config),
+    )?;
+    require_control(
+        "isolated_pid_namespace",
+        container.host_config.pid_mode == "private",
+    )?;
+    require_control(
+        "isolated_ipc_namespace",
+        container.host_config.ipc_mode == "none",
+    )?;
+    require_control(
+        "isolated_uts_namespace",
+        container
+            .host_config
+            .uts_mode
+            .as_deref()
+            .is_none_or(|mode| mode == "private"),
+    )?;
+    require_control(
+        "isolated_cgroup_namespace",
+        container
+            .host_config
+            .cgroup_mode
+            .as_deref()
+            .is_none_or(|mode| mode == "private"),
+    )?;
+    require_control(
+        "external_egress_denied",
+        container.host_config.network_mode == "none",
+    )?;
+    require_control(
+        "non_root_identity",
+        container.config.user
+            == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+    )?;
+    require_control(
+        "resource_limits",
+        resource_limits_match(&container.host_config, &request.resources),
+    )?;
+    require_control(
+        "command_mount_set",
+        container.mounts.len() == usize::from(request.source_artifact.is_some()),
+    )?;
+    if request.source_artifact.is_some() {
+        let source_mount = container
+            .mounts
+            .iter()
+            .find(|mount| mount.destination == "/workspace");
+        require_control(
+            "source_artifact_read_only",
+            source_mount.is_some_and(|mount| !mount.read_write),
+        )?;
+        require_control(
+            "source_artifact_bind_source",
+            source_mount.is_some_and(|mount| {
+                mount.mount_type == "bind"
+                    && staged_source_path.is_some_and(|expected| mount.source == expected)
+            }),
+        )?;
+        for required_option in ["noexec", "nosuid", "nodev"] {
+            require_control(
+                "source_artifact_mount_options",
+                source_mount.is_some_and(|mount| {
+                    mount.options.iter().any(|option| option == required_option)
+                }),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn map_bounded_command_error(
