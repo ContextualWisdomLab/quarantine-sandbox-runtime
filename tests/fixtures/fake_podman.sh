@@ -88,7 +88,7 @@ case "$MODE" in
       wait:*) require_owned "${2:-}"; printf '0\n' ;;
       logs:*) require_owned "${2:-}"; printf 'owned stdout\n' ;;
       kill:*) require_owned "${2:-}" ;;
-      rm:--force) require_owned "${3:-}"; rm -f "$OWNED_MARKER" ;;
+      rm:--force) require_owned "${4:-}"; rm -f "$OWNED_MARKER" ;;
       *) exit 91 ;;
     esac
     ;;
