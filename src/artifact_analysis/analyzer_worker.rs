@@ -131,6 +131,14 @@ pub struct AnalyzerWorkerFinding {
 
 impl AnalyzerWorkerFinding {
     fn validate(&self) -> Result<(), AnalyzerWorkerContractError> {
+        if matches!(
+            self.evidence_kind,
+            EvidenceKind::ArtifactIdentity | EvidenceKind::PolicyBoundary
+        ) {
+            return Err(AnalyzerWorkerContractError::InvalidOutcome {
+                field_name: "evidence_kind",
+            });
+        }
         if !is_bounded_text(&self.summary, MAX_SUMMARY_BYTES) {
             return Err(AnalyzerWorkerContractError::InvalidOutcome {
                 field_name: "summary",
