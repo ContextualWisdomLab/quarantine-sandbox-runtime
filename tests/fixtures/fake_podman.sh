@@ -47,6 +47,7 @@ case "$MODE" in
     case "${1:-}:${2:-}" in
       info:--format) printf '%s\n' "$COMMAND_INFO" ;;
       create:--name) printf 'fake-command-container-id\n' ;;
+      init:*) : ;;
       start:*)
         if [ "$MODE" = command_start_cleanup_fail ]; then exit 17; fi
         ;;
@@ -82,6 +83,7 @@ case "$MODE" in
     case "${1:-}:${2:-}" in
       info:--format) printf '%s\n' "$COMMAND_INFO" ;;
       create:--name) : > "$OWNED_MARKER"; printf '%s\n' "$OWNED_CONTAINER_ID" ;;
+      init:*) require_owned "${2:-}" ;;
       start:*) require_owned "${2:-}" ;;
       container:inspect) require_owned "${5:-}"; printf '%s\n' "$OWNED_CONTAINER_INSPECT" ;;
       top:*) require_owned "${2:-}"; printf '%s\n' "$COMMAND_TOP" ;;
