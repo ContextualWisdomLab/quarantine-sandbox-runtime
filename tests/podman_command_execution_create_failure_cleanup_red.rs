@@ -120,8 +120,7 @@ fn failed_create_with_owned_cidfile_receipt_is_cleaned_by_exact_id() {
         cidfile_parser_prefix(),
         OWNED_CONTAINER_ID,
     );
-    let (program, config, script_path) =
-        source_script_program("fake-podman", &call_log, &script);
+    let (program, config, script_path) = source_script_program("fake-podman", &call_log, &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
