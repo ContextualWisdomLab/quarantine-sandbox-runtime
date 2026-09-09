@@ -9,8 +9,8 @@
 
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -35,15 +35,37 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
-fn write_executable(name: &str, script: &str) -> PathBuf {
+fn fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn config_path(program: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", program.display()))
+}
+
+fn source_script_program(name: &str, call_log: &Path, script: &str) -> (PathBuf, PathBuf, PathBuf) {
     let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    program
+    symlink(fixture_executable(), &program).expect("fake Podman symlink should be creatable");
+    let script_path = temporary_path(&format!("{name}-script"));
+    fs::write(&script_path, script).expect("fake Podman data script should be writable");
+    let config = config_path(&program);
+    fs::write(
+        &config,
+        format!(
+            "MODE='source_script'\nLOG='{}'\nSCRIPT='{}'\n",
+            call_log.display(),
+            script_path.display(),
+        ),
+    )
+    .expect("fake Podman data config should be writable");
+    (program, config, script_path)
+}
+
+fn cleanup_fixture(program: PathBuf, config: PathBuf, script: PathBuf, call_log: PathBuf) {
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(config);
+    let _ = fs::remove_file(script);
+    let _ = fs::remove_file(call_log);
 }
 
 fn policy() -> IsolationPolicy {
@@ -83,16 +105,23 @@ fn security_info_json() -> &'static str {
     r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#
 }
 
+fn cidfile_parser_prefix() -> String {
+    format!(
+        "cidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n",
+        security_info_json(),
+    )
+}
+
 #[test]
 fn failed_create_with_owned_cidfile_receipt_is_cleaned_by_exact_id() {
     let call_log = temporary_path("call-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; printf '%s\\n' '{}' > \"$cidfile\"; exit 42 ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
+        "{}  create:--name) test -n \"$cidfile\"; printf '%s\\n' '{}' > \"$cidfile\"; exit 42 ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        cidfile_parser_prefix(),
         OWNED_CONTAINER_ID,
     );
-    let program = write_executable("fake-podman", &script);
+    let (program, config, script_path) =
+        source_script_program("fake-podman", &call_log, &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -119,20 +148,19 @@ fn failed_create_with_owned_cidfile_receipt_is_cleaned_by_exact_id() {
     );
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    cleanup_fixture(program, config, script_path, call_log);
 }
 
 #[test]
 fn cleanup_failure_for_owned_failed_create_surfaces_leak_risk() {
     let call_log = temporary_path("cleanup-fail-call-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; printf '%s\\n' '{}' > \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
+        "{}  create:--name) test -n \"$cidfile\"; printf '%s\\n' '{}' > \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
+        cidfile_parser_prefix(),
         OWNED_CONTAINER_ID,
     );
-    let program = write_executable("fake-podman-cleanup-fail", &script);
+    let (program, config, script_path) =
+        source_script_program("fake-podman-cleanup-fail", &call_log, &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -157,19 +185,18 @@ fn cleanup_failure_for_owned_failed_create_surfaces_leak_risk() {
     );
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    cleanup_fixture(program, config, script_path, call_log);
 }
 
 #[test]
 fn malformed_failed_create_receipt_fails_closed_without_name_cleanup() {
     let call_log = temporary_path("malformed-receipt-call-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; printf '%s\\n' 'not-an-owned-container-id' > \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
+        "{}  create:--name) test -n \"$cidfile\"; printf '%s\\n' 'not-an-owned-container-id' > \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
+        cidfile_parser_prefix(),
     );
-    let program = write_executable("fake-podman-malformed-receipt", &script);
+    let (program, config, script_path) =
+        source_script_program("fake-podman-malformed-receipt", &call_log, &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -187,19 +214,18 @@ fn malformed_failed_create_receipt_fails_closed_without_name_cleanup() {
     assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    cleanup_fixture(program, config, script_path, call_log);
 }
 
 #[test]
 fn unreadable_failed_create_receipt_fails_closed_without_name_cleanup() {
     let call_log = temporary_path("unreadable-receipt-call-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncidfile=''\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n  esac\ndone\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) test -n \"$cidfile\"; mkdir \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
+        "{}  create:--name) test -n \"$cidfile\"; mkdir \"$cidfile\"; exit 42 ;;\n  rm:--force) exit 99 ;;\n  *) exit 91 ;;\nesac\n",
+        cidfile_parser_prefix(),
     );
-    let program = write_executable("fake-podman-unreadable-receipt", &script);
+    let (program, config, script_path) =
+        source_script_program("fake-podman-unreadable-receipt", &call_log, &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -217,6 +243,5 @@ fn unreadable_failed_create_receipt_fails_closed_without_name_cleanup() {
     assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
 
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    cleanup_fixture(program, config, script_path, call_log);
 }
