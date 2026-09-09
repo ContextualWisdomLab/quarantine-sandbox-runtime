@@ -115,3 +115,65 @@ fn runtime_gate_release_token() -> Result<String, CommandExecutionError> {
     })?;
     Ok(format!("{:x}", Sha256::digest(nonce)))
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::fs;
+
+    use sha2::{Digest, Sha256};
+
+    use super::RootlessPodmanAdapter;
+    use crate::{CommandExecutionRequest, IsolationPolicy, ResourceRequest, RuntimeGateArtifact};
+
+    fn policy() -> IsolationPolicy {
+        IsolationPolicy {
+            policy_id: "runtime_gate_stdin_policy_v1".to_owned(),
+            maximum_memory_bytes: 512 * 1024 * 1024,
+            maximum_cpu_millicores: 2_000,
+            maximum_processes: 64,
+            maximum_lease_seconds: 300,
+            maximum_tmpfs_bytes: 64 * 1024 * 1024,
+            readiness_timeout_millis: 1_000,
+            readiness_poll_interval_millis: 10,
+            shutdown_grace_seconds: 2,
+            run_as_user_id: 65_532,
+            run_as_group_id: 65_532,
+        }
+    }
+
+    fn request() -> CommandExecutionRequest {
+        CommandExecutionRequest {
+            schema_version: "1.0.0".to_owned(),
+            request_id: "runtime-gate-stdin-request".to_owned(),
+            image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
+            command: vec!["payload-sentinel".to_owned()],
+            source_artifact: None,
+            resources: ResourceRequest {
+                memory_bytes: 256 * 1024 * 1024,
+                cpu_millicores: 1_000,
+                maximum_processes: 16,
+                lease_seconds: 20,
+                tmpfs_bytes: 16 * 1024 * 1024,
+            },
+        }
+    }
+
+    #[test]
+    fn gate_binding_keeps_container_stdin_open_for_bounded_release() {
+        let source = std::env::current_exe().expect("current test executable should exist");
+        let bytes = fs::read(&source).expect("current test executable should be readable");
+        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
+        let artifact = RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+            .expect("matching runtime gate artifact should stage");
+        let adapter = RootlessPodmanAdapter::new("podman").with_runtime_gate_artifact(artifact);
+        let plan = adapter
+            .plan_command_binding(&request(), &policy())
+            .expect("valid gate binding should plan");
+
+        assert_eq!(
+            plan.container_create_binding_args().first().map(String::as_str),
+            Some("--interactive"),
+            "the runtime gate reads its one-time release token from stdin, so Podman must keep container stdin open until the controller releases the held gate"
+        );
+    }
+}
