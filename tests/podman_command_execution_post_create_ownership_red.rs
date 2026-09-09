@@ -10,8 +10,8 @@
 
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -35,15 +35,12 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
-fn write_executable(name: &str, script: &str) -> PathBuf {
-    let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    program
+fn fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn config_path(program: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", program.display()))
 }
 
 fn policy() -> IsolationPolicy {
@@ -79,10 +76,6 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
-fn security_info_json() -> &'static str {
-    r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#
-}
-
 fn container_inspect_json() -> String {
     format!(
         "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
@@ -104,16 +97,20 @@ fn successful_create_binds_every_lifecycle_operation_to_the_acquired_container_i
     fs::write(&foreign_marker, b"foreign-container-untouched")
         .expect("foreign resource marker should be writable");
 
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nowned='{}'\nforeign='{}'\nowned_marker='{}'\nmark_foreign() {{ printf 'foreign-container-touched' > \"$foreign\"; }}\nrequire_owned() {{ [ \"${{1:-}}\" = \"$owned\" ] || {{ mark_foreign; exit 97; }}; }}\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) : > \"$owned_marker\"; printf '%s\\n' \"$owned\" ;;\n  start:*) require_owned \"${{2:-}}\" ;;\n  container:inspect) require_owned \"${{5:-}}\"; printf '%s\\n' '{}' ;;\n  top:*) require_owned \"${{2:-}}\"; printf '%s\\n' 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL'; printf '%s\\n' '1 filter - - - - - containers-default (enforce)' ;;\n  wait:*) require_owned \"${{2:-}}\"; printf '0\\n' ;;\n  logs:*) require_owned \"${{2:-}}\"; printf 'owned stdout\\n' ;;\n  kill:*) require_owned \"${{2:-}}\" ;;\n  rm:--force) require_owned \"${{3:-}}\"; rm -f \"$owned_marker\" ;;\n  *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        OWNED_CONTAINER_ID,
-        foreign_marker.display(),
-        owned_marker.display(),
-        security_info_json(),
-        container_inspect_json(),
-    );
-    let program = write_executable("fake-podman", &script);
+    let program = temporary_path("fake-podman");
+    symlink(fixture_executable(), &program).expect("fake Podman symlink should be creatable");
+    let config = config_path(&program);
+    fs::write(
+        &config,
+        format!(
+            "MODE='command_owned_lifecycle'\nLOG='{}'\nOWNED_CONTAINER_ID='{OWNED_CONTAINER_ID}'\nOWNED_MARKER='{}'\nFOREIGN_MARKER='{}'\nOWNED_CONTAINER_INSPECT='{}'\n",
+            call_log.display(),
+            owned_marker.display(),
+            foreign_marker.display(),
+            container_inspect_json(),
+        ),
+    )
+    .expect("fake Podman data config should be writable");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter
@@ -155,6 +152,7 @@ fn successful_create_binds_every_lifecycle_operation_to_the_acquired_container_i
     );
 
     let _ = fs::remove_file(program);
+    let _ = fs::remove_file(config);
     let _ = fs::remove_file(call_log);
     let _ = fs::remove_file(owned_marker);
     let _ = fs::remove_file(foreign_marker);
