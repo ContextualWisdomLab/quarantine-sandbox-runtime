@@ -17,6 +17,7 @@ Cleanup is lifecycle evidence, not analyzer output. A boolean that does not iden
 - Infrastructure adapters own provider-specific cleanup operations and observations.
 - The repair remains backend-neutral; Podman names, container IDs, gVisor handles, containerd task IDs or VM identifiers do not become Supporting-context domain types.
 - #69/#70 seven-control isolation completeness, #77/#78 finding producer authority and #79/#80 process-exit/completion binding remain independent gates.
+- Repository-local CI policy remains owned by the canonical `.github` contract. Descendant stacks must adopt that contract rather than retaining stale checkout credential behavior.
 
 ## Executed RED
 
@@ -38,13 +39,25 @@ The same verify job later failed in inherited `podman_command_execution_entrypoi
 
 Concrete adapters must still prove that their cleanup operation targeted the exact acquired runtime identity. Matching Rust values are consistency evidence, not proof that cleanup happened.
 
+## Current-head CI policy repair
+
+Fresh execution on doctoring head `90091c48b4570067c4d5c9771c68fc6edab4fc9b`, native CI `34309878181`, corrected two stale assumptions. First, the cleanup-identity suite itself remained GREEN: all three cleanup cases plus the Core worker-boundary, identifier, outcome, port and required-isolation suites passed. The broad verify failure appeared later in `podman_command_execution_create_failure_cleanup_red::unreadable_failed_create_receipt_fails_closed_without_name_cleanup`, where the inherited runtime returned `BackendInvocationFailed { operation: "backend_security_info" }` instead of the expected `BackendInvocationFailed { operation: "container_create_receipt" }`. Other cases in that binary passed. This is another rotating command/backend specimen, not evidence against the cleanup-identity contract.
+
+Second, the same exact GitHub Actions log showed `actions/checkout` running with `persist-credentials: true`. Current canonical root #1 already requires every checkout to set `persist-credentials: false` and carries a repository regression for that invariant. The child had stale `.github` ancestry: its workflow omitted the setting and its `tests/ci_runner_contract.rs` omitted the corresponding regression. This is a repository/CI ownership finding independent of worker cleanup semantics.
+
+Test-only `93637bc56a23711b943d4a08e545aebe038d025e` adopts the canonical root CI-regression file so the stale credential behavior cannot silently recur. The reality RED is the already-executed `90091c48...` Actions log; the test-only commit itself moved before hosted execution and is not promoted as an executed RED. Minimum CI repair `536603e2fcaeb1bdaa16edf6d8af31fe0c70fb5d` adopts the canonical root `.github/workflows/ci.yml` blob exactly, adding `persist-credentials: false` to all five checkout steps without changing production Rust, runner labels, toolchains, test commands or isolation semantics. Fresh exact-head CI must execute before that candidate is called GREEN.
+
 ## Alternatives considered
 
 Keeping `cleanup_completed: bool` was rejected because it cannot identify the cleaned worker. Adding a second `cleanup_worker_id` beside the boolean would make the invariant representable but would preserve two loosely coupled fields; a cleanup evidence value keeps lifecycle identity and observation together. Moving cleanup ownership into `artifact_analysis` was rejected because cleanup is reusable sandbox lifecycle truth. Embedding provider-specific container identifiers in the Supporting contract was rejected because it breaks backend neutrality and the Context Map.
 
+Keeping persisted checkout credentials in this descendant was also rejected. The repository only needs read access during CI, canonical root policy already disables persistence, and retaining stale credentials after checkout creates unnecessary ambient Git write authority for later test/build steps. A local exception would duplicate `.github` ownership and make descendant behavior weaker than the current canonical contract.
+
 ## Security and standards basis
 
 The repository's AGENTS/TRD require cleanup to fail closed and make runtime lifecycle evidence an isolation responsibility. NIST SP 800-190 treats container runtime isolation/resource controls and lifecycle security as part of the container security boundary. OCI Runtime Specification v1.3.0 defines lifecycle operations against the same container identity; the runtime user must be able to apply operations to the container it created. These sources support preserving exact runtime identity across lifecycle operations; repository-specific worker identity remains the executable contract authority.
+
+The checkout credential repair follows least-privilege and ambient-authority reduction already encoded by the repository's canonical CI contract; it does not claim that GitHub checkout configuration itself proves workload confinement.
 
 ### References
 
@@ -54,4 +67,4 @@ Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container securit
 
 ## Completion gate
 
-This doctoring update moves the PR head beyond the exact source head that produced the focused GREEN; predecessor evidence is retained only as causal history. Do not merge until one unchanged final head passes repository validation, rustfmt, full workspace tests, Clippy with warnings denied, rustdoc with warnings denied, exact 100% owned production statement/function/region/branch coverage, required review/security/thread gates, dependency-safe adoption of the repaired command/runtime foundation through #18/#70, real positive effective-isolation evidence, protected-head integration, SBOM/provenance/reproducibility/rollback, and immutable release evidence.
+This doctoring update moves the PR head beyond the exact source head that produced the focused GREEN. Predecessor evidence is retained only as causal history. The final unchanged head must prove the canonical checkout-credential regression and all five checkout steps, then pass repository validation, rustfmt, full workspace tests, Clippy with warnings denied, rustdoc with warnings denied, exact 100% owned production statement/function/region/branch coverage, required review/security/thread gates, dependency-safe adoption of the repaired command/runtime foundation through #18/#70, real positive effective-isolation evidence, protected-head integration, SBOM/provenance/reproducibility/rollback, and immutable release evidence.
