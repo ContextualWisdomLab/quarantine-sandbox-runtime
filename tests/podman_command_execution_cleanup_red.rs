@@ -1,17 +1,17 @@
 //! RED regressions for command-output evidence and cleanup error handling.
 //!
-//! These tests intentionally exercise the production `RootlessPodmanAdapter`
-//! through a fake Podman executable. They pin the review finding that backend
-//! `podman logs` failures are infrastructure errors, not workload output, and
-//! that a failed cleanup attempt must never be discarded behind an earlier
-//! backend error.
+//! These tests exercise the production `RootlessPodmanAdapter` through a
+//! checked-in immutable fake Podman executable. Runtime-written executable
+//! scripts are deliberately avoided because parallel Unix process creation can
+//! race with a newly written executable and surface ETXTBSY before the intended
+//! backend scenario is reached.
 
 #![cfg(target_os = "linux")]
 
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -35,15 +35,33 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
-fn write_executable(name: &str, script: &str) -> PathBuf {
+fn fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn config_path(program: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", program.display()))
+}
+
+fn create_fake_podman(name: &str, mode: &str) -> (PathBuf, PathBuf) {
     let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    program
+    let call_log = temporary_path(&format!("{name}-call-log"));
+    symlink(fixture_executable(), &program).expect("fake Podman symlink should be creatable");
+    fs::write(
+        config_path(&program),
+        format!(
+            "MODE='{mode}'\nREADY_PORT='0'\nLOG='{}'\n",
+            call_log.display()
+        ),
+    )
+    .expect("fake Podman data config should be writable");
+    (program, call_log)
+}
+
+fn remove_fixture(program: &Path, call_log: &Path) {
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(config_path(program));
+    let _ = fs::remove_file(call_log);
 }
 
 fn policy() -> IsolationPolicy {
@@ -79,38 +97,9 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
-fn security_info_json() -> &'static str {
-    r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#
-}
-
-fn container_inspect_json() -> &'static str {
-    r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#
-}
-
-fn top_output() -> &'static str {
-    "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n"
-}
-
 #[test]
 fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
-    let call_log = temporary_path("nonzero-logs-call-log");
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         top:*) printf '%s' '{}' ;;\n  \
-         wait:*) printf '0\\n' ;;\n  \
-         logs:*) printf 'podman logs backend failure\\n' >&2; exit 42 ;;\n  \
-         rm:--force) : ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
-        container_inspect_json(),
-        top_output(),
-    );
-    let program = write_executable("nonzero-logs", &script);
+    let (program, call_log) = create_fake_podman("nonzero-logs", "command_nonzero_logs");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -126,25 +115,13 @@ fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("logs ")));
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    remove_fixture(&program, &call_log);
 }
 
 #[test]
 fn cleanup_failure_is_not_hidden_behind_container_start_failure() {
-    let call_log = temporary_path("start-and-cleanup-fail-call-log");
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) exit 17 ;;\n  \
-         rm:--force) exit 88 ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
-    );
-    let program = write_executable("start-and-cleanup-fail", &script);
+    let (program, call_log) =
+        create_fake_podman("start-and-cleanup-fail", "command_start_cleanup_fail");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -158,31 +135,13 @@ fn cleanup_failure_is_not_hidden_behind_container_start_failure() {
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("start ")));
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    remove_fixture(&program, &call_log);
 }
 
 #[test]
 fn cleanup_failure_is_not_hidden_behind_container_logs_failure() {
-    let call_log = temporary_path("logs-and-cleanup-fail-call-log");
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         top:*) printf '%s' '{}' ;;\n  \
-         wait:*) printf '0\\n' ;;\n  \
-         logs:*) printf 'podman logs backend failure\\n' >&2; exit 42 ;;\n  \
-         rm:--force) exit 88 ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
-        container_inspect_json(),
-        top_output(),
-    );
-    let program = write_executable("logs-and-cleanup-fail", &script);
+    let (program, call_log) =
+        create_fake_podman("logs-and-cleanup-fail", "command_logs_cleanup_fail");
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -196,31 +155,15 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_failure() {
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("logs ")));
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    remove_fixture(&program, &call_log);
 }
 
 #[test]
 fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
-    let call_log = temporary_path("logs-timeout-and-cleanup-fail-call-log");
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         top:*) printf '%s' '{}' ;;\n  \
-         wait:*) printf '0\\n' ;;\n  \
-         logs:*) sleep 3 ;;\n  \
-         rm:--force) exit 88 ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
-        container_inspect_json(),
-        top_output(),
+    let (program, call_log) = create_fake_podman(
+        "logs-timeout-and-cleanup-fail",
+        "command_logs_timeout_cleanup_fail",
     );
-    let program = write_executable("logs-timeout-and-cleanup-fail", &script);
     let adapter =
         RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(2));
 
@@ -235,28 +178,15 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
     assert!(calls.lines().any(|line| line.starts_with("logs ")));
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    remove_fixture(&program, &call_log);
 }
 
 #[test]
 fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
-    let call_log = temporary_path("isolation-and-cleanup-fail-call-log");
-    let invalid_container = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":false,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         rm:--force) exit 88 ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        call_log.display(),
-        security_info_json(),
-        invalid_container,
+    let (program, call_log) = create_fake_podman(
+        "isolation-and-cleanup-fail",
+        "command_isolation_cleanup_fail",
     );
-    let program = write_executable("isolation-and-cleanup-fail", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
@@ -274,7 +204,5 @@ fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
             .any(|line| line.starts_with("container inspect "))
     );
     assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(call_log);
+    remove_fixture(&program, &call_log);
 }
