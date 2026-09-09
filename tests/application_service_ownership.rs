@@ -3,7 +3,12 @@
 #![cfg(target_os = "linux")]
 
 use std::{
-    fs, net::TcpListener, os::unix::fs::PermissionsExt, path::Path, sync::Arc, thread,
+    fs,
+    net::TcpListener,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread,
     time::Duration,
 };
 
@@ -55,23 +60,33 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
+fn fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn config_path(program: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", program.display()))
+}
+
 fn write_fake_podman(program: &Path, log: &Path, mode: &str, ready_port: u16) {
-    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.6.2"}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
-    let network = r#"[{"internal":true,"dns_enabled":false}]"#;
-    let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$MODE\" = slow_rootless ] && [ \"${{1:-}}\" = info ]; then sleep 1; fi\nif [ \"$MODE\" = fail_rootless ] && [ \"${{1:-}}\" = info ]; then exit 20; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter 0000000000000000 0000000000000000 0000000000000000 0000000000000000 0000000000000000 containers-default (enforce)\\n' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        info,
-        network,
-        container,
-    );
-    fs::write(program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(program, permissions).expect("fake Podman should be executable");
+    if !program.exists() {
+        symlink(fixture_executable(), program)
+            .expect("immutable fake Podman symlink should be creatable");
+    }
+    let fixture_mode = match mode {
+        "success" => "app_success",
+        "slow_rootless" => "app_slow_rootless",
+        "fail_rootless" => "app_fail_rootless",
+        other => panic!("unsupported ownership fake Podman mode: {other}"),
+    };
+    fs::write(
+        config_path(program),
+        format!(
+            "MODE='{fixture_mode}'\nREADY_PORT='{ready_port}'\nLOG='{}'\n",
+            log.display()
+        ),
+    )
+    .expect("fake Podman data config should be writable");
 }
 
 fn count_calls(log: &Path, needle: &str) -> usize {
