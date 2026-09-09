@@ -809,15 +809,8 @@ where
 
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     let identifier = std::str::from_utf8(bytes).ok()?.trim();
-    if identifier.is_empty()
-        || identifier.len() > 128
-        || identifier
-            .chars()
-            .any(|character| character.is_control() || character.is_whitespace())
-    {
-        return None;
-    }
-    Some(identifier.to_owned())
+    (identifier.len() == 64 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| identifier.to_owned())
 }
 
 fn sandbox_identity(
