@@ -78,6 +78,7 @@ case "${{1:-}}:${{2:-}}" in
     done
     printf 'fake-command-container-id\n'
     ;;
+  init:*) : ;;
   start:*) : ;;
   container:inspect)
     printf '%s\n' '[{{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{{"io.podman.annotations.userns":"auto"}},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}}}]'
