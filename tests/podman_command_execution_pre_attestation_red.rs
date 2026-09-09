@@ -87,13 +87,13 @@ fn command_payload_is_not_runnable_before_effective_process_attestation() {
     let security_info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) case \"$*\" in *payload-sentinel*) : > '{}' ;; esac; printf 'fake-command-container-id\\n' ;;\n  start:*) if [ -f '{}' ]; then : > '{}'; fi ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) exit 1 ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) case \"$*\" in *payload-sentinel*) : > '{}' ;; esac; printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  start:*) if [ -f '{}' ]; then : > '{}'; fi ;;\n  top:*) exit 1 ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         calls.display(),
         security_info,
         created_payload.display(),
+        inspect,
         created_payload.display(),
         payload_side_effect.display(),
-        inspect,
     );
     let program = write_executable("payload-before-attestation", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -105,6 +105,14 @@ fn command_payload_is_not_runnable_before_effective_process_attestation() {
         "missing live process attestation must fail the command execution"
     );
     let recorded_calls = fs::read_to_string(&calls).expect("backend calls should be recorded");
+    assert!(
+        recorded_calls.contains("init fake-command-container-id"),
+        "the regression must begin from the init-held design before testing the remaining release boundary"
+    );
+    assert!(
+        recorded_calls.contains("start fake-command-container-id"),
+        "the current implementation should reach the consumer-release operation after init and pre-start configuration checks"
+    );
     assert!(
         recorded_calls.contains("rm --force --ignore"),
         "attestation failure must clean up the exact command sandbox"
