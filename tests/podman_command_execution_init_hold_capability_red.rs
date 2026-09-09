@@ -15,8 +15,7 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionBackend, CommandExecutionRequest, IsolationPolicy, ResourceRequest,
-    RootlessPodmanAdapter,
+    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
 };
 use tempfile::TempDir;
 
