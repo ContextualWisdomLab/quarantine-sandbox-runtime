@@ -10,7 +10,7 @@ use std::{
     fs,
     net::TcpListener,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -69,7 +69,7 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(ready_port: u16, foreign_marker: &PathBuf) -> (PathBuf, PathBuf) {
+fn write_fake_podman(ready_port: u16, foreign_marker: &Path) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
