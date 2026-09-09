@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const MAX_POLICY_IDENTIFIER_BYTES: usize = 128;
+const MAX_WORKER_IDENTIFIER_BYTES: usize = 128;
+const SHA256_HEX_BYTES: usize = 64;
 
 /// Verification state for one isolation control in an attested sandbox.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +173,188 @@ impl VerifiedIsolationState {
     #[must_use]
     pub const fn credentials_available(self) -> bool {
         self.credentials_available
+    }
+}
+
+/// Reusable resource and result-channel budget for one isolated worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SandboxWorkerBudget {
+    /// Maximum cumulative CPU time in milliseconds.
+    pub maximum_cpu_millis: u64,
+    /// Maximum resident memory in bytes.
+    pub maximum_memory_bytes: u64,
+    /// Maximum process count.
+    pub maximum_pids: u64,
+    /// Maximum wall-clock execution time in milliseconds.
+    pub maximum_wall_time_millis: u64,
+    /// Maximum writable scratch-space budget in bytes.
+    pub maximum_scratch_bytes: u64,
+    /// Maximum retained worker output in bytes.
+    pub maximum_output_bytes: u64,
+}
+
+impl SandboxWorkerBudget {
+    pub(crate) fn invalid_field(self) -> Option<&'static str> {
+        [
+            ("maximum_cpu_millis", self.maximum_cpu_millis),
+            ("maximum_memory_bytes", self.maximum_memory_bytes),
+            ("maximum_pids", self.maximum_pids),
+            ("maximum_wall_time_millis", self.maximum_wall_time_millis),
+            ("maximum_scratch_bytes", self.maximum_scratch_bytes),
+            ("maximum_output_bytes", self.maximum_output_bytes),
+        ]
+        .into_iter()
+        .find_map(|(field_name, value)| (value == 0).then_some(field_name))
+    }
+}
+
+/// Runtime-observed lifecycle state for one isolated worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SandboxWorkerTerminationState {
+    /// The runtime still observes the worker as running.
+    Running,
+    /// The worker reached an exited terminal state with the observed exit code.
+    Exited {
+        /// Runtime-observed process exit code.
+        exit_code: i32,
+    },
+}
+
+impl SandboxWorkerTerminationState {
+    /// Return whether this state proves that the worker is no longer running.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Exited { .. })
+    }
+}
+
+/// Runtime-owned termination evidence bound to one exact worker identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxWorkerTerminationEvidence {
+    /// Runtime-owned worker invocation identifier.
+    pub worker_id: String,
+    /// Runtime-observed lifecycle state for that worker.
+    pub state: SandboxWorkerTerminationState,
+}
+
+/// Runtime-owned isolation, lifecycle, and cleanup evidence for one worker.
+///
+/// Shared effective controls are composed through [`VerifiedIsolationState`].
+/// Worker-specific fields cover facts not represented by that shared value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxWorkerIsolationEvidence {
+    /// Runtime-owned worker invocation identifier.
+    pub worker_id: String,
+    /// Stable backend implementation identifier.
+    pub runtime_backend_id: String,
+    /// Backend implementation version.
+    pub runtime_backend_version: String,
+    /// Lower-case SHA-256 digest of the applied isolation policy.
+    pub isolation_policy_sha256: String,
+    /// Resource and output ceilings observed as applied by the backend.
+    pub applied_budget: SandboxWorkerBudget,
+    /// Canonical Core effective-isolation state observed for the worker.
+    pub isolation_state: VerifiedIsolationState,
+    /// Whether the worker reached a host-loopback service outside its boundary.
+    pub host_loopback_access_performed: bool,
+    /// Whether broad host filesystem access was observed or granted.
+    pub host_filesystem_access_performed: bool,
+    /// Whether a host/container runtime socket was accessible.
+    pub runtime_socket_access_performed: bool,
+    /// Whether uncontrolled subprocess execution authority was available.
+    pub uncontrolled_subprocess_performed: bool,
+    /// Runtime-observed termination evidence for the exact worker.
+    pub termination: SandboxWorkerTerminationEvidence,
+    /// Whether runtime-owned cleanup completed after terminal observation.
+    pub cleanup_completed: bool,
+}
+
+impl SandboxWorkerIsolationEvidence {
+    pub(crate) fn invalid_identity_field(&self) -> Option<&'static str> {
+        for (field_name, value) in [
+            ("worker_id", self.worker_id.as_str()),
+            ("runtime_backend_id", self.runtime_backend_id.as_str()),
+            (
+                "runtime_backend_version",
+                self.runtime_backend_version.as_str(),
+            ),
+            ("termination_worker_id", self.termination.worker_id.as_str()),
+        ] {
+            if !is_valid_worker_identifier(value) {
+                return Some(field_name);
+            }
+        }
+        (!is_lowercase_sha256(&self.isolation_policy_sha256)).then_some("isolation_policy_sha256")
+    }
+
+    pub(crate) fn boundary_violation(&self) -> Option<&'static str> {
+        if self.termination.worker_id != self.worker_id {
+            return Some("termination_worker_id");
+        }
+        if !self.termination.state.is_terminal() {
+            return Some("termination_state");
+        }
+        if !self.cleanup_completed {
+            return Some("cleanup_completed");
+        }
+        for (field_name, status) in [
+            ("rootless", self.isolation_state.rootless_status()),
+            (
+                "read_only_root_filesystem",
+                self.isolation_state.read_only_root_filesystem_status(),
+            ),
+            (
+                "all_capabilities_dropped",
+                self.isolation_state.all_capabilities_dropped_status(),
+            ),
+            (
+                "no_new_privileges",
+                self.isolation_state.no_new_privileges_status(),
+            ),
+            (
+                "isolated_user_namespace",
+                self.isolation_state.isolated_user_namespace_status(),
+            ),
+            ("seccomp_enforced", self.isolation_state.seccomp_status()),
+            ("lsm_enforced", self.isolation_state.lsm_status()),
+        ] {
+            if status != IsolationControlStatus::Verified {
+                return Some(field_name);
+            }
+        }
+        if self.isolation_state.external_egress_denied_status() != IsolationControlStatus::Verified
+        {
+            return Some("external_egress_denied");
+        }
+        if self.isolation_state.resource_limits_status() != IsolationControlStatus::Verified {
+            return Some("resource_limits_verified");
+        }
+        if self.isolation_state.credentials_available() {
+            return Some("credentials_available");
+        }
+        for (field_name, violated) in [
+            (
+                "host_loopback_access_performed",
+                self.host_loopback_access_performed,
+            ),
+            (
+                "host_filesystem_access_performed",
+                self.host_filesystem_access_performed,
+            ),
+            (
+                "runtime_socket_access_performed",
+                self.runtime_socket_access_performed,
+            ),
+            (
+                "uncontrolled_subprocess_performed",
+                self.uncontrolled_subprocess_performed,
+            ),
+        ] {
+            if violated {
+                return Some(field_name);
+            }
+        }
+        None
     }
 }
 
@@ -383,6 +567,19 @@ fn hash_component(hasher: &mut Sha256, name: &str, value: &[u8]) {
     hasher.update(name.as_bytes());
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);
+}
+
+fn is_valid_worker_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_WORKER_IDENTIFIER_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == SHA256_HEX_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 pub(crate) struct RuntimeLeaseMetadata {
