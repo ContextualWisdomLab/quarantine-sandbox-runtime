@@ -22,8 +22,7 @@ use quarantine_sandbox_runtime::{
 };
 use sha2::{Digest, Sha256};
 
-const OWNED_CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
