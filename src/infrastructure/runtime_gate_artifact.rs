@@ -232,12 +232,9 @@ mod tests {
         let source = std::env::current_exe().expect("current test executable should exist");
         let bytes = fs::read(&source).expect("current test executable should be readable");
         let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
-        let artifact = RuntimeGateArtifact::stage(
-            &source,
-            &expected_sha256,
-            std::env::consts::ARCH,
-        )
-        .expect("matching runtime gate artifact should stage");
+        let artifact =
+            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+                .expect("matching runtime gate artifact should stage");
 
         let mode = fs::metadata(artifact.path())
             .expect("staged runtime gate metadata should exist")
