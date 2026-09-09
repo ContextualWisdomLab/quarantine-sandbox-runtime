@@ -75,7 +75,11 @@ fn write_executable(name: &str, script: &str) -> FixturePath {
     std::os::unix::fs::symlink(immutable_fixture_executable(), &program)
         .expect("fake Podman immutable symlink should be creatable");
     let script_path = fixture_sidecar(&program, "script");
-    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    let init_capable_script = format!(
+        "if [ \"${{1:-}}\" = init ]; then exit 0; fi\n{script}"
+    );
+    fs::write(&script_path, init_capable_script)
+        .expect("fake Podman scenario data should be writable");
     fs::write(
         fixture_sidecar(&program, "config"),
         format!(
