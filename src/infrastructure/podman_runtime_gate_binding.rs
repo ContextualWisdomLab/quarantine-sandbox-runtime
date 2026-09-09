@@ -1,205 +1,108 @@
-/// A Podman command adapter with one independently verified runtime gate artifact bound to it.
+use sha2::{Digest, Sha256};
+
+use super::{podman::RootlessPodmanAdapter, runtime_gate_artifact::RuntimeGateArtifact};
+use crate::{
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+};
+
+const RUNTIME_GATE_CONTAINER_PATH: &str = "/qsr-runtime-gate";
+
+/// Immutable command-create fragment for a release-authorized runtime gate.
 ///
-/// This is an intentionally fail-closed integration slice for issue #25. It proves that the
-/// release-authorized host artifact, rather than hostile image content, becomes the initial OCI
-/// process. Until the bounded release channel is implemented, this adapter never starts the
-/// initialized container and therefore cannot release consumer code.
+/// This plan is deliberately narrower than a complete Podman launch plan. It carries only the
+/// arguments that must replace the hostile consumer as OCI PID 1: the verified read-only gate
+/// bind, the runtime-owned gate entrypoint, the immutable image reference, a fresh one-time release
+/// token, and the exact consumer argv behind that token. Existing command isolation flags remain
+/// owned by the canonical Podman adapter and are not copied into this value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeGateCommandBindingPlan {
+    container_create_binding_args: Vec<String>,
+    runtime_gate_sha256: String,
+    runtime_gate_architecture: String,
+}
+
+impl RuntimeGateCommandBindingPlan {
+    /// Return the exact create arguments that bind and select the runtime-owned gate.
+    #[must_use]
+    pub fn container_create_binding_args(&self) -> &[String] {
+        &self.container_create_binding_args
+    }
+
+    /// Return the independently verified gate digest attached to this plan.
+    #[must_use]
+    pub fn runtime_gate_sha256(&self) -> &str {
+        &self.runtime_gate_sha256
+    }
+
+    /// Return the independently verified gate architecture attached to this plan.
+    #[must_use]
+    pub fn runtime_gate_architecture(&self) -> &str {
+        &self.runtime_gate_architecture
+    }
+}
+
+/// A Podman command adapter carrying one independently verified runtime gate artifact.
+///
+/// This is an intentionally incomplete issue #25 integration boundary. The wrapped canonical
+/// adapter retains ownership of command execution; this type only admits construction of the
+/// immutable gate-binding fragment. It does not start a container or claim that the bounded
+/// release channel exists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeGatePodmanAdapter {
-    inner: RootlessPodmanAdapter,
-    runtime_gate_artifact: super::runtime_gate_artifact::RuntimeGateArtifact,
+    _inner: RootlessPodmanAdapter,
+    runtime_gate_artifact: RuntimeGateArtifact,
 }
 
 impl RootlessPodmanAdapter {
     /// Bind an independently digest- and architecture-verified runtime gate artifact.
     ///
-    /// The returned adapter remains fail closed before `podman start` until the runtime-owned
-    /// bounded release channel is implemented. This builder does not weaken the legacy command
-    /// path or claim completion of issue #25.
+    /// The returned adapter exposes only the gate-binding plan until the canonical command runtime
+    /// owns a bounded attest-and-release channel. The legacy command execution method remains
+    /// unchanged and must not be treated as issue #25 GREEN.
     #[must_use]
     pub fn with_runtime_gate_artifact(
         self,
-        runtime_gate_artifact: super::runtime_gate_artifact::RuntimeGateArtifact,
+        runtime_gate_artifact: RuntimeGateArtifact,
     ) -> RuntimeGatePodmanAdapter {
         RuntimeGatePodmanAdapter {
-            inner: self,
+            _inner: self,
             runtime_gate_artifact,
         }
     }
 }
 
 impl RuntimeGatePodmanAdapter {
-    /// Create and initialize one command container with the verified gate as PID 1.
-    ///
-    /// The verified gate is mounted read-only at `/qsr-runtime-gate`; the consumer argv is passed
-    /// behind a controller-generated release token and is never installed as the OCI entrypoint.
-    /// After `podman init` succeeds this transitional adapter deliberately cleans up and returns a
-    /// fail-closed `runtime_gate_release` backend error because no authoritative release channel is
-    /// admitted yet.
+    /// Build the runtime-owned gate fragment without invoking Podman or releasing consumer code.
     ///
     /// # Errors
     ///
-    /// Returns [`CommandExecutionError`] on request, backend, create/init, cleanup, or the expected
-    /// not-yet-implemented release boundary. A successful consumer execution is impossible in this
-    /// slice by design.
-    pub fn run_command_at(
+    /// Returns [`CommandExecutionError`] when the request violates policy or a cryptographically
+    /// random one-time release token cannot be generated. A plan is never produced with a guessed
+    /// or deterministic fallback token.
+    pub fn plan_command_binding(
         &self,
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
-        started_at_epoch_seconds: u64,
-    ) -> Result<CommandExecutionResult, CommandExecutionError> {
+    ) -> Result<RuntimeGateCommandBindingPlan, CommandExecutionError> {
         request.validate(policy)?;
-        let staged_source = request
-            .source_artifact
-            .as_ref()
-            .map(stage_pr_source_artifact)
-            .transpose()?;
-        let info_output = self.inner.checked_output(
-            "backend_security_info",
-            &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
-        )?;
-        let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
-        validate_backend_security(&info)?;
-
-        let identity = command_sandbox_identity(
-            &request.request_id,
-            &request.image_reference,
-            &policy.policy_id,
-            started_at_epoch_seconds,
-        )?;
-        let sandbox_name = format!("qsr-cmd-{identity}");
-        let create_receipt_directory = tempfile::Builder::new()
-            .prefix("qsr-command-create-")
-            .tempdir()
-            .map_err(|_| {
-                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                    operation: "container_create_receipt",
-                })
-            })?;
-        let create_receipt_path = create_receipt_directory.path().join("container-id");
-        let create_receipt_path_text = create_receipt_path.to_str().ok_or(
-            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                operation: "container_create_receipt",
-            }),
-        )?;
         let release_token = runtime_gate_release_token()?;
-
-        let mut create_args = vec![
-            "create".to_owned(),
-            "--name".to_owned(),
-            sandbox_name.clone(),
-            format!("--cidfile={create_receipt_path_text}"),
-            "--pull=never".to_owned(),
-            "--read-only".to_owned(),
-            "--read-only-tmpfs=false".to_owned(),
-            "--http-proxy=false".to_owned(),
-            "--image-volume=ignore".to_owned(),
-            "--no-hosts".to_owned(),
-            "--systemd=false".to_owned(),
-            "--sdnotify=ignore".to_owned(),
-            "--cap-drop=all".to_owned(),
-            "--security-opt=no-new-privileges".to_owned(),
-            "--userns=auto".to_owned(),
-            "--ipc=none".to_owned(),
-            "--pid=private".to_owned(),
-            "--uts=private".to_owned(),
-            "--cgroupns=private".to_owned(),
-            "--restart=no".to_owned(),
-            "--log-driver=k8s-file".to_owned(),
-            "--log-opt".to_owned(),
-            format!("max-size={DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES}b"),
-            "--network".to_owned(),
-            "none".to_owned(),
-            "--timeout".to_owned(),
-            request.resources.lease_seconds.to_string(),
-            "--user".to_owned(),
-            format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
-            "--pids-limit".to_owned(),
-            request.resources.maximum_processes.to_string(),
-            "--memory".to_owned(),
-            request.resources.memory_bytes.to_string(),
-            "--cpus".to_owned(),
-            cpu_limit(request.resources.cpu_millicores),
-            "--tmpfs".to_owned(),
+        let mut container_create_binding_args = vec![
+            "--volume".to_owned(),
             format!(
-                "/tmp:rw,noexec,nosuid,nodev,size={}",
-                request.resources.tmpfs_bytes
+                "{}:{RUNTIME_GATE_CONTAINER_PATH}:ro",
+                self.runtime_gate_artifact.path().display()
             ),
-            "--label".to_owned(),
-            format!("org.contextualwisdomlab.sandbox.identity={identity}"),
-            "--label".to_owned(),
-            format!(
-                "org.contextualwisdomlab.sandbox.policy={}",
-                policy.policy_id
-            ),
-            "--label".to_owned(),
-            format!(
-                "org.contextualwisdomlab.sandbox.policy_sha256={}",
-                policy.effective_policy_sha256()
-            ),
+            format!("--entrypoint={RUNTIME_GATE_CONTAINER_PATH}"),
+            request.image_reference.clone(),
+            release_token,
         ];
-        if let Some(staged) = &staged_source {
-            create_args.push("--volume".to_owned());
-            create_args.push(format!(
-                "{}:/workspace:ro,noexec,nosuid,nodev,Z",
-                staged.path().display()
-            ));
-            create_args.push("--workdir".to_owned());
-            create_args.push("/workspace".to_owned());
-        }
-        create_args.push("--volume".to_owned());
-        create_args.push(format!(
-            "{}:/qsr-runtime-gate:ro",
-            self.runtime_gate_artifact.path().display()
-        ));
-        create_args.push("--entrypoint=/qsr-runtime-gate".to_owned());
-        create_args.push(request.image_reference.clone());
-        create_args.push(release_token);
-        create_args.extend(request.command.iter().cloned());
+        container_create_binding_args.extend(request.command.iter().cloned());
 
-        let create_output = match self.inner.checked_output("container_create", &create_args) {
-            Ok(output) => output,
-            Err(error) => {
-                let original = CommandExecutionError::Backend(error);
-                let owned_container_id = read_command_create_receipt(&create_receipt_path)
-                    .map_err(CommandExecutionError::Backend)?;
-                return match owned_container_id {
-                    Some(container_id) => Err(self
-                        .inner
-                        .cleanup_owned_command_container_or_report(&container_id, original)),
-                    None => Err(original),
-                };
-            }
-        };
-        let container_id = match parse_backend_identifier(&create_output.stdout) {
-            Some(identifier) => identifier,
-            None => {
-                return Err(self.inner.cleanup_or_report(
-                    &sandbox_name,
-                    CommandExecutionError::Backend(
-                        ApplicationServiceError::MalformedIsolationInspection {
-                            operation: "container_create",
-                        },
-                    ),
-                ));
-            }
-        };
-
-        if let Err(error) = self.inner.checked_output(
-            "container_init",
-            &["init".to_owned(), container_id.clone()],
-        ) {
-            return Err(self
-                .inner
-                .cleanup_owned_command_container_or_report(&container_id, error.into()));
-        }
-
-        Err(self.inner.cleanup_owned_command_container_or_report(
-            &container_id,
-            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                operation: "runtime_gate_release",
-            }),
-        ))
+        Ok(RuntimeGateCommandBindingPlan {
+            container_create_binding_args,
+            runtime_gate_sha256: self.runtime_gate_artifact.sha256().to_owned(),
+            runtime_gate_architecture: self.runtime_gate_artifact.architecture().to_owned(),
+        })
     }
 }
 
