@@ -51,6 +51,7 @@ impl AnalyzerWorkerIdentity {
         Ok(identity)
     }
 
+    /// Revalidate stored identity fields before they cross a trust boundary.
     fn validate(&self) -> Result<(), AnalyzerWorkerContractError> {
         validate_identity_text("analyzer_id", &self.analyzer_id)?;
         validate_identity_text("implementation_version", &self.implementation_version)?;
@@ -103,6 +104,7 @@ impl<'a> AnalyzerWorkerRequest<'a> {
         Ok(request)
     }
 
+    /// Revalidate controller-owned request fields before backend execution.
     fn validate(&self) -> Result<(), AnalyzerWorkerContractError> {
         self.analyzer.validate()?;
         validate_identity_text("policy_id", &self.policy_id)?;
@@ -130,6 +132,7 @@ pub struct AnalyzerWorkerFinding {
 }
 
 impl AnalyzerWorkerFinding {
+    /// Enforce worker-owned evidence authority and bounded finding payloads.
     fn validate(&self) -> Result<(), AnalyzerWorkerContractError> {
         if matches!(
             self.evidence_kind,
@@ -181,6 +184,7 @@ pub enum AnalyzerWorkerOutcome {
 }
 
 impl AnalyzerWorkerOutcome {
+    /// Validate the semantic result without treating process success as authority.
     fn validate(&self) -> Result<(), AnalyzerWorkerContractError> {
         match self {
             Self::Completed { findings } => {
@@ -331,6 +335,7 @@ pub trait AnalyzerWorkerExecutionPort {
     ) -> Result<AnalyzerWorkerReceipt, AnalyzerWorkerExecutionError>;
 }
 
+/// Validate one bounded identity field using the shared text invariant.
 fn validate_identity_text(
     field_name: &'static str,
     value: &str,
@@ -342,10 +347,12 @@ fn validate_identity_text(
     }
 }
 
+/// Return whether text is non-empty, bounded in bytes, and free of control characters.
 fn is_bounded_text(value: &str, maximum_bytes: usize) -> bool {
     !value.is_empty() && value.len() <= maximum_bytes && !value.chars().any(char::is_control)
 }
 
+/// Return whether a value is exactly one lower-case hexadecimal SHA-256 digest.
 fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == SHA256_HEX_BYTES
         && value
