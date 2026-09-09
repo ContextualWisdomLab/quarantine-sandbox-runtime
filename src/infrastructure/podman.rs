@@ -889,6 +889,9 @@ mod runtime_identity_tests {
     #[test]
     fn entropy_failure_is_typed_and_fail_closed() {
         let result = runtime_identity_with(|_| Err::<(), ()>(()));
-        assert_eq!(result, Err(ApplicationServiceError::RuntimeIdentityUnavailable));
+        assert_eq!(
+            result,
+            Err(ApplicationServiceError::RuntimeIdentityUnavailable)
+        );
     }
 }
