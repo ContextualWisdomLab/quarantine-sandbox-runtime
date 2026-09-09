@@ -1,9 +1,10 @@
-//! RED regression for cleanup precedence after malformed container creation evidence.
+//! Regression for malformed successful-create evidence without an ownership receipt.
 //!
-//! A successful `podman create` process can still return malformed/empty stdout.
-//! Once that command has succeeded, the runtime owns a possible container resource
-//! and must surface `CleanupFailed` when removing it cannot be proven. Returning
-//! only the earlier malformed-inspection error would hide the stronger leak risk.
+//! A successful `podman create` with malformed stdout does not by itself identify
+//! which concrete container resource the runtime may destroy. When the runtime-owned
+//! cidfile is also absent, generated `qsr-cmd-*` names remain correlation metadata:
+//! cleanup must not re-resolve them, and the original malformed-create evidence must
+//! remain visible instead of being replaced by a synthetic cleanup failure.
 
 #![cfg(target_os = "linux")]
 
@@ -79,7 +80,7 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn cleanup_failure_is_not_hidden_behind_malformed_container_identifier() {
+fn malformed_create_without_receipt_never_authorizes_generated_name_cleanup() {
     let call_log = temporary_path("call-log");
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf '\\n' ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
@@ -94,11 +95,17 @@ fn cleanup_failure_is_not_hidden_behind_malformed_container_identifier() {
 
     assert_eq!(
         error,
-        CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
+        CommandExecutionError::Backend(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_create",
+        })
     );
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    assert!(calls.lines().any(|line| line.starts_with("create --name ")));
-    assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
+    let create_call = calls
+        .lines()
+        .find(|line| line.starts_with("create --name "))
+        .expect("container creation should be attempted");
+    assert!(create_call.contains("--cidfile="));
+    assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(call_log);
