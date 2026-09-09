@@ -14,6 +14,8 @@ APP_NETWORK='[{"internal":true,"dns_enabled":false}]'
 COMMAND_INFO='{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}'
 COMMAND_CONTAINER='[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]'
 COMMAND_CONTAINER_INVALID='[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":false,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]'
+COMMAND_CONTAINER_HOST_UTS='[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"host","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}},"Mounts":[]}]'
+COMMAND_CONTAINER_HOST_CGROUP='[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"host","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}},"Mounts":[]}]'
 COMMAND_TOP='PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL
 1 filter - - - - - containers-default (enforce)'
 
@@ -36,7 +38,7 @@ case "$MODE" in
       *) exit 91 ;;
     esac
     ;;
-  command_nonzero_logs|command_start_cleanup_fail|command_logs_cleanup_fail|command_logs_timeout_cleanup_fail|command_isolation_cleanup_fail)
+  command_nonzero_logs|command_start_cleanup_fail|command_logs_cleanup_fail|command_logs_timeout_cleanup_fail|command_isolation_cleanup_fail|command_host_uts|command_host_cgroup)
     case "${1:-}:${2:-}" in
       info:--format) printf '%s\n' "$COMMAND_INFO" ;;
       create:--name) printf 'fake-command-container-id\n' ;;
@@ -44,11 +46,12 @@ case "$MODE" in
         if [ "$MODE" = command_start_cleanup_fail ]; then exit 17; fi
         ;;
       container:inspect)
-        if [ "$MODE" = command_isolation_cleanup_fail ]; then
-          printf '%s\n' "$COMMAND_CONTAINER_INVALID"
-        else
-          printf '%s\n' "$COMMAND_CONTAINER"
-        fi
+        case "$MODE" in
+          command_isolation_cleanup_fail) printf '%s\n' "$COMMAND_CONTAINER_INVALID" ;;
+          command_host_uts) printf '%s\n' "$COMMAND_CONTAINER_HOST_UTS" ;;
+          command_host_cgroup) printf '%s\n' "$COMMAND_CONTAINER_HOST_CGROUP" ;;
+          *) printf '%s\n' "$COMMAND_CONTAINER" ;;
+        esac
         ;;
       top:*) printf '%s\n' "$COMMAND_TOP" ;;
       wait:*) printf '0\n' ;;
