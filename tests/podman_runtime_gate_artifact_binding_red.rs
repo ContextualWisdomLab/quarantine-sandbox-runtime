@@ -103,7 +103,10 @@ fn configured_release_artifact_is_bound_read_only_and_selected_as_initial_proces
     let adapter = RootlessPodmanAdapter::new(program.clone()).with_runtime_gate_artifact(gate);
 
     let result = adapter.run_command_at(&request(), &policy(), 1_780_000_301);
-    assert!(result.is_err(), "the fake backend intentionally stops at init");
+    assert!(
+        result.is_err(),
+        "the fake backend intentionally stops at init"
+    );
 
     let recorded_calls = fs::read_to_string(&calls).expect("backend calls should be recorded");
     let create_call = recorded_calls
