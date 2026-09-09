@@ -272,6 +272,16 @@ impl RootlessPodmanAdapter {
         PODMAN_BACKEND_ID
     }
 
+    /// Return the configured Podman-compatible executable to sibling infrastructure adapters.
+    pub(super) fn command_program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Return the per-operation wall-clock budget shared by sibling infrastructure adapters.
+    pub(super) const fn command_timeout(&self) -> Duration {
+        self.command_timeout
+    }
+
     /// Build a deterministic fail-closed Podman launch plan without executing it.
     ///
     /// # Errors
@@ -1384,7 +1394,7 @@ fn map_bounded_command_error(
     }
 }
 
-fn classify_spawn_failure(error_kind: ErrorKind) -> BackendInvocationFailureKind {
+pub(super) fn classify_spawn_failure(error_kind: ErrorKind) -> BackendInvocationFailureKind {
     match error_kind {
         ErrorKind::NotFound => BackendInvocationFailureKind::NotFound,
         ErrorKind::PermissionDenied => BackendInvocationFailureKind::PermissionDenied,

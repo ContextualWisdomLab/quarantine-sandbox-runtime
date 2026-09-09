@@ -1,11 +1,28 @@
+use std::{
+    io::{self, Read, Write},
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, RecvTimeoutError},
+    thread,
+};
+
 use sha2::{Digest, Sha256};
 
-use super::{podman::RootlessPodmanAdapter, runtime_gate_artifact::RuntimeGateArtifact};
+use super::{
+    podman::{RootlessPodmanAdapter, classify_spawn_failure},
+    runtime_gate_artifact::RuntimeGateArtifact,
+};
 use crate::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
 };
 
 const RUNTIME_GATE_CONTAINER_PATH: &str = "/qsr-runtime-gate";
+const RUNTIME_GATE_RELEASE_ACK: &[u8] = b"QSR_GATE_RELEASED\n";
+const RUNTIME_GATE_RELEASE_ACK_BUDGET_BYTES: usize = 64;
+const RUNTIME_GATE_RELEASE_IDENTITY_OPERATION: &str = "runtime_gate_release_identity";
+const RUNTIME_GATE_RELEASE_ATTACH_OPERATION: &str = "runtime_gate_release_attach";
+const RUNTIME_GATE_RELEASE_WRITE_OPERATION: &str = "runtime_gate_release_write";
+const RUNTIME_GATE_RELEASE_ACK_OPERATION: &str = "runtime_gate_release_ack";
+const RUNTIME_GATE_RELEASE_DETACH_OPERATION: &str = "runtime_gate_release_detach";
 
 /// Immutable command-create fragment for a release-authorized runtime gate.
 ///
@@ -14,11 +31,12 @@ const RUNTIME_GATE_CONTAINER_PATH: &str = "/qsr-runtime-gate";
 /// bind, the runtime-owned gate entrypoint, the immutable image reference, a fresh one-time release
 /// token, and the exact consumer argv behind that token. Existing command isolation flags remain
 /// owned by the canonical Podman adapter and are not copied into this value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RuntimeGateCommandBindingPlan {
     container_create_binding_args: Vec<String>,
     runtime_gate_sha256: String,
     runtime_gate_architecture: String,
+    release_token: String,
 }
 
 impl RuntimeGateCommandBindingPlan {
@@ -95,7 +113,7 @@ impl RuntimeGatePodmanAdapter {
             ),
             format!("--entrypoint={RUNTIME_GATE_CONTAINER_PATH}"),
             request.image_reference.clone(),
-            release_token,
+            release_token.clone(),
         ];
         container_create_binding_args.extend(request.command.iter().cloned());
 
@@ -103,8 +121,160 @@ impl RuntimeGatePodmanAdapter {
             container_create_binding_args,
             runtime_gate_sha256: self.runtime_gate_artifact.sha256().to_owned(),
             runtime_gate_architecture: self.runtime_gate_artifact.architecture().to_owned(),
+            release_token,
         })
     }
+
+    /// Deliver this plan's one-time release token to one exact acquired container.
+    ///
+    /// The attach client is an infrastructure control channel only. The method writes the token
+    /// once, closes stdin so the consumer cannot inherit controller input authority, requires an
+    /// explicit bounded gate acknowledgement, and then terminates only the local attach client.
+    /// `--sig-proxy=false` prevents that local termination from being forwarded to the container.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandExecutionError`] for malformed acquired identity, attach spawn/write/read
+    /// failures, acknowledgement timeout or contradiction, and attach-client reap failure.
+    pub fn release_command_gate(
+        &self,
+        container_id: &str,
+        plan: RuntimeGateCommandBindingPlan,
+    ) -> Result<(), CommandExecutionError> {
+        if !is_exact_container_id(container_id) {
+            return Err(CommandExecutionError::Backend(
+                ApplicationServiceError::MalformedIsolationInspection {
+                    operation: RUNTIME_GATE_RELEASE_IDENTITY_OPERATION,
+                },
+            ));
+        }
+
+        let mut child = Command::new(self._inner.command_program())
+            .args(["attach", "--sig-proxy=false", container_id])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| {
+                CommandExecutionError::Backend(ApplicationServiceError::BackendSpawnFailed {
+                    operation: RUNTIME_GATE_RELEASE_ATTACH_OPERATION,
+                    failure_kind: classify_spawn_failure(error.kind()),
+                })
+            })?;
+
+        let Some(stdout) = child.stdout.take() else {
+            let original = release_invocation_error(RUNTIME_GATE_RELEASE_ACK_OPERATION);
+            return Err(fail_after_release_client_cleanup(&mut child, original));
+        };
+        let Some(mut stdin) = child.stdin.take() else {
+            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
+            return Err(fail_after_release_client_cleanup(&mut child, original));
+        };
+
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let _reader = thread::spawn(move || {
+            let _ = sender.send(read_release_ack(stdout));
+        });
+
+        let release_payload = format!("{}\n", plan.release_token);
+        if stdin
+            .write_all(release_payload.as_bytes())
+            .and_then(|()| stdin.flush())
+            .is_err()
+        {
+            drop(stdin);
+            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
+            return Err(fail_after_release_client_cleanup(&mut child, original));
+        }
+        drop(stdin);
+
+        let acknowledgement = receiver.recv_timeout(self._inner.command_timeout());
+        let cleanup_result = terminate_release_client(&mut child);
+        if let Err(error) = cleanup_result {
+            return Err(error);
+        }
+
+        match acknowledgement {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => {
+                Err(release_invocation_error(RUNTIME_GATE_RELEASE_ACK_OPERATION))
+            }
+            Err(RecvTimeoutError::Timeout) => Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendCommandTimedOut {
+                    operation: RUNTIME_GATE_RELEASE_ACK_OPERATION,
+                },
+            )),
+        }
+    }
+}
+
+fn is_exact_container_id(container_id: &str) -> bool {
+    container_id.len() == 64
+        && container_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn read_release_ack(mut stdout: impl Read) -> io::Result<()> {
+    let mut line = Vec::with_capacity(RUNTIME_GATE_RELEASE_ACK.len());
+    let mut byte = [0_u8; 1];
+    for _ in 0..RUNTIME_GATE_RELEASE_ACK_BUDGET_BYTES {
+        if stdout.read(&mut byte)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "runtime gate closed before release acknowledgement",
+            ));
+        }
+        line.push(byte[0]);
+        if byte[0] == b'\n' {
+            if line == RUNTIME_GATE_RELEASE_ACK {
+                return Ok(());
+            }
+            line.clear();
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "runtime gate release acknowledgement exceeded the bounded control budget",
+    ))
+}
+
+fn release_invocation_error(operation: &'static str) -> CommandExecutionError {
+    CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed { operation })
+}
+
+fn terminate_release_client(child: &mut Child) -> Result<(), CommandExecutionError> {
+    match child.try_wait() {
+        Ok(Some(_)) => return Ok(()),
+        Ok(None) => {}
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(release_invocation_error(
+                RUNTIME_GATE_RELEASE_DETACH_OPERATION,
+            ));
+        }
+    }
+
+    if child.kill().is_err() {
+        if child.try_wait().is_ok_and(|status| status.is_some()) {
+            return Ok(());
+        }
+        return Err(release_invocation_error(
+            RUNTIME_GATE_RELEASE_DETACH_OPERATION,
+        ));
+    }
+    child
+        .wait()
+        .map(|_| ())
+        .map_err(|_| release_invocation_error(RUNTIME_GATE_RELEASE_DETACH_OPERATION))
+}
+
+fn fail_after_release_client_cleanup(
+    child: &mut Child,
+    original: CommandExecutionError,
+) -> CommandExecutionError {
+    terminate_release_client(child).err().unwrap_or(original)
 }
 
 fn runtime_gate_release_token() -> Result<String, CommandExecutionError> {
