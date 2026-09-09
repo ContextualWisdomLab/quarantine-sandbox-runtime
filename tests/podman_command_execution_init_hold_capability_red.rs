@@ -131,9 +131,9 @@ fn invalid_prestart_evidence_is_rejected_after_init_without_releasing_payload() 
     let init_position = lines
         .iter()
         .position(|line| line.starts_with(&format!("init {container_id}")));
-    let inspect_position = lines
-        .iter()
-        .position(|line| line.starts_with(&format!("container inspect {container_id}")));
+    let inspect_position = lines.iter().position(|line| {
+        line.starts_with(&format!("container inspect --format json {container_id}"))
+    });
     let start_seen = lines
         .iter()
         .any(|line| line.starts_with(&format!("start {container_id}")));
