@@ -178,7 +178,7 @@ fn executable_architecture(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{executable_architecture, validate_expected_digest, RuntimeGateArtifactError};
+    use super::{RuntimeGateArtifactError, executable_architecture, validate_expected_digest};
 
     #[test]
     fn expected_digest_requires_exact_lowercase_sha256_shape() {
