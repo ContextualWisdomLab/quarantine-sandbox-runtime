@@ -1,50 +1,19 @@
-//! RED for binding a release-authorized runtime gate artifact into command execution.
+//! Regression for planning a release-authorized runtime gate binding.
 //!
 //! The adapter must consume an already verified [`RuntimeGateArtifact`] rather than deriving trust
 //! from hostile image content or from the mutable source path at container-create time. This slice
-//! proves only immutable gate delivery and initial-process binding; the bounded release channel and
-//! same-head payload-release GREEN remain separate issue #25 gates.
+//! proves immutable gate identity and initial-process argv construction only; the canonical Podman
+//! execution path and bounded release channel remain separate issue #25 gates.
 
 #![cfg(target_os = "linux")]
 
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::fs;
 
 use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
     RuntimeGateArtifact,
 };
 use sha2::{Digest, Sha256};
-
-static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-gate-artifact-binding-{name}-{}-{nanos}-{unique_id}",
-        std::process::id()
-    ))
-}
-
-fn write_executable(name: &str, script: &str) -> PathBuf {
-    let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    program
-}
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -83,53 +52,37 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn configured_release_artifact_is_bound_read_only_and_selected_as_initial_process() {
+fn configured_release_artifact_plans_read_only_gate_as_initial_process() {
     let gate_source = std::env::current_exe().expect("current test executable should exist");
     let gate_bytes = fs::read(&gate_source).expect("current test executable should be readable");
     let gate_sha256 = format!("{:x}", Sha256::digest(gate_bytes));
     let gate = RuntimeGateArtifact::stage(&gate_source, &gate_sha256, std::env::consts::ARCH)
         .expect("matching release-authorized gate artifact should stage");
     let staged_gate_path = gate.path().display().to_string();
+    let adapter = RootlessPodmanAdapter::new("podman").with_runtime_gate_artifact(gate);
 
-    let calls = temporary_path("calls");
-    let security_info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf '{}\\n' ;;\n  init:*) exit 91 ;;\n  rm:--force) : ;;\n  *) exit 92 ;;\nesac\n",
-        calls.display(),
-        security_info,
-        "a".repeat(64),
-    );
-    let program = write_executable("podman", &script);
-    let adapter = RootlessPodmanAdapter::new(program.clone()).with_runtime_gate_artifact(gate);
+    let plan = adapter
+        .plan_command_binding(&request(), &policy())
+        .expect("valid request should produce a fail-closed gate binding plan");
+    let args = plan.container_create_binding_args();
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_301);
+    assert_eq!(args[0], "--volume");
+    assert_eq!(args[1], format!("{staged_gate_path}:/qsr-runtime-gate:ro"));
+    assert_eq!(args[2], "--entrypoint=/qsr-runtime-gate");
+    assert_eq!(args[3], request().image_reference);
+    assert_eq!(args[4].len(), 64, "release token must retain 256 bits");
     assert!(
-        result.is_err(),
-        "the fake backend intentionally stops at init"
+        args[4]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "release token must be canonical lowercase hex"
     );
-
-    let recorded_calls = fs::read_to_string(&calls).expect("backend calls should be recorded");
-    let create_call = recorded_calls
-        .lines()
-        .find(|line| line.starts_with("create --name "))
-        .expect("the command runtime must issue one Podman create request");
+    assert_eq!(&args[5..], request().command.as_slice());
+    assert_eq!(plan.runtime_gate_sha256(), gate_sha256);
+    assert_eq!(plan.runtime_gate_architecture(), std::env::consts::ARCH);
     assert!(
-        create_call.contains(&format!("{staged_gate_path}:/qsr-runtime-gate:ro")),
-        "the verified staged artifact must be delivered read-only: {create_call}"
+        !args.iter()
+            .any(|arg| arg.starts_with("--entrypoint=[\"payload-sentinel\"")),
+        "consumer argv must never become the OCI entrypoint in a gate binding plan"
     );
-    assert!(
-        create_call.contains("--entrypoint=/qsr-runtime-gate"),
-        "the runtime-owned gate must be the initial OCI process: {create_call}"
-    );
-    assert!(
-        !create_call.contains("--entrypoint=[\"payload-sentinel\""),
-        "consumer argv must not become the OCI entrypoint when gate authority is configured: {create_call}"
-    );
-    assert!(
-        create_call.contains("payload-sentinel") && create_call.contains("argument with spaces"),
-        "exact consumer argv must remain available behind the gate: {create_call}"
-    );
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(calls);
 }
