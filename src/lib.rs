@@ -39,8 +39,8 @@ pub use pr_source_artifact::{
 };
 pub use sandbox_execution::{
     IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
-    SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
-    SandboxWorkerTerminationState, VerifiedIsolationState,
+    SandboxWorkerBudget, SandboxWorkerCleanupEvidence, SandboxWorkerIsolationEvidence,
+    SandboxWorkerTerminationEvidence, SandboxWorkerTerminationState, VerifiedIsolationState,
 };
 
 impl From<SandboxExecutionError> for ApplicationServiceError {

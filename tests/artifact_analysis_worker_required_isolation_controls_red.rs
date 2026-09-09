@@ -6,8 +6,9 @@
 use quarantine_sandbox_runtime::{
     AnalyzerWorkerContractError, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome,
     AnalyzerWorkerReceipt, AnalyzerWorkerRequest, IngestedArtifact, IngestionPolicy,
-    SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
-    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
+    SandboxWorkerBudget, SandboxWorkerCleanupEvidence, SandboxWorkerIsolationEvidence,
+    SandboxWorkerTerminationEvidence, SandboxWorkerTerminationState, VerifiedIsolationState,
+    ingest_bytes,
 };
 use serde_json::json;
 
@@ -82,7 +83,10 @@ fn fixture_receipt(
                 worker_id: WORKER_ID.to_owned(),
                 state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
             },
-            cleanup_completed: true,
+            cleanup: SandboxWorkerCleanupEvidence {
+                worker_id: WORKER_ID.to_owned(),
+                completed: true,
+            },
         },
         outcome: AnalyzerWorkerOutcome::Failed {
             failure_code: "analyzer_failed".to_owned(),

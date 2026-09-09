@@ -7,8 +7,9 @@
 use quarantine_sandbox_runtime::{
     AnalyzerWorkerContractError, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome,
     AnalyzerWorkerReceipt, AnalyzerWorkerRequest, IngestedArtifact, IngestionPolicy,
-    SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
-    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
+    SandboxWorkerBudget, SandboxWorkerCleanupEvidence, SandboxWorkerIsolationEvidence,
+    SandboxWorkerTerminationEvidence, SandboxWorkerTerminationState, VerifiedIsolationState,
+    ingest_bytes,
 };
 use serde_json::json;
 
@@ -82,7 +83,10 @@ fn isolation_evidence(
         runtime_socket_access_performed: false,
         uncontrolled_subprocess_performed: false,
         termination,
-        cleanup_completed: true,
+        cleanup: SandboxWorkerCleanupEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            completed: true,
+        },
     }
 }
 
@@ -123,6 +127,7 @@ fn artifact_analysis_composes_existing_core_isolation_state() {
 
     for core_type in [
         "pub struct SandboxWorkerBudget",
+        "pub struct SandboxWorkerCleanupEvidence",
         "pub struct SandboxWorkerIsolationEvidence",
         "pub struct SandboxWorkerTerminationEvidence",
         "pub enum SandboxWorkerTerminationState",

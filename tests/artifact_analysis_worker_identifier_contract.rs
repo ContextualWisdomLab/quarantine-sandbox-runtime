@@ -2,9 +2,9 @@
 
 use quarantine_sandbox_runtime::{
     AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt, AnalyzerWorkerRequest,
-    IngestionPolicy, SandboxWorkerBudget, SandboxWorkerIsolationEvidence,
-    SandboxWorkerTerminationEvidence, SandboxWorkerTerminationState, VerifiedIsolationState,
-    ingest_bytes,
+    IngestionPolicy, SandboxWorkerBudget, SandboxWorkerCleanupEvidence,
+    SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
 use serde_json::json;
 
@@ -56,7 +56,10 @@ fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
             worker_id: WORKER_ID.to_owned(),
             state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
         },
-        cleanup_completed: true,
+        cleanup: SandboxWorkerCleanupEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            completed: true,
+        },
     }
 }
 
@@ -149,7 +152,12 @@ fn worker_receipt_rejects_oversized_or_control_runtime_evidence_identity() {
     };
 
     let oversized = "w".repeat(MAX_IDENTIFIER_BYTES + 1);
-    for field in ["worker_id", "runtime_backend_id", "runtime_backend_version"] {
+    for field in [
+        "worker_id",
+        "runtime_backend_id",
+        "runtime_backend_version",
+        "cleanup_worker_id",
+    ] {
         for invalid in [oversized.as_str(), "forged\nidentity"] {
             let mut receipt = base.clone();
             match field {
@@ -158,6 +166,7 @@ fn worker_receipt_rejects_oversized_or_control_runtime_evidence_identity() {
                 "runtime_backend_version" => {
                     receipt.isolation.runtime_backend_version = invalid.to_owned();
                 }
+                "cleanup_worker_id" => receipt.isolation.cleanup.worker_id = invalid.to_owned(),
                 _ => unreachable!(),
             }
             assert!(
