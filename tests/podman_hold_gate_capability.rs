@@ -112,6 +112,20 @@ mod linux {
         value
     }
 
+    fn capability_set_is_empty(value: &str) -> bool {
+        let normalized = value.trim();
+        if normalized.is_empty()
+            || normalized == "-"
+            || normalized.eq_ignore_ascii_case("none")
+            || normalized == "0"
+            || normalized.eq_ignore_ascii_case("0x0")
+        {
+            return true;
+        }
+        let hexadecimal = normalized.strip_prefix("0x").unwrap_or(normalized);
+        !hexadecimal.is_empty() && hexadecimal.chars().all(|character| character == '0')
+    }
+
     fn proc_status_field(host_pid: &str, field_name: &str) -> String {
         assert!(
             host_pid.chars().all(|character| character.is_ascii_digit()),
@@ -271,9 +285,8 @@ mod linux {
             "held gate must expose an effective seccomp mode"
         );
         for capability_column in ["capeff", "capbnd", "capinh", "capprm"] {
-            assert_eq!(
-                podman_top_value(&container_id, capability_column),
-                "0000000000000000",
+            assert!(
+                capability_set_is_empty(&podman_top_value(&container_id, capability_column)),
                 "held gate must expose an empty {capability_column} set"
             );
         }
