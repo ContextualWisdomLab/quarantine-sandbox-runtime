@@ -75,9 +75,7 @@ fn write_executable(name: &str, script: &str) -> FixturePath {
     std::os::unix::fs::symlink(immutable_fixture_executable(), &program)
         .expect("fake Podman immutable symlink should be creatable");
     let script_path = fixture_sidecar(&program, "script");
-    let init_capable_script = format!(
-        "if [ \"${{1:-}}\" = init ]; then exit 0; fi\n{script}"
-    );
+    let init_capable_script = format!("if [ \"${{1:-}}\" = init ]; then exit 0; fi\n{script}");
     fs::write(&script_path, init_capable_script)
         .expect("fake Podman scenario data should be writable");
     fs::write(
@@ -443,11 +441,13 @@ fn run_command_at_cleans_up_when_container_start_fails() {
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
          create:--name) printf 'fake-command-container-id\\n' ;;\n  \
+         container:inspect) printf '%s\\n' '{}' ;;\n  \
          start:*) exit 1 ;;\n  \
          rm:--force) : ;;\n  \
          *) exit 91 ;;\nesac\n",
         log.display(),
         security_info_json(),
+        container_inspect_json("fake-command-container-id"),
     );
     let program = write_executable("start-fails", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
