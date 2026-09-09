@@ -65,7 +65,10 @@ fn request() -> CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "hold-gate-binding-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
-        command: vec!["payload-sentinel".to_owned(), "argument with spaces".to_owned()],
+        command: vec![
+            "payload-sentinel".to_owned(),
+            "argument with spaces".to_owned(),
+        ],
         source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
@@ -84,7 +87,9 @@ fn podman_create_binds_runtime_gate_as_initial_process_before_consumer_argv() {
     let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  start:*) : ;;\n  top:*) exit 1 ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(), security_info, inspect,
+        calls.display(),
+        security_info,
+        inspect,
     );
     let program = write_executable("hold-gate-binding", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
