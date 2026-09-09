@@ -4,7 +4,7 @@ Issue #77 defines the controller-side authority boundary for evidence kinds retu
 
 ## Current authority
 
-- Parent worker-port authority: Draft #70 exact `34de52819549e0362ebcd0a110a361146b3556d1`.
+- Parent worker-port authority: Draft #70 exact `da2e9e1616232e0e3c1f521d43eabe03213ce4ea`.
 - Parent DDD decision: ADR-0009 remains Proposed; `artifact_analysis` owns analyzer/result semantics, `sandbox_execution` owns reusable isolation/resource/lifecycle semantics, and `infrastructure` owns concrete enforcement and observation.
 - RED authority: `tests/artifact_analysis_worker_evidence_authority_red.rs`, introduced by `3b6693394a89030c286839145cbdda6aa0a83bad` and causally executed on exact `ab919126a1ada3a039fb1f8979bdb66300469d91`.
 - Minimum production repair: `31dc17771b08e2535e33c8e0861c15eeb5113d4f`.
