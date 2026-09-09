@@ -81,7 +81,8 @@ fn configured_release_artifact_plans_read_only_gate_as_initial_process() {
     assert_eq!(plan.runtime_gate_sha256(), gate_sha256);
     assert_eq!(plan.runtime_gate_architecture(), std::env::consts::ARCH);
     assert!(
-        !args.iter()
+        !args
+            .iter()
             .any(|arg| arg.starts_with("--entrypoint=[\"payload-sentinel\"")),
         "consumer argv must never become the OCI entrypoint in a gate binding plan"
     );
