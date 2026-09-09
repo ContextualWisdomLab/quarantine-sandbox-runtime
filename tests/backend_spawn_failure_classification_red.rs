@@ -66,12 +66,15 @@ fn missing_backend_executable_preserves_not_found_spawn_class() {
 
     let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
     let cleanup = fs::remove_dir(&fixture_directory);
-    assert!(cleanup.is_ok(), "private RED fixture directory should stay empty");
+    assert!(
+        cleanup.is_ok(),
+        "private RED fixture directory should stay empty"
+    );
 
     assert_eq!(
         result,
         Err(ApplicationServiceError::BackendSpawnFailed {
-            operation: "rootless_probe",
+            operation: "backend_security_info",
             failure_kind: BackendInvocationFailureKind::NotFound,
         })
     );
