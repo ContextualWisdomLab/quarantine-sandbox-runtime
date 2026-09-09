@@ -1,0 +1,35 @@
+name: PR14 fixture repair materializer
+
+on:
+  push:
+    branches: [feat/podman-command-execution-backend]
+
+permissions:
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Materialize exact fixture repair
+        run: python3 scripts/materialize_pr14_fixture_repair.py
+      - name: Verify materialized repair
+        run: |
+          cargo fmt
+          cargo fmt --check
+          cargo test --locked --test podman_command_execution run_command_at_cleans_up_when_container_start_fails
+          cargo test --locked --test podman_command_execution
+      - name: Upload repaired source file
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr14-repaired-podman-command-execution
+          path: tests/podman_command_execution.rs
+          if-no-files-found: error
