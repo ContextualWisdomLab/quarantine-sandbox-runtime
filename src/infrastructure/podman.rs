@@ -9,7 +9,6 @@ use std::{
 };
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
@@ -20,6 +19,8 @@ use crate::{
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+const RUNTIME_IDENTITY_ENTROPY_BYTES: usize = 16;
+const LOWER_HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -108,11 +109,11 @@ struct ProcessSecurityEvidence {
     lsm_label: String,
 }
 
-/// Deterministic, auditable rootless Podman command plan.
+/// Auditable rootless Podman command plan for one runtime invocation.
 ///
-/// Creating a plan performs no process execution. It exists so the domain
-/// contract and isolation controls can be reviewed before a process adapter is
-/// allowed to execute them.
+/// Creating a plan performs no process execution. It validates the domain
+/// contract and binds a fresh runtime-owned resource identity before a process
+/// adapter is allowed to create any resource.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PodmanLaunchPlan {
     rootless_probe_args: Vec<String>,
@@ -142,13 +143,13 @@ impl PodmanLaunchPlan {
         &self.container_create_args
     }
 
-    /// Return the deterministic sandbox identifier used by the backend adapter.
+    /// Return the invocation-unique sandbox identifier used by the backend adapter.
     #[must_use]
     pub fn sandbox_name(&self) -> &str {
         &self.sandbox_name
     }
 
-    /// Return the deterministic per-sandbox network identifier.
+    /// Return the invocation-unique per-sandbox network identifier.
     #[must_use]
     pub fn network_name(&self) -> &str {
         &self.network_name
@@ -211,12 +212,13 @@ impl RootlessPodmanAdapter {
         PODMAN_BACKEND_ID
     }
 
-    /// Build a deterministic fail-closed Podman launch plan without executing it.
+    /// Build a fail-closed Podman launch plan with a fresh runtime-owned identity.
     ///
     /// # Errors
     ///
     /// Returns [`ApplicationServiceError`] when the request or policy is invalid,
-    /// or when the requested lease cannot be represented as an absolute expiry.
+    /// the requested lease cannot be represented as an absolute expiry, or the
+    /// operating system cannot provide entropy for the invocation identity.
     pub fn plan_at(
         request: &ApplicationServiceRequest,
         policy: &IsolationPolicy,
@@ -226,7 +228,7 @@ impl RootlessPodmanAdapter {
         let expires_at_epoch_seconds = started_at_epoch_seconds
             .checked_add(u64::from(request.resources.lease_seconds))
             .ok_or(ApplicationServiceError::LeaseExpiryOverflow)?;
-        let identity = sandbox_identity(request, policy, started_at_epoch_seconds);
+        let identity = runtime_identity()?;
         let sandbox_name = format!("qsr-app-{identity}");
         let network_name = format!("qsr-net-{identity}");
 
@@ -819,23 +821,22 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
         .then(|| identifier.to_owned())
 }
 
-fn sandbox_identity(
-    request: &ApplicationServiceRequest,
-    policy: &IsolationPolicy,
-    started_at_epoch_seconds: u64,
-) -> String {
-    let mut hasher = Sha256::new();
-    for component in [
-        request.request_id.as_str(),
-        request.image_reference.as_str(),
-        policy.policy_id.as_str(),
-    ] {
-        hasher.update(component.as_bytes());
-        hasher.update([0]);
+fn runtime_identity() -> Result<String, ApplicationServiceError> {
+    runtime_identity_with(|entropy| getrandom::fill(entropy))
+}
+
+fn runtime_identity_with<E>(
+    fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,
+) -> Result<String, ApplicationServiceError> {
+    let mut entropy = [0_u8; RUNTIME_IDENTITY_ENTROPY_BYTES];
+    fill_entropy(&mut entropy).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;
+
+    let mut identity = String::with_capacity(RUNTIME_IDENTITY_ENTROPY_BYTES * 2);
+    for byte in entropy {
+        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte >> 4)]));
+        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte & 0x0f)]));
     }
-    hasher.update(started_at_epoch_seconds.to_be_bytes());
-    let digest = format!("{:x}", hasher.finalize());
-    digest[..16].to_owned()
+    Ok(identity)
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {
@@ -866,5 +867,28 @@ fn wait_for_readiness(
         }
         let after_probe = Instant::now();
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+    }
+}
+
+#[cfg(test)]
+mod runtime_identity_tests {
+    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, runtime_identity_with};
+    use crate::ApplicationServiceError;
+
+    #[test]
+    fn injected_entropy_has_stable_lower_hex_encoding() {
+        let identity = runtime_identity_with(|entropy| {
+            *entropy = [0xab; RUNTIME_IDENTITY_ENTROPY_BYTES];
+            Ok::<(), ()>(())
+        })
+        .expect("injected entropy must encode");
+
+        assert_eq!(identity, "ab".repeat(RUNTIME_IDENTITY_ENTROPY_BYTES));
+    }
+
+    #[test]
+    fn entropy_failure_is_typed_and_fail_closed() {
+        let result = runtime_identity_with(|_| Err::<(), ()>(()));
+        assert_eq!(result, Err(ApplicationServiceError::RuntimeIdentityUnavailable));
     }
 }
