@@ -393,29 +393,34 @@ impl RootlessPodmanAdapter {
     ///
     /// # Errors
     ///
-    /// Returns [`ApplicationServiceError::CleanupFailed`] when container or
-    /// network removal cannot be proven successful.
+    /// Returns [`ApplicationServiceError::CleanupAuthorityUnavailable`] when the
+    /// supplied lease contains only consumer-visible evidence, or
+    /// [`ApplicationServiceError::CleanupFailed`] when removal of runtime-owned
+    /// resources cannot be proven successful.
     pub fn terminate_at(
         &self,
         lease: &ApplicationServiceLease,
         terminated_at_epoch_seconds: u64,
     ) -> Result<CleanupReceipt, ApplicationServiceError> {
+        let authority = lease
+            .cleanup_authority()
+            .ok_or(ApplicationServiceError::CleanupAuthorityUnavailable)?;
         let stop_args = [
             "stop".to_owned(),
             "--time".to_owned(),
-            lease.shutdown_grace_seconds().to_string(),
-            lease.sandbox_id().to_owned(),
+            authority.shutdown_grace_seconds().to_string(),
+            authority.sandbox_id().to_owned(),
         ];
         let remove_args = [
             "rm".to_owned(),
             "--force".to_owned(),
-            lease.sandbox_id().to_owned(),
+            authority.sandbox_id().to_owned(),
         ];
         let network_args = [
             "network".to_owned(),
             "rm".to_owned(),
             "--force".to_owned(),
-            lease.network_id().to_owned(),
+            authority.network_id().to_owned(),
         ];
         let stop_ok = self.command_succeeded(&stop_args);
         let remove_ok = self.command_succeeded(&remove_args);
