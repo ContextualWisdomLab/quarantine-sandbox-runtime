@@ -110,6 +110,22 @@ mod linux {
         headers.into_iter().zip(values).collect()
     }
 
+    fn proc_status_field(host_pid: &str, field_name: &str) -> String {
+        assert!(
+            host_pid.chars().all(|character| character.is_ascii_digit()),
+            "Podman hpid evidence must be a decimal host PID"
+        );
+        let status = fs::read_to_string(format!("/proc/{host_pid}/status"))
+            .expect("held gate host process status must remain readable");
+        let prefix = format!("{field_name}:");
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(&prefix))
+            .map(str::trim)
+            .map(str::to_owned)
+            .unwrap_or_else(|| panic!("held gate process status must expose {field_name}"))
+    }
+
     fn release_gate(container_id: &str, release_token: &str) {
         let mut child = Command::new("podman")
             .args(["attach", "--sig-proxy=false", container_id])
@@ -252,12 +268,12 @@ mod linux {
                 "top",
                 &container_id,
                 "pid",
+                "hpid",
                 "seccomp",
                 "capeff",
                 "capbnd",
                 "capinh",
                 "capprm",
-                "capamb",
                 "label",
             ]),
             "podman top held gate security evidence",
@@ -271,13 +287,24 @@ mod linux {
             ),
             "held gate must expose an effective seccomp mode"
         );
-        for capability_column in ["capeff", "capbnd", "capinh", "capprm", "capamb"] {
+        for capability_column in ["capeff", "capbnd", "capinh", "capprm"] {
             assert_eq!(
                 security.get(capability_column).map(String::as_str),
                 Some("0000000000000000"),
                 "held gate must expose an empty {capability_column} set"
             );
         }
+        // Podman 4.9.3 has no `capamb` top descriptor; passing it triggers host-ps fallback.
+        // Preserve ambient-capability proof by resolving the documented `hpid` descriptor and
+        // reading the kernel's process status instead of weakening the capability assertion.
+        let host_pid = security
+            .get("hpid")
+            .expect("held gate security evidence must expose its host PID");
+        assert_eq!(
+            proc_status_field(host_pid, "CapAmb"),
+            "0000000000000000",
+            "held gate must expose an empty ambient capability set"
+        );
         assert!(
             security.get("label").is_some_and(|label| !label.is_empty()),
             "held gate must expose the backend's process label even when the hosted lane cannot accept it as a positive LSM"
