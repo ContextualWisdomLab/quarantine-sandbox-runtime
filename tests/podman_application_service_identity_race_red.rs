@@ -107,9 +107,8 @@ fn runtime_identity_labels(calls: &str) -> Vec<&str> {
         .lines()
         .filter(|line| line.starts_with("create --name "))
         .filter_map(|line| {
-            line.split_whitespace().find_map(|token| {
-                token.strip_prefix("org.contextualwisdomlab.sandbox.identity=")
-            })
+            line.split_whitespace()
+                .find_map(|token| token.strip_prefix("org.contextualwisdomlab.sandbox.identity="))
         })
         .collect()
 }
@@ -133,18 +132,10 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
 
     let (first_result, second_result) = thread::scope(|scope| {
         let first = scope.spawn(move || {
-            first_adapter.launch_at(
-                &first_request,
-                &first_policy,
-                started_at_epoch_seconds,
-            )
+            first_adapter.launch_at(&first_request, &first_policy, started_at_epoch_seconds)
         });
         let second = scope.spawn(move || {
-            second_adapter.launch_at(
-                &second_request,
-                &second_policy,
-                started_at_epoch_seconds,
-            )
+            second_adapter.launch_at(&second_request, &second_policy, started_at_epoch_seconds)
         });
         (
             first.join().expect("first launch thread must not panic"),
@@ -193,7 +184,11 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
         "both independent launches must reach network creation"
     );
     assert_eq!(
-        container_names.iter().copied().collect::<HashSet<_>>().len(),
+        container_names
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len(),
         2,
         "actual Podman container names must be distinct, not only lease metadata"
     );
@@ -223,7 +218,11 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
         "both created containers must carry the runtime-owned identity label"
     );
     assert_eq!(
-        identity_labels.iter().copied().collect::<HashSet<_>>().len(),
+        identity_labels
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len(),
         2,
         "runtime identity labels must be distinct across independent launches"
     );
