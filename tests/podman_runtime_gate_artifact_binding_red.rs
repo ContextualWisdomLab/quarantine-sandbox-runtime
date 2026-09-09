@@ -66,18 +66,19 @@ fn configured_release_artifact_plans_read_only_gate_as_initial_process() {
         .expect("valid request should produce a fail-closed gate binding plan");
     let args = plan.container_create_binding_args();
 
-    assert_eq!(args[0], "--volume");
-    assert_eq!(args[1], format!("{staged_gate_path}:/qsr-runtime-gate:ro"));
-    assert_eq!(args[2], "--entrypoint=/qsr-runtime-gate");
-    assert_eq!(args[3], request().image_reference);
-    assert_eq!(args[4].len(), 64, "release token must retain 256 bits");
+    assert_eq!(args[0], "--interactive");
+    assert_eq!(args[1], "--volume");
+    assert_eq!(args[2], format!("{staged_gate_path}:/qsr-runtime-gate:ro"));
+    assert_eq!(args[3], "--entrypoint=/qsr-runtime-gate");
+    assert_eq!(args[4], request().image_reference);
+    assert_eq!(args[5].len(), 64, "release token must retain 256 bits");
     assert!(
-        args[4]
+        args[5]
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
         "release token must be canonical lowercase hex"
     );
-    assert_eq!(&args[5..], request().command.as_slice());
+    assert_eq!(&args[6..], request().command.as_slice());
     assert_eq!(plan.runtime_gate_sha256(), gate_sha256);
     assert_eq!(plan.runtime_gate_architecture(), std::env::consts::ARCH);
     assert!(
