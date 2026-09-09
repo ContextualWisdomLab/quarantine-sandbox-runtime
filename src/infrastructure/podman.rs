@@ -880,10 +880,9 @@ mod runtime_identity_tests {
         let identity = runtime_identity_with(|entropy| {
             *entropy = [0xab; RUNTIME_IDENTITY_ENTROPY_BYTES];
             Ok::<(), ()>(())
-        })
-        .expect("injected entropy must encode");
+        });
 
-        assert_eq!(identity, "ab".repeat(RUNTIME_IDENTITY_ENTROPY_BYTES));
+        assert_eq!(identity, Ok("ab".repeat(RUNTIME_IDENTITY_ENTROPY_BYTES)));
     }
 
     #[test]
