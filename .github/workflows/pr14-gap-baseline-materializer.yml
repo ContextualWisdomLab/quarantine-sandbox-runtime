@@ -1,0 +1,50 @@
+name: PR14 gap-baseline materializer
+
+on:
+  push:
+    branches: [feat/podman-command-execution-backend]
+    paths:
+      - scripts/materialize_pr14_gap_baseline.py
+      - .github/workflows/pr14-gap-baseline-materializer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Materialize exact gap baseline
+        run: python3 scripts/materialize_pr14_gap_baseline.py
+      - name: Verify baseline authority
+        run: |
+          set -euo pipefail
+          grep -F 'podman init' docs/product-technical-gap-baseline.md >/dev/null
+          grep -F 'runtime-owned effective hold/attest/release' docs/product-technical-gap-baseline.md >/dev/null
+          grep -F 'temporary source-materialization workflow/script were removed' docs/product-technical-gap-baseline.md >/dev/null
+      - name: Commit verified baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${GITHUB_REF_NAME}" --jq '.object.sha')"
+          if [ "$current_head" != "$GITHUB_SHA" ]; then
+            echo "branch moved from exact materializer source; refusing stale write" >&2
+            exit 1
+          fi
+          if git diff --quiet -- docs/product-technical-gap-baseline.md; then
+            echo "materializer produced no baseline delta; refusing empty commit" >&2
+            exit 1
+          fi
+          source_blob="$(git rev-parse HEAD:docs/product-technical-gap-baseline.md)"
+          encoded="$(base64 -w0 docs/product-technical-gap-baseline.md)"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/docs/product-technical-gap-baseline.md" \
+            -f message='docs: update PR14 init-hold gap authority' \
+            -f content="$encoded" \
+            -f sha="$source_blob" \
+            -f branch="$GITHUB_REF_NAME" \
+            --silent
