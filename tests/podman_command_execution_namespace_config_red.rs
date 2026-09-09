@@ -1,15 +1,17 @@
-//! RED: command execution must bind applied UTS and cgroup namespace modes.
+//! Command execution must reject applied host UTS/cgroup namespace modes and
+//! clean up only by the acquired container identity.
 //!
-//! PR #14 requests private UTS and cgroup namespaces, and AGENTS.md treats
-//! isolated namespaces / no host namespaces as fail-closed P0 invariants.
-//! Current command attestation does not deserialize Podman `HostConfig.UTSMode`
-//! or `HostConfig.CgroupMode`, so these otherwise-positive hostile fixtures can
-//! report host namespace sharing without being rejected. Production behavior is
-//! intentionally unchanged until this RED executes for that exact cause.
+//! These regressions retain the namespace-attestation contract after the
+//! command lifecycle moved cleanup authority from the generated correlation name
+//! to the container ID returned by a successful create.
 
 #![cfg(target_os = "linux")]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    fs,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
+};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -50,37 +52,36 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
-fn fake_podman(container_inspect: &str) -> (TempDir, PathBuf, PathBuf) {
+fn fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn config_path(program: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.config", program.display()))
+}
+
+fn fake_podman(mode: &str) -> (TempDir, PathBuf, PathBuf) {
     let directory = tempfile::Builder::new()
         .prefix("qsr-command-namespace-red-")
         .tempdir()
         .expect("isolated fake-Podman directory");
     let program = directory.path().join("podman");
     let calls = directory.path().join("calls");
-    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
-    let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
-    let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(),
-        info,
-        container_inspect,
-        top
-    );
-    fs::write(&program, script).expect("fake Podman must be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata must exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman must be executable");
+    symlink(fixture_executable(), &program).expect("fake Podman symlink must be creatable");
+    fs::write(
+        config_path(&program),
+        format!("MODE='{mode}'\nREADY_PORT='0'\nLOG='{}'\n", calls.display()),
+    )
+    .expect("fake Podman data config must be writable");
     (directory, program, calls)
 }
 
 fn assert_namespace_config_rejected(
-    container_inspect: &str,
+    mode: &str,
     control_name: &'static str,
     evidence_name: &str,
 ) {
-    let (_directory, program, calls_path) = fake_podman(container_inspect);
+    let (_directory, program, calls_path) = fake_podman(mode);
     let adapter = RootlessPodmanAdapter::new(program);
 
     let result = adapter.run_command_at(&request(), &policy(), 1_780_000_100);
@@ -93,7 +94,7 @@ fn assert_namespace_config_rejected(
                 .then(|| parts.next().map(str::to_owned))
                 .flatten()
         })
-        .expect("create must record the invocation-owned sandbox name");
+        .expect("create must record the invocation correlation name");
 
     assert_eq!(
         result,
@@ -105,8 +106,14 @@ fn assert_namespace_config_rejected(
     assert!(
         calls
             .lines()
+            .any(|line| line == "rm --force --ignore fake-command-container-id"),
+        "{evidence_name} must clean up the acquired container ID: {calls}"
+    );
+    assert!(
+        !calls
+            .lines()
             .any(|line| line == format!("rm --force --ignore {sandbox_name}")),
-        "{evidence_name} must clean up the exact created sandbox: {calls}"
+        "{evidence_name} must not regain generated-name cleanup authority: {calls}"
     );
     assert!(
         !calls.lines().any(|line| line.starts_with("logs ")),
@@ -116,10 +123,8 @@ fn assert_namespace_config_rejected(
 
 #[test]
 fn host_uts_namespace_configuration_fails_closed_and_cleans_up() {
-    let host_uts = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"host","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}},"Mounts":[]}]"#;
-
     assert_namespace_config_rejected(
-        host_uts,
+        "command_host_uts",
         "isolated_uts_namespace",
         "host UTS namespace configuration",
     );
@@ -127,10 +132,8 @@ fn host_uts_namespace_configuration_fails_closed_and_cleans_up() {
 
 #[test]
 fn host_cgroup_namespace_configuration_fails_closed_and_cleans_up() {
-    let host_cgroup = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"host","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}},"Mounts":[]}]"#;
-
     assert_namespace_config_rejected(
-        host_cgroup,
+        "command_host_cgroup",
         "isolated_cgroup_namespace",
         "host cgroup namespace configuration",
     );
