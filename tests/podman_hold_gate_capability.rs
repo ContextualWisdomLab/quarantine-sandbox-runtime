@@ -7,7 +7,6 @@
 #[cfg(target_os = "linux")]
 mod linux {
     use std::{
-        collections::BTreeMap,
         fs,
         io::Write,
         os::unix::fs::PermissionsExt,
@@ -88,26 +87,26 @@ mod linux {
         }
     }
 
-    fn parse_security_top(output: &str) -> BTreeMap<String, String> {
-        let mut lines = output.lines().filter(|line| !line.trim().is_empty());
-        let headers = lines
-            .next()
-            .expect("podman top must return a header")
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>();
-        let values = lines
+    fn podman_top_value(container_id: &str, descriptor: &str) -> String {
+        let operation = format!("podman top held gate {descriptor} evidence");
+        let output = successful_output(
+            Command::new("podman").args(["top", container_id, descriptor]),
+            &operation,
+        );
+        let text = String::from_utf8(output.stdout).expect("podman top output must be UTF-8");
+        let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+        let _header = lines.next().expect("podman top must return a header");
+        let value = lines
             .next()
             .expect("podman top must return the held gate process")
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            headers.len(),
-            values.len(),
-            "security top row must preserve the requested column shape"
+            .trim()
+            .to_owned();
+        assert!(!value.is_empty(), "podman top {descriptor} must not be empty");
+        assert!(
+            lines.next().is_none(),
+            "held gate fixture must expose exactly one running process before release"
         );
-        headers.into_iter().zip(values).collect()
+        value
     }
 
     fn proc_status_field(host_pid: &str, field_name: &str) -> String {
@@ -263,50 +262,29 @@ mod linux {
             "consumer output must not exist while the runtime-owned gate is held"
         );
 
-        let top = successful_output(
-            Command::new("podman").args([
-                "top",
-                &container_id,
-                "pid",
-                "hpid",
-                "seccomp",
-                "capeff",
-                "capbnd",
-                "capinh",
-                "capprm",
-                "label",
-            ]),
-            "podman top held gate security evidence",
-        );
-        let top_text = String::from_utf8(top.stdout).expect("security top output must be UTF-8");
-        let security = parse_security_top(&top_text);
+        let seccomp = podman_top_value(&container_id, "seccomp");
         assert!(
-            matches!(
-                security.get("seccomp").map(String::as_str),
-                Some("filter" | "strict")
-            ),
+            matches!(seccomp.as_str(), "filter" | "strict"),
             "held gate must expose an effective seccomp mode"
         );
         for capability_column in ["capeff", "capbnd", "capinh", "capprm"] {
             assert_eq!(
-                security.get(capability_column).map(String::as_str),
-                Some("0000000000000000"),
+                podman_top_value(&container_id, capability_column),
+                "0000000000000000",
                 "held gate must expose an empty {capability_column} set"
             );
         }
         // Podman 4.9.3 has no `capamb` top descriptor; passing it triggers host-ps fallback.
         // Preserve ambient-capability proof by resolving the documented `hpid` descriptor and
         // reading the kernel's process status instead of weakening the capability assertion.
-        let host_pid = security
-            .get("hpid")
-            .expect("held gate security evidence must expose its host PID");
+        let host_pid = podman_top_value(&container_id, "hpid");
         assert_eq!(
-            proc_status_field(host_pid, "CapAmb"),
+            proc_status_field(&host_pid, "CapAmb"),
             "0000000000000000",
             "held gate must expose an empty ambient capability set"
         );
         assert!(
-            security.get("label").is_some_and(|label| !label.is_empty()),
+            !podman_top_value(&container_id, "label").is_empty(),
             "held gate must expose the backend's process label even when the hosted lane cannot accept it as a positive LSM"
         );
 
