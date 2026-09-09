@@ -21,8 +21,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
-const OWNED_CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
