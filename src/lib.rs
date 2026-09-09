@@ -30,9 +30,7 @@ pub use artifact_analysis::{
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 #[cfg(unix)]
-pub use infrastructure::{
-    RuntimeGateArtifact, RuntimeGateArtifactError, RuntimeGatePodmanAdapter,
-};
+pub use infrastructure::{RuntimeGateArtifact, RuntimeGateArtifactError, RuntimeGatePodmanAdapter};
 pub use pr_source_artifact::{
     PrSourceArtifactError, PrSourceArtifactInput, PrSourceArtifactReceipt, StagedPrSourceArtifact,
     stage_pr_source_artifact,
