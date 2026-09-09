@@ -101,7 +101,10 @@ mod linux {
             .expect("podman top must return the held gate process")
             .trim()
             .to_owned();
-        assert!(!value.is_empty(), "podman top {descriptor} must not be empty");
+        assert!(
+            !value.is_empty(),
+            "podman top {descriptor} must not be empty"
+        );
         assert!(
             lines.next().is_none(),
             "held gate fixture must expose exactly one running process before release"
