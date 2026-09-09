@@ -2,7 +2,7 @@
 
 ## Problem and boundary
 
-`ApplicationServiceLease` is a public serializable evidence contract. It currently also derives `Deserialize`, while `RootlessPodmanAdapter::terminate_at` uses `sandbox_id` and `network_id` from that value as direct Podman destruction targets. That conflates consumer-visible evidence with runtime-owned lifecycle authority.
+At the executed RED state, `ApplicationServiceLease` was a public serializable/deserializable evidence contract and `RootlessPodmanAdapter::terminate_at` used `sandbox_id` and `network_id` from that value directly as Podman destruction targets. That conflated consumer-visible evidence with runtime-owned lifecycle authority.
 
 The runtime owns cleanup of resources it created. It does not gain authority to stop or remove an arbitrary same-principal container or network merely because a caller can present a lease-shaped JSON object naming that resource. Upstream consumers retain application authorization; the infrastructure adapter must still enforce its own resource-ownership boundary.
 
@@ -23,19 +23,29 @@ Issue #42 owns this defect. It is distinct from:
 
 | Evidence | Exact responsibility |
 | --- | --- |
-| `src/application_service/mod.rs::ApplicationServiceLease` | Consumer-visible lease/evidence contract; currently derives `Deserialize`. |
-| `src/infrastructure/podman.rs::RootlessPodmanAdapter::terminate_at` | Destructive backend lifecycle boundary; currently trusts lease resource identifiers. |
+| `src/application_service/mod.rs::ApplicationServiceLease` at RED head `1d0cf2f47a8bd9df6594c734806a6c9c912fe0ed` | Consumer-visible lease/evidence contract whose deserialized identifiers could recreate cleanup selection. |
 | `tests/podman_application_service_forged_lease_ownership_red.rs` | Hostile RED proving that a lease created only from caller JSON must not select Podman stop/remove/network-remove targets. |
-| Issue #42 | Decision and completion authority for separating evidence from cleanup capability. |
+| Native CI `34299565806`, verify `102303404021` | Causal execution showing forged `foreign-container` / `foreign-network` values reached destructive cleanup. |
+| `b0bcbe90ef034115ec266ffed5937aed1ee75150` | Captures crate-private, non-serializable `ApplicationServiceCleanupAuthority` only during runtime construction. |
+| `e15980b820becd13c7e5756a3adca1f6504cd92c` | Makes `terminate_at` require `lease.cleanup_authority()` and fail closed as `CleanupAuthorityUnavailable` before destructive Podman commands when authority is absent. |
+| Exact later ancestry `368e20eeeb0ac3d573a913af981dcb5dd4104b1a` | Regression-verified the forged-lease authority boundary before execution advanced to the independent #20 collision RED. |
+| Issue #42 / Draft #21 | Decision, integration, and completion authority for separating evidence from cleanup capability. |
 
-The RED keeps the scenario intentionally small: no launch occurs, no runtime-owned resource receipt exists, and fake Podman reports successful destruction if the forged identifiers are used. Current production should therefore fail because `terminate_at` accepts the deserialized value as sufficient authority.
+The RED scenario is intentionally small: no launch occurs, no runtime-owned resource authority exists, and fake Podman reports successful destruction if the forged identifiers are used. The RED head failed because deserialized evidence was sufficient to select those resources. Current #21 production no longer behaves that way: runtime construction captures private cleanup authority, while a deserialized lease has none and `terminate_at` returns `CleanupAuthorityUnavailable` before issuing Podman destruction.
 
-## Smallest causal repair after executed RED
+## Selected causal repair
 
-Preserve `ApplicationServiceLease` as evidence/correlation where the public contract needs it, but move destructive lifecycle selection behind runtime-owned provenance that cannot be manufactured by deserializing the lease. The preferred model is a non-serializable internal cleanup handle or equivalent authenticated runtime authority record bound to the acquired container ID and network ownership receipt.
+`ApplicationServiceLease` remains consumer-visible evidence/correlation, but destructive lifecycle selection is now gated by crate-private runtime-owned provenance that Serde does not reconstruct. This is deliberately stronger than identifier-shape validation: `request_id`, `sandbox_id`, `network_id`, policy metadata, endpoint fields, and attestation booleans remain replayable evidence once serialized and cannot independently authorize backend destruction.
 
-Identifier-shape validation is not ownership proof. `request_id`, `sandbox_id`, `network_id`, policy metadata, endpoint fields, and attestation booleans remain caller-replayable once serialized and cannot independently authorize backend destruction.
+The private cleanup authority currently retains the runtime-selected container/network targets and shutdown grace. #40 remains an independent prerequisite because the application-service Podman adapter still must replace the generated post-create container selector with the exact admitted long ID returned by successful `podman create`; that acquired ID must then flow into private cleanup authority without changing the public generated-name correlation field.
+
+Rejected alternatives remain:
+
+- accepting any schema-valid or well-shaped lease identifiers as ownership proof;
+- reconstructing private authority during deserialization;
+- restoring generated-name destructive fallback when private authority is absent;
+- weakening #40 by treating collision-resistant generated names as equivalent to acquired backend identity.
 
 ## Evidence levels
 
-A GREEN unit regression establishes only that the public/deserialized lease is no longer accepted as destructive authority. Release acceptance still requires a legitimate launch → readiness → termination path using exact runtime-acquired identity, failure-path cleanup precedence, no foreign-resource effects, real rootless Podman execution, positive effective LSM evidence, full owned coverage/rustdoc/security/review, and exact protected integration evidence.
+The executed RED plus later regression establishes that public/deserialized lease evidence is no longer accepted as destructive authority on this Draft lineage. It is not protected-integrated or release GREEN. Release acceptance still requires a legitimate launch → readiness → termination path using exact runtime-acquired identity, #40 lifecycle selector repair after its own causal RED, failure-path cleanup precedence, no foreign-resource effects, real rootless Podman execution, positive effective LSM evidence, full owned coverage/rustdoc/security/review, and exact protected integration evidence.
