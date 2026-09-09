@@ -62,14 +62,28 @@ fn temporary_path(name: &str) -> FixturePath {
     }
 }
 
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
+}
+
 fn write_executable(name: &str, script: &str) -> FixturePath {
     let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    std::os::unix::fs::symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink should be creatable");
+    let script_path = fixture_sidecar(&program, "script");
+    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        fixture_sidecar(&program, "config"),
+        format!(
+            "MODE='source_script'\nLOG='/dev/null'\nSCRIPT='{}'\n",
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
     program
 }
 
