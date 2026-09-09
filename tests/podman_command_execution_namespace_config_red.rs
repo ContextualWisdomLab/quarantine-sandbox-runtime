@@ -76,11 +76,7 @@ fn fake_podman(mode: &str) -> (TempDir, PathBuf, PathBuf) {
     (directory, program, calls)
 }
 
-fn assert_namespace_config_rejected(
-    mode: &str,
-    control_name: &'static str,
-    evidence_name: &str,
-) {
+fn assert_namespace_config_rejected(mode: &str, control_name: &'static str, evidence_name: &str) {
     let (_directory, program, calls_path) = fake_podman(mode);
     let adapter = RootlessPodmanAdapter::new(program);
 
