@@ -82,7 +82,7 @@ impl RuntimeGateArtifact {
         let mut staged = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o500)
+            .mode(0o555)
             .open(&path)
             .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
         staged
