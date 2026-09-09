@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{EvidenceKind, IngestedArtifact};
-use crate::sandbox_execution::{SandboxWorkerBudget, SandboxWorkerIsolationEvidence};
+use crate::sandbox_execution::{
+    SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationState,
+};
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ATTRIBUTE_COUNT: usize = 32;
@@ -259,6 +261,16 @@ impl AnalyzerWorkerReceipt {
         }
         if let Some(field_name) = self.isolation.boundary_violation() {
             return Err(AnalyzerWorkerContractError::IsolationBoundaryViolated { field_name });
+        }
+        if matches!(&self.outcome, AnalyzerWorkerOutcome::Completed { .. })
+            && !matches!(
+                self.isolation.termination.state,
+                SandboxWorkerTerminationState::Exited { exit_code: 0 }
+            )
+        {
+            return Err(AnalyzerWorkerContractError::InvalidOutcome {
+                field_name: "worker_exit_code",
+            });
         }
         self.outcome.validate()
     }
