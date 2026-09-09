@@ -60,7 +60,7 @@ fn fake_podman(container_inspect: &str) -> (TempDir, PathBuf, PathBuf) {
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         calls.display(),
         info,
         container_inspect,
@@ -89,7 +89,7 @@ fn assert_resource_config_rejected(container_inspect: &str, evidence_name: &str)
                 .then(|| parts.next().map(str::to_owned))
                 .flatten()
         })
-        .expect("create must record the invocation-owned sandbox name");
+        .expect("create must record the invocation correlation name");
 
     assert_eq!(
         result,
@@ -103,8 +103,14 @@ fn assert_resource_config_rejected(container_inspect: &str, evidence_name: &str)
     assert!(
         calls
             .lines()
+            .any(|line| line == "rm --force --ignore fake-command-container-id"),
+        "{evidence_name} must clean up the exact acquired container ID: {calls}"
+    );
+    assert!(
+        !calls
+            .lines()
             .any(|line| line == format!("rm --force --ignore {sandbox_name}")),
-        "{evidence_name} must clean up the exact created sandbox: {calls}"
+        "{evidence_name} must not regain generated-name cleanup authority: {calls}"
     );
 }
 
@@ -119,10 +125,7 @@ fn widened_command_tmpfs_configuration_fails_closed_and_cleans_up() {
 fn unbounded_command_timeout_configuration_fails_closed_and_cleans_up() {
     let unbounded_timeout = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":0},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
 
-    assert_resource_config_rejected(
-        unbounded_timeout,
-        "unbounded command wall-time configuration",
-    );
+    assert_resource_config_rejected(unbounded_timeout, "unbounded command wall-time configuration");
 }
 
 #[test]
