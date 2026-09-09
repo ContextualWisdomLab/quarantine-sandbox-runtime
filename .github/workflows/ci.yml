@@ -144,6 +144,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
         with:
           toolchain: 1.97.1
+          targets: x86_64-unknown-linux-musl
       - name: Capture hosted negative LSM capability evidence
         run: |
           # The current ubuntu-24.04 image exposes distribution Podman 4.9.3.
@@ -164,6 +165,11 @@ jobs:
         run: |
           podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
           podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Prove real held-gate backend capability
+        run: >-
+          cargo test --locked
+          --test podman_hold_gate_capability
+          -- --ignored --exact linux::rootless_podman_supports_a_runtime_owned_held_gate_before_consumer_exec --nocapture
       - name: Prove unavailable effective LSM fails closed and cleans up
         run: >-
           cargo test --locked
