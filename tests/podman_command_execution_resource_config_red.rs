@@ -125,7 +125,10 @@ fn widened_command_tmpfs_configuration_fails_closed_and_cleans_up() {
 fn unbounded_command_timeout_configuration_fails_closed_and_cleans_up() {
     let unbounded_timeout = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":0},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
 
-    assert_resource_config_rejected(unbounded_timeout, "unbounded command wall-time configuration");
+    assert_resource_config_rejected(
+        unbounded_timeout,
+        "unbounded command wall-time configuration",
+    );
 }
 
 #[test]
