@@ -154,8 +154,8 @@ mod linux {
 
         let workspace = tempfile::tempdir().expect("capability workspace must be creatable");
         let gate_path = workspace.path().join("qsr-hold-gate");
-        let gate_source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/qsr_hold_gate.rs");
+        let gate_source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qsr_hold_gate.rs");
         successful_output(
             Command::new("rustc").args([
                 "--edition=2024",
@@ -178,7 +178,8 @@ mod linux {
             .expect("compiled gate metadata must be available")
             .permissions();
         permissions.set_mode(0o555);
-        fs::set_permissions(&gate_path, permissions).expect("gate fixture must be read/execute only");
+        fs::set_permissions(&gate_path, permissions)
+            .expect("gate fixture must be read/execute only");
         let gate_digest_before = sha256(&gate_path);
 
         let release_token = format!("qsr-release-{}", std::process::id());
@@ -189,8 +190,7 @@ mod linux {
                 .to_str()
                 .expect("temporary gate path must be Unicode on the hosted runner")
         );
-        let consumer_script =
-            "import sys,time; print('QSR_CONSUMER_RAN:' + sys.argv[1], flush=True); time.sleep(0.05)";
+        let consumer_script = "import sys,time; print('QSR_CONSUMER_RAN:' + sys.argv[1], flush=True); time.sleep(0.05)";
         let create = successful_output(
             Command::new("podman").args([
                 "create",
@@ -225,7 +225,10 @@ mod linux {
             .expect("podman create ID must be UTF-8")
             .trim()
             .to_owned();
-        assert!(!container_id.is_empty(), "podman create must return an exact ID");
+        assert!(
+            !container_id.is_empty(),
+            "podman create must return an exact ID"
+        );
         let mut cleanup = ContainerGuard::new(container_id.clone());
 
         successful_output(
@@ -256,7 +259,10 @@ mod linux {
         let top_text = String::from_utf8(top.stdout).expect("security top output must be UTF-8");
         let security = parse_security_top(&top_text);
         assert!(
-            matches!(security.get("seccomp").map(String::as_str), Some("filter" | "strict")),
+            matches!(
+                security.get("seccomp").map(String::as_str),
+                Some("filter" | "strict")
+            ),
             "held gate must expose an effective seccomp mode"
         );
         for capability_column in ["capeff", "capbnd", "capinh", "capprm", "capamb"] {
