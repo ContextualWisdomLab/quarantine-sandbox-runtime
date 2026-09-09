@@ -192,8 +192,7 @@ mod linux {
 
         let workspace = tempfile::tempdir().expect("capability workspace must be creatable");
         let gate_path = workspace.path().join("qsr-runtime-gate");
-        let gate_source =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin/qsr_runtime_gate.rs");
+        let gate_source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin/qsr_runtime_gate.rs");
         successful_output(
             Command::new("rustc").args([
                 "--edition=2024",
