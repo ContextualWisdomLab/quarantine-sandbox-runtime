@@ -5,6 +5,7 @@ use std::{
     io::Write,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use sha2::{Digest, Sha256};
@@ -16,16 +17,27 @@ const ELF_HEADER_MINIMUM_BYTES: usize = 20;
 
 /// A digest-bound, architecture-matched runtime gate staged in a private directory.
 ///
-/// The staging directory is owned by this value and is removed when the value is dropped. The
+/// Clones share ownership of the same private staging directory, so an adapter can retain the
+/// verified bytes without copying or persisting them outside the runtime-owned lifecycle. The
 /// staged gate is created read-only and executable so a later container adapter can bind-mount the
 /// exact verified bytes without trusting an artifact supplied by the hostile image.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RuntimeGateArtifact {
-    _staging_directory: TempDir,
+    _staging_directory: Arc<TempDir>,
     path: PathBuf,
     sha256: String,
     architecture: String,
 }
+
+impl PartialEq for RuntimeGateArtifact {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.sha256 == other.sha256
+            && self.architecture == other.architecture
+    }
+}
+
+impl Eq for RuntimeGateArtifact {}
 
 impl RuntimeGateArtifact {
     /// Verify and stage a runtime gate from a trusted host release path.
@@ -94,7 +106,7 @@ impl RuntimeGateArtifact {
         drop(staged);
 
         Ok(Self {
-            _staging_directory: staging_directory,
+            _staging_directory: Arc::new(staging_directory),
             path,
             sha256: actual_sha256,
             architecture: actual_architecture,
@@ -225,6 +237,23 @@ mod tests {
             "elf-unknown-data-encoding"
         );
         assert_eq!(executable_architecture(b"not-elf"), "non-elf");
+    }
+
+    #[test]
+    fn clone_keeps_one_staged_gate_alive_without_copying_identity() {
+        let source = std::env::current_exe().expect("current test executable should exist");
+        let bytes = fs::read(&source).expect("current test executable should be readable");
+        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
+        let artifact =
+            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+                .expect("matching runtime gate artifact should stage");
+        let clone = artifact.clone();
+        assert_eq!(artifact, clone);
+        drop(artifact);
+        assert!(
+            clone.path().is_file(),
+            "an adapter clone must keep the verified staged gate alive"
+        );
     }
 
     #[test]
