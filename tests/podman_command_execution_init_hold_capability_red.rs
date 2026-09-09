@@ -138,7 +138,10 @@ fn invalid_prestart_evidence_is_rejected_after_init_without_releasing_payload() 
     let start_seen = lines
         .iter()
         .any(|line| line.starts_with(&format!("start {container_id}")));
-    let init_before_inspect = matches!((init_position, inspect_position), (Some(init), Some(inspect)) if init < inspect);
+    let init_before_inspect = matches!(
+        (init_position, inspect_position),
+        (Some(init), Some(inspect)) if init < inspect
+    );
 
     assert!(
         init_before_inspect && !start_seen && !payload_marker.exists(),
