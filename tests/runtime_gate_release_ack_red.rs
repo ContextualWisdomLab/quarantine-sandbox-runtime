@@ -1,3 +1,5 @@
+//! Regression requiring the trusted runtime gate to acknowledge release before consumer exec.
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::{
