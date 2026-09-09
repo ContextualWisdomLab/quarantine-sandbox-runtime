@@ -163,15 +163,18 @@ mod tests {
         let source = std::env::current_exe().expect("current test executable should exist");
         let bytes = fs::read(&source).expect("current test executable should be readable");
         let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
-        let artifact = RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
-            .expect("matching runtime gate artifact should stage");
+        let artifact =
+            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+                .expect("matching runtime gate artifact should stage");
         let adapter = RootlessPodmanAdapter::new("podman").with_runtime_gate_artifact(artifact);
         let plan = adapter
             .plan_command_binding(&request(), &policy())
             .expect("valid gate binding should plan");
 
         assert_eq!(
-            plan.container_create_binding_args().first().map(String::as_str),
+            plan.container_create_binding_args()
+                .first()
+                .map(String::as_str),
             Some("--interactive"),
             "the runtime gate reads its one-time release token from stdin, so Podman must keep container stdin open until the controller releases the held gate"
         );
