@@ -8,6 +8,7 @@ Issue #77 defines the controller-side authority boundary for evidence kinds retu
 - Parent DDD decision: ADR-0009 remains Proposed; `artifact_analysis` owns analyzer/result semantics, `sandbox_execution` owns reusable isolation/resource/lifecycle semantics, and `infrastructure` owns concrete enforcement and observation.
 - RED authority: `tests/artifact_analysis_worker_evidence_authority_red.rs`, introduced by `3b6693394a89030c286839145cbdda6aa0a83bad` and causally executed on exact `ab919126a1ada3a039fb1f8979bdb66300469d91`.
 - Minimum production candidate: `31dc17771b08e2535e33c8e0861c15eeb5113d4f`.
+- Repository-CI authority: root Draft #1 exact `5c6a44bb2b35eb17d0315d72db242f4488c3c426`; this descendant adopts its checkout credential policy rather than forking it.
 
 At the executed RED head, the worker finding contract carried the repository-wide `EvidenceKind` and `AnalyzerWorkerReceipt::validate_against` validated bounded text/attributes plus request and Core isolation consistency, but did not constrain which evidence authorities an untrusted analyzer could claim. An otherwise-valid worker could therefore label one normalized finding as `ArtifactIdentity` or `PolicyBoundary` even though those facts are assembled from controller-admitted immutable bytes and runtime-owned boundary state.
 
@@ -26,13 +27,21 @@ The first minimum boundary is deliberately narrow:
 
 Forbidden kinds fail closed. They are not rewritten into another kind, dropped silently, or authorized merely because the enclosing worker receipt matches its request.
 
-## Executed RED and minimum GREEN
+## Executed RED and minimum GREEN candidate
 
 Native CI `34306038425`, verify `102322814270`, executed exact `ab919126a1ada3a039fb1f8979bdb66300469d91`. Exact checkout, dependency lock, repository validation, coverage-parser tests, rustfmt, Core worker-isolation suites, and `worker_owned_static_evidence_remains_admissible` all passed. `worker_cannot_claim_controller_or_runtime_owned_foundation_evidence` then failed for the intended cause: an `ArtifactIdentity` finding returned `Ok(())` where the contract required `AnalyzerWorkerContractError::InvalidOutcome { field_name: "evidence_kind" }`. The adjacent static-evidence case remaining GREEN rules out a repair that indiscriminately rejects worker findings.
 
 Minimum production candidate `31dc17771b08e2535e33c8e0861c15eeb5113d4f` adds one fail-closed guard in `AnalyzerWorkerFinding::validate`: `ArtifactIdentity | PolicyBoundary` returns `InvalidOutcome { field_name: "evidence_kind" }` before worker output is admitted. It leaves `FileFormat`, `StaticCapability`, `RuntimeBehavior`, `NetworkAttempt`, and `ToolFailure` behavior otherwise unchanged and does not move the taxonomy into Core or add backend-specific state.
 
-Candidate CI `34308822329` materialized after the production commit, but any later documentation commit moves exact-head authority again. GREEN is claimed only after one unchanged current head executes the focused tests plus full fmt/test/Clippy/rustdoc, complete owned production/branch coverage, applicable security/confinement gates, and review.
+Candidate CI `34308822329` materialized after the production commit but all five jobs were cancelled before checkout because the branch moved to doctoring. It is not GREEN evidence. Exact-head semantic GREEN must therefore be reacquired on a later unchanged head.
+
+## Repository CI ownership repair
+
+The causal RED run on `ab919126...` also exposed stale descendant CI authority: `actions/checkout` executed with `persist-credentials: true`. The canonical root already sets `persist-credentials: false` on every checkout and carries `every_checkout_discards_persisted_credentials` so build/test steps do not retain ambient Git write credentials.
+
+This is independent of analyzer semantics and is repaired through the canonical `.github` owner contract rather than a local exception. Test-only `d03df966f171d5ce445ad0240ff91bf32727ec7b` adopts the root `tests/ci_runner_contract.rs` blob exactly. Workflow repair `13969067ee0ba9d8dd90d9706018b638025eb00b` adopts the root `.github/workflows/ci.yml` blob exactly, including `persist-credentials: false` on all five checkout steps. Those commits do not change production Rust, runner labels, toolchains, test commands, or the evidence-authority decision. Because the branch moved again for this doctoring update, their transient queued runs do not transfer to the final head.
+
+Keeping persisted credentials was rejected: this repository's CI permissions are read-only and later Rust/tests need no Git write authority. Maintaining a descendant-specific weaker workflow was also rejected because `.github` is the canonical CI/security owner and source-copy divergence would recreate the same gap.
 
 ## Security rationale
 
@@ -47,6 +56,7 @@ Saltzer and Schroeder's complete-mediation and fail-safe-default principles supp
 - Rewrite forbidden kinds into `StaticCapability` or `ToolFailure`: rejected because silent coercion destroys provenance and can turn a security contradiction into apparently valid evidence.
 - Move the enum or authority table into `sandbox_execution`: rejected because evidence semantics belong to Supporting `artifact_analysis`; Core owns isolation/resource/lifecycle truth, not analyzer evidence taxonomy.
 - Solve `RuntimeBehavior` / `NetworkAttempt` in this slice: rejected because #52/#53 already owns the dynamic-execution/completeness contract and combining it would blur the causal RED.
+- Keep persisted checkout credentials or a descendant-specific workflow exception: rejected because neither analyzer execution nor repository validation requires ambient Git write credentials, and `.github` is the canonical CI/security owner.
 
 ## References
 
@@ -55,3 +65,7 @@ Joint Task Force. (2020/2025). *Security and privacy controls for information sy
 Saltzer, J. H., & Schroeder, M. D. (1975). The protection of information in computer systems. *Proceedings of the IEEE, 63*(9), 1278–1308. https://doi.org/10.1109/PROC.1975.9939
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
+
+## Completion gate
+
+The final unchanged head must execute the focused producer-authority positive/negative cases and the checkout-credential regression, then pass repository validation, rustfmt, full workspace tests, Clippy with warnings denied, rustdoc with warnings denied, exact complete owned-production statement/function/region/branch coverage, qualifying review/security/thread gates, dependency-safe adoption of the stabilized command/runtime ancestry through #18/#70, applicable positive effective-isolation evidence, protected integration, SBOM/provenance/reproducibility/rollback, and immutable publication. Predecessor or cancelled-run results never transfer.
