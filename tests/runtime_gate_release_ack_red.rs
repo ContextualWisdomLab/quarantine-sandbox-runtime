@@ -19,7 +19,10 @@ mod linux {
             .spawn()
             .expect("runtime gate should spawn");
 
-        let stdout = child.stdout.take().expect("runtime gate stdout should exist");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("runtime gate stdout should exist");
         let mut stdout = BufReader::new(stdout);
         let mut line = String::new();
         stdout
@@ -44,6 +47,9 @@ mod linux {
         );
 
         let status = child.wait().expect("runtime gate child should be reapable");
-        assert!(status.success(), "released /bin/true should exit successfully");
+        assert!(
+            status.success(),
+            "released /bin/true should exit successfully"
+        );
     }
 }
