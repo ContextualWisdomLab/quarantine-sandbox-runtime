@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{io::ErrorKind, path::Path, time::Duration};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 
@@ -52,7 +52,7 @@ fn concrete_child_spawn_failure_is_typed() {
         .run(Path::new("/definitely-missing-qsr-command"), &[])
         .err();
 
-    assert_eq!(error, Some(BoundedCommandError::Spawn));
+    assert_eq!(error, Some(BoundedCommandError::Spawn(ErrorKind::NotFound)));
 }
 
 #[test]
