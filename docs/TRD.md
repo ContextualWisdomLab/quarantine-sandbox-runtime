@@ -5,7 +5,7 @@
 - Rust 1.97.x baseline, Edition 2024.
 - `unsafe` forbidden in this crate by default.
 - `serde`/JSON Schema Draft 2020-12 for versioned wire contracts.
-- SHA-256 for immutable artifact identity and deterministic infrastructure-safe sandbox names.
+- SHA-256 for immutable artifact and effective-policy identity; fresh operating-system entropy for application-service invocation/resource identity.
 - Rootless Podman as the first application-service infrastructure adapter.
 - Future adapters may target OCI/containerd/gVisor and Kubernetes RuntimeClass without changing consumer domain authority.
 
@@ -74,6 +74,8 @@ Schema `1.1.0` records:
 - start/expiry/shutdown values;
 - P0 isolation attestation.
 
+The serialized lease is evidence/correlation, not destructive authority. A runtime-issued in-process lease additionally carries crate-private, non-serializable cleanup authority. Deserializing the public lease shape cannot recreate that authority; explicit termination fails closed as `CleanupAuthorityUnavailable` when it is absent.
+
 ### `CleanupReceipt`
 
 Successful receipt exists only when both container and network removal succeeded.
@@ -82,7 +84,9 @@ Successful receipt exists only when both container and network removal succeeded
 
 ### Planning
 
-`RootlessPodmanAdapter::plan_at` validates request/policy and produces deterministic command argv. Sandbox/network names are currently derived from SHA-256 over request ID, immutable image, policy ID, and start time; raw caller strings are not used as container/network names. Draft #21 carries the RED proving that this deterministic identity is not sufficient to distinguish independent same-request/same-second runtime invocations.
+`RootlessPodmanAdapter::plan_at` validates request/policy, obtains 128 bits of operating-system entropy, encodes it as 32 lowercase hexadecimal characters, and binds that invocation identity across the generated `qsr-app-*` container name, `qsr-net-*` network name, and runtime identity label. Entropy failure returns `RuntimeIdentityUnavailable`; there is no deterministic fallback. Raw caller strings and `request_id` remain correlation/idempotency data and are not infrastructure cleanup authority.
+
+Draft #21 owns this invocation-collision repair. Draft #40 remains a separate post-create ownership contract: once Podman returns an admitted concrete container ID, lifecycle/destructive operations must bind to that acquired ID rather than assuming the generated correlation name remains authoritative.
 
 ### Backend verification
 
@@ -141,7 +145,7 @@ The immutable image reference is appended before application argv, so applicatio
 ### Start, effective verification, readiness, and lease
 
 1. Create the internal network.
-2. Create the container.
+2. Create the container and admit only an exact 64-character ASCII hexadecimal container identifier from successful create output.
 3. Start the container.
 4. Inspect the runtime-owned network and exact container identity/configuration.
 5. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
@@ -158,10 +162,11 @@ P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplie
 - Container-create failure: remove network.
 - Start failure: remove container and network.
 - Isolation/port/readiness failure: stop/remove container and remove network.
-- Explicit termination: stop with lease shutdown grace, remove container, remove network.
+- Explicit termination: require runtime-owned non-serializable cleanup authority, stop with its captured shutdown grace, remove its container target, then remove its network target.
+- Consumer-deserialized lease evidence without runtime cleanup authority: return `CleanupAuthorityUnavailable` before any destructive Podman command.
 - If cleanup cannot be proven, return `CleanupFailed` rather than the original error as though cleanup succeeded.
 
-`--timeout` expresses an intended container lifetime bound, but configuration alone is not release-grade proof that wall-time termination occurred. Durable crash/restart orphan reclamation also requires the Recovery context/reaper before GA.
+Current #21 ancestry still has the independent #40 exact acquired-container-ID lifecycle RED checked in; generated-name versus acquired-ID selection must be resolved there before this cleanup path is considered ownership-complete. `--timeout` expresses an intended container lifetime bound, but configuration alone is not release-grade proof that wall-time termination occurred. Durable crash/restart orphan reclamation also requires the Recovery context/reaper before GA.
 
 ## Artifact-analysis technical contract
 
