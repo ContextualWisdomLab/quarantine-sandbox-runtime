@@ -10,7 +10,7 @@
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -63,7 +63,7 @@ fn forged_lease() -> ApplicationServiceLease {
     serde_json::from_str(&json).expect("public lease wire type currently accepts deserialization")
 }
 
-fn write_fake_podman(foreign_marker: &PathBuf) -> (PathBuf, PathBuf) {
+fn write_fake_podman(foreign_marker: &Path) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let script = format!(
