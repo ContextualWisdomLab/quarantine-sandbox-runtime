@@ -20,6 +20,11 @@ COMMAND_TOP='PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL
 1 filter - - - - - containers-default (enforce)'
 
 case "$MODE" in
+  source_script)
+    # Dynamic scenario bodies are sourced as data by this checked-in immutable
+    # executable. No test spawns a file that it has just written or rewritten.
+    . "$SCRIPT"
+    ;;
   app_success|app_slow_rootless|app_fail_rootless)
     if [ "$MODE" = app_slow_rootless ] && [ "${1:-}" = info ]; then sleep 1; fi
     if [ "$MODE" = app_fail_rootless ] && [ "${1:-}" = info ]; then exit 20; fi
