@@ -178,7 +178,14 @@ fn executable_architecture(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeGateArtifactError, executable_architecture, validate_expected_digest};
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    use sha2::{Digest, Sha256};
+
+    use super::{
+        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture,
+        validate_expected_digest,
+    };
 
     #[test]
     fn expected_digest_requires_exact_lowercase_sha256_shape() {
@@ -218,5 +225,29 @@ mod tests {
             "elf-unknown-data-encoding"
         );
         assert_eq!(executable_architecture(b"not-elf"), "non-elf");
+    }
+
+    #[test]
+    fn staged_gate_permissions_survive_a_remapped_container_user() {
+        let source = std::env::current_exe().expect("current test executable should exist");
+        let bytes = fs::read(&source).expect("current test executable should be readable");
+        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
+        let artifact = RuntimeGateArtifact::stage(
+            &source,
+            &expected_sha256,
+            std::env::consts::ARCH,
+        )
+        .expect("matching runtime gate artifact should stage");
+
+        let mode = fs::metadata(artifact.path())
+            .expect("staged runtime gate metadata should exist")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o222, 0, "staged runtime gate must be read-only");
+        assert_eq!(
+            mode & 0o555,
+            0o555,
+            "runtime gate must remain readable/executable when Podman maps the container process to a non-owner host identity"
+        );
     }
 }
