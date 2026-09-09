@@ -5,5 +5,9 @@ mod bounded_command;
 #[cfg(all(test, unix))]
 mod bounded_command_concrete_tests;
 mod podman;
+#[cfg(unix)]
+mod runtime_gate_artifact;
 
 pub use podman::{PodmanLaunchPlan, RootlessPodmanAdapter};
+#[cfg(unix)]
+pub use runtime_gate_artifact::{RuntimeGateArtifact, RuntimeGateArtifactError};
