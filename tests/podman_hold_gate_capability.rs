@@ -1,8 +1,8 @@
 //! Real rootless-Podman capability proof for the runtime-owned hold/attest/release gate.
 //!
-//! The dedicated Linux E2E lane proves that the runtime gate remains the running process until
-//! explicit release, so effective process isolation can be observed before exact consumer argv
-//! becomes executable.
+//! The dedicated Linux E2E lane proves that the production runtime gate remains the running
+//! process until explicit release, so effective process isolation can be observed before exact
+//! consumer argv becomes executable.
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -35,7 +35,7 @@ mod linux {
                     .args(["rm", "--force", "--ignore", &container_id])
                     .status()
                     .expect("Podman cleanup command must be spawnable");
-                assert!(status.success(), "real capability fixture must clean up");
+                assert!(status.success(), "real capability sandbox must clean up");
             }
         }
     }
@@ -64,7 +64,7 @@ mod linux {
     }
 
     fn sha256(path: &Path) -> String {
-        let bytes = fs::read(path).expect("gate fixture bytes must remain readable");
+        let bytes = fs::read(path).expect("runtime gate bytes must remain readable");
         format!("{:x}", Sha256::digest(bytes))
     }
 
@@ -107,7 +107,7 @@ mod linux {
         );
         assert!(
             lines.next().is_none(),
-            "held gate fixture must expose exactly one running process before release"
+            "held gate must expose exactly one running process before release"
         );
         value
     }
@@ -181,7 +181,7 @@ mod linux {
         assert_eq!(
             std::env::consts::ARCH,
             "x86_64",
-            "this hosted capability fixture currently builds an x86_64 musl gate explicitly"
+            "this hosted capability proof currently builds an x86_64 musl gate explicitly"
         );
         let image = std::env::var("QSR_PODMAN_E2E_IMAGE")
             .expect("E2E lane must provide one pre-pulled digest-pinned image");
@@ -191,9 +191,9 @@ mod linux {
         );
 
         let workspace = tempfile::tempdir().expect("capability workspace must be creatable");
-        let gate_path = workspace.path().join("qsr-hold-gate");
+        let gate_path = workspace.path().join("qsr-runtime-gate");
         let gate_source =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/qsr_hold_gate.rs");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin/qsr_runtime_gate.rs");
         successful_output(
             Command::new("rustc").args([
                 "--edition=2024",
@@ -208,16 +208,16 @@ mod linux {
                     .expect("temporary gate path must be Unicode on the hosted runner"),
                 gate_source
                     .to_str()
-                    .expect("repository fixture path must be Unicode on the hosted runner"),
+                    .expect("production gate source path must be Unicode on the hosted runner"),
             ]),
-            "compile static runtime-owned hold gate fixture",
+            "compile production runtime gate as a static musl executable",
         );
         let mut permissions = fs::metadata(&gate_path)
             .expect("compiled gate metadata must be available")
             .permissions();
         permissions.set_mode(0o555);
         fs::set_permissions(&gate_path, permissions)
-            .expect("gate fixture must be read/execute only");
+            .expect("runtime gate must be read/execute only");
         let gate_digest_before = sha256(&gate_path);
 
         let release_token = format!("qsr-release-{}", std::process::id());
@@ -316,7 +316,7 @@ mod linux {
         assert_eq!(
             sha256(&gate_path),
             gate_digest_before,
-            "the runtime-owned gate fixture must not change while it is mounted and held"
+            "the runtime-owned gate must not change while it is mounted and held"
         );
 
         release_gate(&container_id, &release_token);
@@ -333,7 +333,7 @@ mod linux {
         assert_eq!(
             sha256(&gate_path),
             gate_digest_before,
-            "gate fixture identity must remain unchanged through the exec transition"
+            "runtime gate identity must remain unchanged through the exec transition"
         );
 
         cleanup.remove();
