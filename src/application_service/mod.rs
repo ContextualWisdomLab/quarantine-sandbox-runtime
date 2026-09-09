@@ -210,6 +210,10 @@ impl IsolationAttestation {
     }
 }
 
+/// Runtime-only capability that selects resources this invocation may destroy.
+///
+/// This type is deliberately crate-private and non-serializable. Public lease
+/// fields remain correlation/evidence and cannot recreate cleanup authority.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ApplicationServiceCleanupAuthority {
     sandbox_id: String,
@@ -218,14 +222,17 @@ pub(crate) struct ApplicationServiceCleanupAuthority {
 }
 
 impl ApplicationServiceCleanupAuthority {
+    /// Return the runtime-owned container selector retained for cleanup.
     pub(crate) fn sandbox_id(&self) -> &str {
         &self.sandbox_id
     }
 
+    /// Return the runtime-owned network selector retained for cleanup.
     pub(crate) fn network_id(&self) -> &str {
         &self.network_id
     }
 
+    /// Return the bounded stop grace period captured when the lease was created.
     pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
         self.shutdown_grace_seconds
     }
@@ -252,6 +259,7 @@ pub struct ApplicationServiceLease {
 }
 
 impl ApplicationServiceLease {
+    /// Construct runtime-issued lease evidence and retain non-serializable cleanup authority.
     pub(crate) fn new(
         request: &ApplicationServiceRequest,
         metadata: RuntimeLeaseMetadata,
@@ -346,10 +354,7 @@ impl ApplicationServiceLease {
         self.expires_at_epoch_seconds
     }
 
-    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
-        self.shutdown_grace_seconds
-    }
-
+    /// Return runtime-only cleanup authority when this lease originated in this process.
     pub(crate) const fn cleanup_authority(&self) -> Option<&ApplicationServiceCleanupAuthority> {
         self.cleanup_authority.as_ref()
     }
@@ -469,6 +474,9 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
+    /// The runtime could not obtain operating-system entropy for an invocation identity.
+    #[error("application service runtime identity entropy is unavailable")]
+    RuntimeIdentityUnavailable,
     /// The configured Podman executable could not be invoked.
     #[error("Podman invocation failed during {operation}")]
     BackendInvocationFailed {
