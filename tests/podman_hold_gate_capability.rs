@@ -1,3 +1,9 @@
+//! Real rootless-Podman capability proof for the runtime-owned hold/attest/release gate.
+//!
+//! The dedicated Linux E2E lane proves that the runtime gate remains the running process until
+//! explicit release, so effective process isolation can be observed before exact consumer argv
+//! becomes executable.
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::{
