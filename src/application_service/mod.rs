@@ -210,6 +210,27 @@ impl IsolationAttestation {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApplicationServiceCleanupAuthority {
+    sandbox_id: String,
+    network_id: String,
+    shutdown_grace_seconds: u32,
+}
+
+impl ApplicationServiceCleanupAuthority {
+    pub(crate) fn sandbox_id(&self) -> &str {
+        &self.sandbox_id
+    }
+
+    pub(crate) fn network_id(&self) -> &str {
+        &self.network_id
+    }
+
+    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
+        self.shutdown_grace_seconds
+    }
+}
+
 /// Attested lease for one ready isolated application service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplicationServiceLease {
@@ -226,6 +247,8 @@ pub struct ApplicationServiceLease {
     expires_at_epoch_seconds: u64,
     shutdown_grace_seconds: u32,
     isolation_attestation: IsolationAttestation,
+    #[serde(skip)]
+    cleanup_authority: Option<ApplicationServiceCleanupAuthority>,
 }
 
 impl ApplicationServiceLease {
@@ -234,6 +257,11 @@ impl ApplicationServiceLease {
         metadata: RuntimeLeaseMetadata,
         endpoint: ServiceEndpoint,
     ) -> Self {
+        let cleanup_authority = ApplicationServiceCleanupAuthority {
+            sandbox_id: metadata.sandbox_id.clone(),
+            network_id: metadata.network_id.clone(),
+            shutdown_grace_seconds: metadata.shutdown_grace_seconds,
+        };
         Self {
             schema_version: APPLICATION_SERVICE_LEASE_SCHEMA_VERSION.to_owned(),
             request_id: request.request_id.clone(),
@@ -248,6 +276,7 @@ impl ApplicationServiceLease {
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
             isolation_attestation: IsolationAttestation::p0(),
+            cleanup_authority: Some(cleanup_authority),
         }
     }
 
@@ -319,6 +348,10 @@ impl ApplicationServiceLease {
 
     pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
         self.shutdown_grace_seconds
+    }
+
+    pub(crate) const fn cleanup_authority(&self) -> Option<&ApplicationServiceCleanupAuthority> {
+        self.cleanup_authority.as_ref()
     }
 
     /// Return the P0 isolation attestation.
@@ -481,6 +514,9 @@ pub enum ApplicationServiceError {
     /// The service did not become reachable before the bounded readiness deadline.
     #[error("application service readiness timed out")]
     ReadinessTimeout,
+    /// Consumer-visible lease evidence lacks the non-serializable runtime cleanup authority.
+    #[error("application service cleanup authority is unavailable")]
+    CleanupAuthorityUnavailable,
     /// Cleanup could not prove removal of all runtime-owned resources.
     #[error("sandbox cleanup failed")]
     CleanupFailed,
