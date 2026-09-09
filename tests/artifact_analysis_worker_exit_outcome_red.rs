@@ -131,3 +131,23 @@ fn completed_worker_outcome_accepts_zero_runtime_exit() {
         .validate_against(&request)
         .expect("zero exit status with otherwise-valid evidence may admit Completed");
 }
+
+#[test]
+fn semantic_failed_outcome_remains_valid_after_zero_runtime_exit() {
+    let artifact = ingest_bytes(
+        "sample.bin",
+        b"hostile-but-immutable-artifact",
+        &IngestionPolicy::default(),
+    )
+    .expect("fixture ingestion must succeed");
+    let identity = analyzer_identity();
+    let request = fixture_request(&identity, &artifact);
+    let mut receipt = completed_receipt(&identity, &artifact, 0);
+    receipt.outcome = AnalyzerWorkerOutcome::Failed {
+        failure_code: "analyzer_failed".to_owned(),
+    };
+
+    receipt.validate_against(&request).expect(
+        "semantic analyzer failure may be reported even when the worker process exits successfully",
+    );
+}
