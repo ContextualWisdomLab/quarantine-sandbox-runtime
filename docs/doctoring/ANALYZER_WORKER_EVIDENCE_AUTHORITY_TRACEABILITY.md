@@ -4,15 +4,16 @@ Issue #77 defines the controller-side authority boundary for evidence kinds retu
 
 ## Current authority
 
-- Parent worker-port authority: Draft #70 exact `c7a05a3870164c8811790af5f4d81d46dc7dc43b`.
+- Parent worker-port authority: Draft #70 exact `34de52819549e0362ebcd0a110a361146b3556d1`.
 - Parent DDD decision: ADR-0009 remains Proposed; `artifact_analysis` owns analyzer/result semantics, `sandbox_execution` owns reusable isolation/resource/lifecycle semantics, and `infrastructure` owns concrete enforcement and observation.
-- RED authority: `tests/artifact_analysis_worker_evidence_authority_red.rs`, introduced by `3b6693394a89030c286839145cbdda6aa0a83bad`.
+- RED authority: `tests/artifact_analysis_worker_evidence_authority_red.rs`, introduced by `3b6693394a89030c286839145cbdda6aa0a83bad` and causally executed on exact `ab919126a1ada3a039fb1f8979bdb66300469d91`.
+- Minimum production candidate: `31dc17771b08e2535e33c8e0861c15eeb5113d4f`.
 
-The current worker finding contract carries the repository-wide `EvidenceKind` and `AnalyzerWorkerReceipt::validate_against` validates only bounded text/attributes plus request and Core isolation consistency. It does not constrain which evidence authorities an untrusted analyzer may claim. As a result, a worker can currently label one normalized finding as `ArtifactIdentity` or `PolicyBoundary` even though those facts are assembled from controller-admitted immutable bytes and runtime-owned boundary state.
+At the executed RED head, the worker finding contract carried the repository-wide `EvidenceKind` and `AnalyzerWorkerReceipt::validate_against` validated bounded text/attributes plus request and Core isolation consistency, but did not constrain which evidence authorities an untrusted analyzer could claim. An otherwise-valid worker could therefore label one normalized finding as `ArtifactIdentity` or `PolicyBoundary` even though those facts are assembled from controller-admitted immutable bytes and runtime-owned boundary state.
 
 ## Decision
 
-Treat evidence kind as an authority-bearing field, not merely an enum-shaped label. The controller-owned worker-result ACL must reject analyzer claims for evidence categories whose truth source belongs to the controller or runtime.
+Treat evidence kind as an authority-bearing field, not merely an enum-shaped label. The controller-owned worker-result ACL rejects analyzer claims for evidence categories whose truth source belongs to the controller or runtime.
 
 The first minimum boundary is deliberately narrow:
 
@@ -23,21 +24,21 @@ The first minimum boundary is deliberately narrow:
 - `RuntimeBehavior` and `NetworkAttempt` are not made generally admissible by this issue; issue #52/#53 owns dynamic-execution truthfulness and completeness.
 - `ToolFailure` remains attributable failure evidence and is not redefined here.
 
-Forbidden kinds must fail closed. Do not rewrite them into another kind, drop them silently, or infer authorization from a matching worker receipt.
+Forbidden kinds fail closed. They are not rewritten into another kind, dropped silently, or authorized merely because the enclosing worker receipt matches its request.
 
-## RED
+## Executed RED and minimum GREEN
 
-`worker_cannot_claim_controller_or_runtime_owned_foundation_evidence` constructs an otherwise-valid worker request/receipt and independently changes the returned finding kind to `ArtifactIdentity` and `PolicyBoundary`. Each must be rejected as `AnalyzerWorkerContractError::InvalidOutcome { field_name: "evidence_kind" }`.
+Native CI `34306038425`, verify `102322814270`, executed exact `ab919126a1ada3a039fb1f8979bdb66300469d91`. Exact checkout, dependency lock, repository validation, coverage-parser tests, rustfmt, Core worker-isolation suites, and `worker_owned_static_evidence_remains_admissible` all passed. `worker_cannot_claim_controller_or_runtime_owned_foundation_evidence` then failed for the intended cause: an `ArtifactIdentity` finding returned `Ok(())` where the contract required `AnalyzerWorkerContractError::InvalidOutcome { field_name: "evidence_kind" }`. The adjacent static-evidence case remaining GREEN rules out a repair that indiscriminately rejects worker findings.
 
-`worker_owned_static_evidence_remains_admissible` protects the intended existing analyzer path by requiring `FileFormat` and `StaticCapability` to remain valid under the same request/isolation fixture.
+Minimum production candidate `31dc17771b08e2535e33c8e0861c15eeb5113d4f` adds one fail-closed guard in `AnalyzerWorkerFinding::validate`: `ArtifactIdentity | PolicyBoundary` returns `InvalidOutcome { field_name: "evidence_kind" }` before worker output is admitted. It leaves `FileFormat`, `StaticCapability`, `RuntimeBehavior`, `NetworkAttempt`, and `ToolFailure` behavior otherwise unchanged and does not move the taxonomy into Core or add backend-specific state.
 
-This is checked-in RED only until an unchanged exact head executes it for the authority-gap cause. The minimum GREEN is a controller-owned evidence-authority predicate in `artifact_analysis::analyzer_worker` used by outcome validation. It must not move evidence semantics into Core, add backend-specific types, or expand dynamic execution authority.
+Candidate CI `34308822329` materialized after the production commit, but any later documentation commit moves exact-head authority again. GREEN is claimed only after one unchanged current head executes the focused tests plus full fmt/test/Clippy/rustdoc, complete owned production/branch coverage, applicable security/confinement gates, and review.
 
 ## Security rationale
 
 NIST SP 800-53 Rev. 5.1 control SI-10 requires systems to validate information inputs against defined syntax, semantics, and acceptable values. For this boundary, the acceptable value set is context-sensitive: an enum value can be syntactically valid while semantically unauthorized for an untrusted analyzer producer. The controller therefore validates both the shape and the authority of worker-supplied evidence metadata.
 
-Saltzer and Schroeder's complete-mediation and fail-safe-default principles support the same boundary: authority should be checked at the point where an untrusted result crosses into trusted controller state, and absence of an explicit authorization rule must not become implicit permission.
+Saltzer and Schroeder's complete-mediation and fail-safe-default principles support the same boundary: authority is checked at the point where an untrusted result crosses into trusted controller state, and absence of an explicit producer authority must not become implicit permission.
 
 ## Alternatives rejected
 
