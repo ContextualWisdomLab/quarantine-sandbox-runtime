@@ -1,10 +1,8 @@
-//! Regression for malformed successful-create evidence without an ownership receipt.
+//! RED regression for lifecycle ownership when successful create stdout is malformed.
 //!
-//! A successful `podman create` with malformed stdout does not by itself identify
-//! which concrete container resource the runtime may destroy. When the runtime-owned
-//! cidfile is also absent, generated `qsr-cmd-*` names remain correlation metadata:
-//! cleanup must not re-resolve them, and the original malformed-create evidence must
-//! remain visible instead of being replaced by a synthetic cleanup failure.
+//! Podman can write an acquired container ID to the runtime-owned cidfile even
+//! when the successful command's stdout cannot be admitted as container identity.
+//! Cleanup must use that acquired ID rather than re-resolving the generated name.
 
 #![cfg(target_os = "linux")]
 
@@ -30,7 +28,7 @@ fn temporary_path(name: &str) -> PathBuf {
         .as_nanos();
     let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-malformed-create-cleanup-red-{name}-{}-{nanos}-{unique_id}",
+        "quarantine-sandbox-runtime-create-cidfile-ownership-red-{name}-{}-{nanos}-{unique_id}",
         std::process::id()
     ))
 }
@@ -48,7 +46,7 @@ fn write_executable(name: &str, script: &str) -> PathBuf {
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
-        policy_id: "malformed_create_cleanup_red_policy_v1".to_owned(),
+        policy_id: "create_cidfile_ownership_red_policy_v1".to_owned(),
         maximum_memory_bytes: 512 * 1024 * 1024,
         maximum_cpu_millicores: 2_000,
         maximum_processes: 64,
@@ -65,7 +63,7 @@ fn policy() -> IsolationPolicy {
 fn request() -> CommandExecutionRequest {
     CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
-        request_id: "malformed-create-cleanup-red-request".to_owned(),
+        request_id: "create-cidfile-ownership-red-request".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["pytest".to_owned(), "-q".to_owned()],
         source_artifact: None,
@@ -80,11 +78,14 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn malformed_create_without_receipt_never_authorizes_generated_name_cleanup() {
+fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
     let call_log = temporary_path("call-log");
+    let acquired_id = "a".repeat(64);
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf '\\n' ;;\n  rm:--force) exit 88 ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    cidfile=''\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n      esac\n    done\n    test -n \"$cidfile\"\n    printf '%s\\n' '{}' > \"$cidfile\"\n    printf '%s\\n' 'not-a-container-id'\n    ;;\n  rm:--force)\n    test \"${{3:-}}\" = '{}'\n    ;;\n  *) exit 91 ;;\nesac\n",
         call_log.display(),
+        acquired_id,
+        acquired_id,
     );
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -99,13 +100,20 @@ fn malformed_create_without_receipt_never_authorizes_generated_name_cleanup() {
             operation: "container_create",
         })
     );
+
     let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    let create_call = calls
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("create --name ") && line.contains("--cidfile="))
+    );
+    let removal_calls: Vec<&str> = calls
         .lines()
-        .find(|line| line.starts_with("create --name "))
-        .expect("container creation should be attempted");
-    assert!(create_call.contains("--cidfile="));
-    assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
+        .filter(|line| line.starts_with("rm --force "))
+        .collect();
+    assert_eq!(removal_calls.len(), 1);
+    assert_eq!(removal_calls[0], format!("rm --force {acquired_id}"));
+    assert!(!removal_calls[0].contains("qsr-cmd-"));
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(call_log);
