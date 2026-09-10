@@ -112,7 +112,10 @@ fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
         .filter(|line| line.starts_with("rm --force "))
         .collect();
     assert_eq!(removal_calls.len(), 1);
-    assert_eq!(removal_calls[0], format!("rm --force --ignore {acquired_id}"));
+    assert_eq!(
+        removal_calls[0],
+        format!("rm --force --ignore {acquired_id}")
+    );
     assert!(!removal_calls[0].contains("qsr-cmd-"));
 
     let _ = fs::remove_file(program);
