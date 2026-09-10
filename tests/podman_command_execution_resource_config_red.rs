@@ -1,11 +1,10 @@
-//! RED: command execution must bind applied tmpfs and wall-time configuration.
+//! RED/GREEN contract: command execution binds applied tmpfs and wall-time configuration.
 //!
 //! PR #14 requests a bounded hardened `/tmp` and a finite Podman container
-//! timeout, but the current command attestation only binds CPU/RAM/PID inspect
-//! fields. These hostile fixtures deliberately report otherwise-positive
-//! isolation evidence with widened/unbounded resource configuration. They must
-//! fail closed before command evidence is trusted and clean up the exact
-//! invocation-owned container.
+//! timeout. These hostile fixtures deliberately report otherwise-positive
+//! isolation evidence with widened, missing, contradictory, or unbounded
+//! resource configuration. They must fail closed before command evidence is
+//! trusted and clean up the exact invocation-owned container.
 
 #![cfg(target_os = "linux")]
 
@@ -139,4 +138,39 @@ fn mismatched_command_timeout_configuration_fails_closed_and_cleans_up() {
         mismatched_timeout,
         "request-mismatched command wall-time configuration",
     );
+}
+
+#[test]
+fn missing_command_timeout_configuration_fails_closed_and_cleans_up() {
+    let missing_timeout = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_config_rejected(missing_timeout, "missing command wall-time configuration");
+}
+
+#[test]
+fn missing_command_tmpfs_configuration_fails_closed_and_cleans_up() {
+    let missing_tmpfs = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
+
+    assert_resource_config_rejected(missing_tmpfs, "missing command tmpfs configuration");
+}
+
+#[test]
+fn additional_command_tmpfs_destination_fails_closed_and_cleans_up() {
+    let additional_tmpfs = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216","/cache":"rw,noexec,nosuid,nodev,size=4096"}}}]"#;
+
+    assert_resource_config_rejected(additional_tmpfs, "additional command tmpfs destination");
+}
+
+#[test]
+fn duplicate_command_tmpfs_option_fails_closed_and_cleans_up() {
+    let duplicate_option = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,nodev,size=16777216"}}}]"#;
+
+    assert_resource_config_rejected(duplicate_option, "duplicate command tmpfs option");
+}
+
+#[test]
+fn contradictory_command_tmpfs_option_fails_closed_and_cleans_up() {
+    let contradictory_option = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,ro,noexec,nosuid,nodev,size=16777216"}}}]"#;
+
+    assert_resource_config_rejected(contradictory_option, "contradictory command tmpfs option");
 }
