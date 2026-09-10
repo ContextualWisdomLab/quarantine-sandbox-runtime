@@ -65,6 +65,8 @@ fn stages_exact_revision_source_read_only_and_strips_every_executable_bit() {
     assert_eq!(staged.receipt().executable_files_stripped(), 1);
     assert_eq!(staged.receipt().regular_file_count(), 2);
     assert_eq!(staged.receipt().total_bytes(), 30);
+    assert!(staged.receipt().mounted_read_only());
+    assert!(staged.receipt().mounted_noexec());
     assert_eq!(
         fs::metadata(staged.path().join("run.sh")).unwrap().mode() & 0o777,
         0o444
