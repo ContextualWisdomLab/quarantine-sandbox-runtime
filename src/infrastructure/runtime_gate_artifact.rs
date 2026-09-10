@@ -235,7 +235,8 @@ fn validate_self_contained_elf_loading(bytes: &[u8]) -> Result<(), RuntimeGateAr
     if program_header_count == 0 {
         return Err(rejected());
     }
-    let program_header_offset = usize::try_from(read_u64(bytes, 32, encoding)).map_err(|_| rejected())?;
+    let program_header_offset =
+        usize::try_from(read_u64(bytes, 32, encoding)).map_err(|_| rejected())?;
     if program_header_offset < ELF64_HEADER_BYTES {
         return Err(rejected());
     }
