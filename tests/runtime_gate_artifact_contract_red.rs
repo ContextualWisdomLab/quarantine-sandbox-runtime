@@ -77,6 +77,14 @@ fn runtime_gate_artifact_rejects_digest_architecture_and_symlink_authority_misma
         RuntimeGateArtifactError::InvalidExpectedDigest
     ));
 
+    let non_lowercase_digest =
+        RuntimeGateArtifact::stage(&source, &"A".repeat(64), std::env::consts::ARCH)
+            .expect_err("a correctly sized but non-lowercase digest must fail closed");
+    assert!(matches!(
+        non_lowercase_digest,
+        RuntimeGateArtifactError::InvalidExpectedDigest
+    ));
+
     let link = directory.path().join("gate-link");
     std::os::unix::fs::symlink(&source, &link).expect("test symlink should be creatable");
     let symlink_error = RuntimeGateArtifact::stage(&link, &expected_sha256, std::env::consts::ARCH)
