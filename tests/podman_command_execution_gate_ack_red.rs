@@ -79,18 +79,22 @@ mod linux {
 
         let mut stdin = child.stdin.take().expect("runtime gate stdin should exist");
         stdin
-            .write_all(format!("{RELEASE_TOKEN}\n{CONSUMER_INPUT_SENTINEL}").as_bytes())
-            .expect("release channel payload should be writable");
-        stdin
-            .flush()
-            .expect("release channel payload should flush");
-        drop(stdin);
+            .write_all(format!("{RELEASE_TOKEN}\n").as_bytes())
+            .expect("release token should be writable");
+        stdin.flush().expect("release token should flush");
 
         line.clear();
         stdout
             .read_line(&mut line)
             .expect("runtime gate release acknowledgement should be readable");
         assert_eq!(line, RELEASED_MARKER);
+
+        // Deliberately attempt a second write only after the trusted gate has acknowledged
+        // the one-time token. A safe gate may already have detached fd 0, in which case
+        // BrokenPipe is also acceptable. Either way, these bytes must not reach consumer stdin.
+        let _ = stdin.write_all(CONSUMER_INPUT_SENTINEL.as_bytes());
+        let _ = stdin.flush();
+        drop(stdin);
 
         let mut consumer_output = String::new();
         stdout
@@ -100,7 +104,7 @@ mod linux {
         assert!(status.success(), "released /bin/cat should exit successfully");
         assert!(
             consumer_output.is_empty(),
-            "release-channel bytes after the one-time token must never become consumer stdin: {consumer_output:?}"
+            "release-channel bytes written after trusted acknowledgement must never become consumer stdin: {consumer_output:?}"
         );
     }
 }
