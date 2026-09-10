@@ -19,7 +19,7 @@ use std::{
 
 use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
-    RootlessPodmanAdapter, execute_command,
+    RootlessPodmanAdapter, RuntimeGateArtifact, execute_command,
 };
 
 const SCHEMA_VERSION: &str = "1.0.0";
@@ -56,6 +56,8 @@ struct RunArgs {
     lease_seconds: u32,
     tmpfs_bytes: u64,
     podman_program: String,
+    runtime_gate_path: Option<String>,
+    runtime_gate_sha256: Option<String>,
     source_path: Option<String>,
     source_revision: Option<String>,
     source_tree_sha256: Option<String>,
@@ -66,7 +68,8 @@ fn print_usage() {
     eprintln!(
         "usage: quarantine-sandbox-runtime run --image <repo@sha256:digest> [--request-id ID]\n\
          \x20      [--memory-bytes N] [--cpu-millicores N] [--max-processes N]\n\
-         \x20      [--timeout-seconds N] [--tmpfs-bytes N] [--podman PATH] -- <command> [args...]\n\n\
+         \x20      [--timeout-seconds N] [--tmpfs-bytes N] [--podman PATH]\n\
+         \x20      --runtime-gate-path PATH --runtime-gate-sha256 SHA256 -- <command> [args...]\n\n\
          \x20      [--source-path PATH --source-revision SHA --source-tree-sha256 SHA256]\n\
          Runs one bounded command to completion inside a rootless-Podman sandbox with no network\n\
          namespace attachment (all egress denied) and prints its exit status plus bounded\n\
@@ -99,6 +102,8 @@ fn parse_args(
     let mut lease_seconds = policy.maximum_lease_seconds;
     let mut tmpfs_bytes = policy.maximum_tmpfs_bytes;
     let mut podman_program = "podman".to_owned();
+    let mut runtime_gate_path = None;
+    let mut runtime_gate_sha256 = None;
     let mut source_path = None;
     let mut source_revision = None;
     let mut source_tree_sha256 = None;
@@ -128,6 +133,8 @@ fn parse_args(
             }
             "--tmpfs-bytes" => tmpfs_bytes = parse_number(&next_value()?, "--tmpfs-bytes")?,
             "--podman" => podman_program = next_value()?,
+            "--runtime-gate-path" => runtime_gate_path = Some(next_value()?),
+            "--runtime-gate-sha256" => runtime_gate_sha256 = Some(next_value()?),
             "--source-path" => source_path = Some(next_value()?),
             "--source-revision" => source_revision = Some(next_value()?),
             "--source-tree-sha256" => source_tree_sha256 = Some(next_value()?),
@@ -157,6 +164,8 @@ fn parse_args(
         lease_seconds,
         tmpfs_bytes,
         podman_program,
+        runtime_gate_path,
+        runtime_gate_sha256,
         source_path,
         source_revision,
         source_tree_sha256,
@@ -192,6 +201,31 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         }
     };
 
+    let (runtime_gate_path, runtime_gate_sha256) = match (
+        parsed.runtime_gate_path.as_deref(),
+        parsed.runtime_gate_sha256.as_deref(),
+    ) {
+        (Some(path), Some(sha256)) => (path, sha256),
+        _ => {
+            eprintln!(
+                "error: runtime gate requires --runtime-gate-path and --runtime-gate-sha256"
+            );
+            print_usage();
+            return 2;
+        }
+    };
+    let runtime_gate = match RuntimeGateArtifact::stage(
+        runtime_gate_path,
+        runtime_gate_sha256,
+        std::env::consts::ARCH,
+    ) {
+        Ok(runtime_gate) => runtime_gate,
+        Err(error) => {
+            eprintln!("error: runtime gate admission failed: {error}");
+            return 2;
+        }
+    };
+
     let request = CommandExecutionRequest {
         schema_version: SCHEMA_VERSION.to_owned(),
         request_id: parsed.request_id.unwrap_or_else(default_request_id),
@@ -211,7 +245,8 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         },
     };
 
-    let adapter = RootlessPodmanAdapter::new(parsed.podman_program);
+    let adapter = RootlessPodmanAdapter::new(parsed.podman_program)
+        .with_runtime_gate_artifact(runtime_gate);
     match execute_command(&adapter, &request, &policy, epoch_seconds()) {
         Ok(result) => {
             match serde_json::to_string_pretty(&result) {
@@ -282,6 +317,8 @@ mod tests {
         assert_eq!(parsed.lease_seconds, policy.maximum_lease_seconds);
         assert_eq!(parsed.tmpfs_bytes, policy.maximum_tmpfs_bytes);
         assert_eq!(parsed.podman_program, "podman");
+        assert!(parsed.runtime_gate_path.is_none());
+        assert!(parsed.runtime_gate_sha256.is_none());
         assert!(parsed.request_id.is_none());
     }
 
@@ -506,6 +543,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod fake_backend {
         use super::{args, run};
+        use sha2::{Digest, Sha256};
         use std::{
             fs,
             os::unix::fs::PermissionsExt,
@@ -537,15 +575,49 @@ mod tests {
 
         const SUCCESS_SCRIPT: &str = "#!/bin/sh\nset -eu\ncase \"${1:-}:${2:-}\" in\n  \
              info:--format) printf '%s\\n' '{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/x\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}' ;;\n  \
-             create:--name) printf 'fake-id\\n' ;;\n  \
+             create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  \
              init:*) : ;;\n  \
              start:*) : ;;\n  \
-             container:inspect) printf '%s\\n' '[{\"Id\":\"fake-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\",\"Timeout\":900},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":1073741824,\"NanoCpus\":4000000000,\"PidsLimit\":256,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=268435456\"}}}]' ;;\n  \
+             container:inspect) printf '%s\\n' '[{\"Id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\",\"Timeout\":900},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":1073741824,\"NanoCpus\":4000000000,\"PidsLimit\":256,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=268435456\"}}}]' ;;\n  \
              top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  \
+             attach:--sig-proxy=false) IFS= read -r token; [ -n \"$token\" ]; printf 'QSR_GATE_RELEASED\\n'; while :; do :; done ;;\n  \
              wait:*) printf '9\\n' ;;\n  \
              logs:*) printf 'cli stdout\\n' ;;\n  \
              rm:--force) : ;;\n  \
              *) exit 91 ;;\nesac\n";
+
+        fn write_self_contained_gate(name: &str) -> (PathBuf, String) {
+            const ELF_HEADER_BYTES: usize = 64;
+            const PROGRAM_HEADER_BYTES: usize = 56;
+            const FILE_BYTES: usize = 512;
+            let machine = match std::env::consts::ARCH {
+                "x86_64" => 62_u16,
+                "aarch64" => 183_u16,
+                other => panic!("runtime-gate test fixture does not support architecture {other}"),
+            };
+            let mut bytes = vec![0_u8; FILE_BYTES];
+            bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+            bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
+            bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+            bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+            bytes[24..32].copy_from_slice(&0x400100_u64.to_le_bytes());
+            bytes[32..40].copy_from_slice(&(ELF_HEADER_BYTES as u64).to_le_bytes());
+            bytes[52..54].copy_from_slice(&(ELF_HEADER_BYTES as u16).to_le_bytes());
+            bytes[54..56].copy_from_slice(&(PROGRAM_HEADER_BYTES as u16).to_le_bytes());
+            bytes[56..58].copy_from_slice(&1_u16.to_le_bytes());
+            let header = ELF_HEADER_BYTES;
+            bytes[header..header + 4].copy_from_slice(&1_u32.to_le_bytes());
+            bytes[header + 4..header + 8].copy_from_slice(&5_u32.to_le_bytes());
+            bytes[header + 16..header + 24].copy_from_slice(&0x400000_u64.to_le_bytes());
+            bytes[header + 32..header + 40]
+                .copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+            bytes[header + 40..header + 48]
+                .copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+            bytes[header + 48..header + 56].copy_from_slice(&4096_u64.to_le_bytes());
+            let path = write_executable(name, "");
+            fs::write(&path, &bytes).expect("self-contained runtime gate should be writable");
+            (path, format!("{:x}", Sha256::digest(&bytes)))
+        }
 
         fn digest_pinned_image() -> String {
             format!("repo@sha256:{}", "e".repeat(64))
@@ -555,12 +627,19 @@ mod tests {
         fn run_mirrors_the_sandboxed_exit_code_and_prints_json_on_a_successful_call() {
             let program = write_executable("success", SUCCESS_SCRIPT);
             let image = digest_pinned_image();
+            let (runtime_gate, runtime_gate_sha256) = write_self_contained_gate("runtime-gate");
             let exit_code = run(args(&[
                 "run",
                 "--image",
                 image.as_str(),
                 "--podman",
                 program.to_str().expect("temp path should be valid UTF-8"),
+                "--runtime-gate-path",
+                runtime_gate
+                    .to_str()
+                    .expect("runtime gate path should be valid UTF-8"),
+                "--runtime-gate-sha256",
+                runtime_gate_sha256.as_str(),
                 "--",
                 "pytest",
                 "-q",
@@ -571,6 +650,7 @@ mod tests {
                 "the CLI's own exit code must mirror the sandboxed command's exit code"
             );
             let _ = fs::remove_file(program);
+            let _ = fs::remove_file(runtime_gate);
         }
 
         #[test]
@@ -578,12 +658,19 @@ mod tests {
             let script = "#!/bin/sh\nset -eu\nexit 91\n";
             let program = write_executable("backend-error", script);
             let image = digest_pinned_image();
+            let (runtime_gate, runtime_gate_sha256) = write_self_contained_gate("runtime-gate");
             let exit_code = run(args(&[
                 "run",
                 "--image",
                 image.as_str(),
                 "--podman",
                 program.to_str().expect("temp path should be valid UTF-8"),
+                "--runtime-gate-path",
+                runtime_gate
+                    .to_str()
+                    .expect("runtime gate path should be valid UTF-8"),
+                "--runtime-gate-sha256",
+                runtime_gate_sha256.as_str(),
                 "--",
                 "pytest",
                 "-q",
@@ -594,6 +681,7 @@ mod tests {
                 "a backend failure must not be reported as a sandboxed exit code"
             );
             let _ = fs::remove_file(program);
+            let _ = fs::remove_file(runtime_gate);
         }
     }
 }
