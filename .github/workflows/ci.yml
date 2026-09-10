@@ -35,12 +35,12 @@ jobs:
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
-      - name: Test coverage evidence parser
-        run: python3 -m unittest scripts/test_check_coverage.py
+      - name: Test CI evidence contracts
+        run: python3 -m unittest scripts/test_check_coverage.py scripts/test_ci_test_inventory.py
       - name: Check formatting
         run: cargo fmt --check
       - name: Test
-        run: cargo test --locked --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets --no-fail-fast
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Build documentation
