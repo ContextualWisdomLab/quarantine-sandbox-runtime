@@ -303,7 +303,8 @@ fn production_gated_command_execution_kills_and_reports_a_command_that_exceeds_i
         "production command E2E must execute on a rootless Podman runtime"
     );
 
-    let adapter = RootlessPodmanAdapter::default().with_runtime_gate_artifact(production_runtime_gate());
+    let adapter =
+        RootlessPodmanAdapter::default().with_runtime_gate_artifact(production_runtime_gate());
     let request = request(
         vec![
             "python".to_owned(),
