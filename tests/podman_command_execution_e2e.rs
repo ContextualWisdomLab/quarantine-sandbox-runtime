@@ -1,29 +1,24 @@
 //! Real rootless-Podman acceptance for the bounded command-execution backend.
 //!
-//! Mirrors `tests/podman_rootless_e2e.rs`'s acceptance shape for the service-lease
-//! backend, but for `RootlessPodmanAdapter::run_command_at`: run one command to
-//! completion inside an isolated sandbox and prove the isolation properties the
-//! contract exists to guarantee -- no host filesystem visibility beyond the
-//! container's own root, no external network egress, and a forced kill (not a
-//! hang) when the command exceeds its bounded wall-clock budget.
+//! The legacy probes below retain historical diagnostics for the pre-gate adapter. Release
+//! acceptance is owned by the production [`RuntimeGatePodmanAdapter`] witness, which executes the
+//! same immutable hold/attest/release boundary exposed through `CommandExecutionBackend`.
 //!
-//! CI invokes these ignored tests explicitly after pre-pulling the digest-pinned
-//! fixture image named by `QSR_PODMAN_E2E_IMAGE`. They can also be run directly on
-//! any developer machine with rootless Podman installed and reachable on `PATH`:
+//! The dedicated positive-LSM CI lane invokes the production-gated timeout witness explicitly
+//! after pre-pulling the digest-pinned fixture image named by `QSR_PODMAN_E2E_IMAGE`. Legacy probes
+//! remain available for targeted diagnosis on a developer machine with rootless Podman installed.
 //!
 //! ```sh
 //! QSR_PODMAN_E2E_IMAGE="docker.io/library/python@sha256:<digest>" \
 //!   cargo test --test podman_command_execution_e2e -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! `--test-threads=1` matters only for running this whole file locally: each
-//! test's own leak check scans every container carrying this runtime's
-//! sandbox-identity label, so two of these tests racing in parallel can see
-//! each other's still-in-flight container as a false "leak". CI does not hit
-//! this -- it invokes one `--exact` test per job step, matching
-//! `tests/podman_rootless_e2e.rs`'s existing pattern.
+//! `--test-threads=1` matters when running this whole file locally: each test's leak check scans
+//! every container carrying this runtime's sandbox-identity label, so parallel real-runtime probes
+//! can observe each other's in-flight containers as false leaks.
 
 use std::{
+    fs,
     process::{Command, Output},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -31,7 +26,9 @@ use std::{
 
 use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    RuntimeGateArtifact,
 };
+use sha2::{Digest, Sha256};
 
 // Sandbox names are derived from request_id+image+policy_id+started_at (seconds
 // granularity), and these tests run concurrently by default: without a per-call
@@ -133,6 +130,39 @@ fn assert_no_runtime_leaks() {
     );
 }
 
+fn production_runtime_gate() -> RuntimeGateArtifact {
+    assert_eq!(
+        std::env::consts::ARCH,
+        "x86_64",
+        "the dedicated positive-LSM runner contract currently installs the x86_64 musl target"
+    );
+
+    let build_directory = tempfile::tempdir().expect("runtime-gate build directory must exist");
+    let gate_path = build_directory.path().join("qsr-runtime-gate");
+    let output = Command::new("rustc")
+        .args([
+            "--edition=2021",
+            "--target",
+            "x86_64-unknown-linux-musl",
+            "-O",
+            "src/bin/qsr_runtime_gate.rs",
+            "-o",
+        ])
+        .arg(&gate_path)
+        .output()
+        .expect("rustc must be available in the dedicated positive-LSM job");
+    assert!(
+        output.status.success(),
+        "runtime gate must compile as a self-contained musl executable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let gate_bytes = fs::read(&gate_path).expect("compiled runtime gate must be readable");
+    let gate_sha256 = format!("{:x}", Sha256::digest(&gate_bytes));
+    RuntimeGateArtifact::stage(&gate_path, &gate_sha256, std::env::consts::ARCH)
+        .expect("compiled runtime gate must satisfy immutable loading admission")
+}
+
 #[test]
 #[ignore = "requires a real rootless-Podman installation on PATH"]
 fn command_execution_reports_exit_status_and_bounded_output() {
@@ -176,7 +206,6 @@ fn command_execution_reports_exit_status_and_bounded_output() {
 #[ignore = "requires a real rootless-Podman installation on PATH"]
 fn command_execution_cannot_see_host_filesystem_or_reach_the_network() {
     let adapter = RootlessPodmanAdapter::default();
-
     // The sandbox's root filesystem is the pulled image, not the host: this
     // repository's own Cargo.toml is invisible from inside the container even
     // though the host process running this test has it on disk right next to it.
@@ -207,8 +236,13 @@ fn command_execution_cannot_see_host_filesystem_or_reach_the_network() {
             "python".to_owned(),
             "-B".to_owned(),
             "-c".to_owned(),
-            "import socket\ntry:\n    socket.create_connection(('1.1.1.1', 80), 2)\n\
-             except OSError:\n    raise SystemExit(0)\nraise SystemExit(1)"
+            "import socket\
+try:\
+    socket.create_connection(('1.1.1.1', 80), 2)\
+\
+             except OSError:\
+    raise SystemExit(0)\
+raise SystemExit(1)"
                 .to_owned(),
         ],
         30,
@@ -257,5 +291,45 @@ fn command_execution_kills_and_reports_a_command_that_exceeds_its_timeout() {
         "the sandbox must be killed near its bounded lease, not run to its own completion: \
          took {elapsed:?}"
     );
+    assert_no_runtime_leaks();
+}
+
+#[test]
+#[ignore = "requires the dedicated rootless-Podman positive-LSM acceptance environment"]
+fn production_gated_command_execution_kills_and_reports_a_command_that_exceeds_its_timeout() {
+    assert_eq!(
+        podman_stdout(&["info", "--format", "{{.Host.Security.Rootless}}"]),
+        "true",
+        "production command E2E must execute on a rootless Podman runtime"
+    );
+
+    let adapter = RootlessPodmanAdapter::default().with_runtime_gate_artifact(production_runtime_gate());
+    let request = request(
+        vec![
+            "python".to_owned(),
+            "-B".to_owned(),
+            "-c".to_owned(),
+            "import time; time.sleep(120)".to_owned(),
+        ],
+        3,
+    );
+
+    let started = Instant::now();
+    let result = adapter
+        .run_command_at(&request, &policy(), started_at())
+        .expect("production gated command runtime must kill and observe an over-lease workload");
+    let elapsed = started.elapsed();
+
+    assert!(
+        result.timed_out(),
+        "production gated runtime must report a workload that exceeded its lease as timed out"
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "runtime-owned termination evidence must arrive well before natural workload completion: \
+         took {elapsed:?}"
+    );
+    assert_eq!(result.backend_id(), "rootless_podman");
+    assert!(!result.backend_version().is_empty());
     assert_no_runtime_leaks();
 }
