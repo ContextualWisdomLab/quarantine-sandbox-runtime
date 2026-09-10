@@ -1,135 +1,51 @@
 # Runtime gate ELF loading boundary
 
-Status: **Proposed / regression tests pending Rust execution**. This is a focused
-supplement to ADR-0008 and issue #25, not a new runtime, a released contract, or
-proof that QSR confinement is complete.
+Status: **Proposed / loader admission repair implemented / exact-head verification pending**. This is a focused supplement to ADR-0008 and issue #25, not a new runtime, a released contract, or proof that QSR confinement is complete.
 
 ## Scope and authority
 
-Inspected parent: PR #14, `77cef4fda661b3e65c602a661b9c5a6db0c84295`.
-Parent tree: `d8afa7f51cfc52ebb5db8138e836a1bfd8e9d9c3`.
-The parent base is `00bd3654d5f1a58cf6d1e23bded1986156645ba0`; protected
-`develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea` at inspection.
+Canonical parent/base is PR #14 exact `645e05825d9991f3054a69efb9dd4231a55e95ce` (`feat/podman-command-execution-backend`). This child remains an ordinary, non-force descendant of that exact parent and retains the parent hold/attest/release work. Protected integration and release authority remain with the canonical owner stack.
 
-This child adds only `tests/command_gate_loading_boundary_red.rs`,
-`tests/fixtures/runtime_gate_elf_loader_probe.mjs`, and this traceability record.
-It does not move the active parent branch, alter its stdin RED, mutate
-`src/`, change dependencies/workflows, or copy QSR into Noema/CO. Shared
-AGENTS/CLAUDE/ADR/Gap-ledger changes stay with the coordinating parent writer.
+The child began as a path-isolated test-first loader-boundary PR. Once the Rust test target reached the Test step, the owner repair necessarily extended into `RuntimeGateArtifact::stage` and into positive staging fixtures whose former use of a dynamically linked `std::env::current_exe()` contradicted the corrected admission contract. No workflow, dependency, credential, AGENTS/CLAUDE, protected-branch, or consumer-source mutation is introduced.
 
 ## Finding and counterevidence
 
-`src/infrastructure/runtime_gate_artifact.rs` authenticates the expected digest
-and ELF `e_machine`, then stages the bytes. `executable_architecture()` inspects
-only magic, byte order and machine in the first 20 bytes. Neither the staging
-path nor this parser validates the ELF program-header table or rejects
-`PT_INTERP`. A matching hash of the gate does not authenticate the interpreter
-and shared libraries resolved from a workload image.
+The parent `src/infrastructure/runtime_gate_artifact.rs` authenticated the expected SHA-256 and ELF `e_machine`, then staged the bytes. `executable_architecture()` inspected only magic, byte order and machine in the first 20 bytes. Neither staging nor that parser validated the ELF64 program-header table or rejected `PT_INTERP`. A matching hash of the gate therefore did not authenticate an interpreter selected from the workload image.
 
-Linux uses the interpreter named by `PT_INTERP` when starting a dynamically
-linked ELF file. Consequently image-owned startup code can run before the gate
-reaches `main()`, announces READY, or reads its release token. No LLM decision,
-shell command approval, or successful gate-file hash comparison closes that
-startup dependency boundary.
+Linux uses the interpreter named by `PT_INTERP` when starting a dynamically linked ELF file. Image-owned startup code can consequently run before the gate reaches `main()`, announces READY, or reads its release token. A gate-file digest remains necessary provenance, but it is not sufficient evidence of image-independent startup.
 
-Important counterevidence: `tests/podman_hold_gate_capability.rs` already builds
-its actual held-gate fixture for `x86_64-unknown-linux-musl`. That is the right
-direction. This finding concerns **admission enforcement**, not an assertion
-that the existing static-musl capability experiment used a compromised loader,
-that a released QSR deployment is exploited, or that a container escape occurred.
+Counterevidence is preserved: `tests/podman_hold_gate_capability.rs` already builds its real held-gate fixture for `x86_64-unknown-linux-musl`. This finding concerns admission enforcement. It is not a claim that the existing static-musl capability experiment used a compromised loader, that a released QSR deployment was exploited, or that a container escape occurred.
 
 ## Executed Linux mechanism witness
 
-Command (Node built-ins only; requires local cc and readelf):
+`tests/fixtures/runtime_gate_elf_loader_probe.mjs` uses Node built-ins plus local compiler/binutils to compare a held main program with an otherwise identical executable whose `PT_INTERP` names a harmless replacement loader. On Linux x86_64, kernel 6.18.35, GCC 14.2.0 and Node 22.16.0, two fresh builds completed three matched trials each. All six comparisons preserved the gate SHA-256, supplied no release token, observed the replacement interpreter marker before any gate-main marker, and preserved the self-contained static control reaching main and rejecting EOF with exit 77.
 
-```sh
-node tests/fixtures/runtime_gate_elf_loader_probe.mjs
-```
+This is OS-loader evidence, not Podman-confinement evidence and not a measured attack-prevention rate.
 
-On Linux x86_64, kernel 6.18.35, GCC 14.2.0 and Node 22.16.0, two fresh local
-builds each completed three matched trials. Each trial:
+## Rust RED and repair
 
-- executed a dynamically linked held-main fixture with the ordinary loader;
-- replaced only its temporary interpreter with a harmless fixed-marker ELF;
-- verified the gate file's SHA-256 was unchanged and sent no release token;
-- observed the replacement interpreter's marker before any gate-main marker;
-- ran the self-contained static control, which still reached held main and
-  rejected EOF with exit 77.
+Five Linux x86_64/aarch64 tests in `tests/command_gate_loading_boundary_red.rs` call the exported `RuntimeGateArtifact::stage` API with data-only ELF64 fixtures. They require two positive admissions—self-contained ET_EXEC and ET_DYN/static PIE—and three fail-closed cases: `PT_INTERP`, a truncated program-header table, and an overflowing program-header offset.
 
-All six matched comparisons met those assertions. Temporary binaries were
-removed by the harness. No secrets, networking, privileged operations, runtime
-sockets, or host-system files were changed. The embedded temporary interpreter
-path varies across independent builds; hash equality is asserted **within**
-each comparison, not across builds.
+Original runs were blocked by rustfmt. Formatter-only exact `2566653126e5a5b0a14e56e467b9e6b84452485d`, native CI `34430312729`, passed exact checkout, dependency lock, repository policy, coverage-parser tests and rustfmt, then verify `102724264748` failed in the Rust Test step; coverage `102724265011` likewise reached production-test execution and failed. The available GitHub connector does not expose the job stdout, so this record does not invent which individual assertion produced that Test-step failure. The source-level counterexample and six-run OS loader witness remain the causal basis for the repair.
 
-This is a real OS-loading witness using small C/assembly fixtures. It is **not**
-execution of `RuntimeGateArtifact::stage`, the Rust regression suite, or Podman
-confinement. Do not count it as QSR RED/GREEN or a measured attack-prevention rate.
+The minimum production repair is implemented on the current child lineage. `RuntimeGateArtifact::stage` now accepts only a bounded ELF64 ET_EXEC or ET_DYN loading profile with a valid ELF version/header shape, a representable complete fixed-size program-header table, at least one `PT_LOAD`, and no `PT_INTERP`. Expected SHA-256 and host/ELF machine checks remain separate prerequisites. Rejection is typed as `RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary`.
 
-## Rust acceptance tests
+The previous positive staging fixtures that used the dynamically linked Rust test harness were not grandfathered. They were replaced with data-only self-contained ELF fixtures before enabling the stricter production admission. This preserves the intended digest, architecture, clone-lifetime, remapped-user permission, binding-plan and bounded release-control assertions without normalizing a dynamic interpreter into trusted gate authority. The shared integration-test fixture lives under `tests/support/runtime_gate_fixture.rs`; no fixture bytes are executed.
 
-The new test target calls the real `RuntimeGateArtifact::stage` API with
-self-authored, digest-matching ELF64 files. It never executes fixture bytes.
-Two positive controls preserve a self-contained ET_EXEC and a self-contained
-ET_DYN/static-PIE file. Three negatives require rejection of an image-owned
-interpreter, a truncated program-header table, and an overflowing table offset.
-The two x86_64 positive fixture layouts were independently checked with readelf
-and executed as harmless exit-77 files. AArch64 fixture encoding has not been
-executed on an AArch64 host.
+Current child source head before this documentation commit is `c21745ff85cb70911b82c54c84bcd71bfdbf4b2d`. Native CI `34432397754` was created for that exact source candidate; at the last read all five jobs were queued, so no exact-head GREEN is claimed here. The documentation commit itself requires fresh exact-head verification and supersedes predecessor CI as merge authority.
 
-```sh
-cargo test --locked --test command_gate_loading_boundary_red -- --nocapture
-```
+## Acceptance boundary
 
-Rust/Cargo/Podman were unavailable in the local review environment, and direct
-compiler downloads failed DNS resolution. The five Rust tests have **not been
-compiled or executed** here. The predicted baseline is two accepted positive
-controls and three rejected-by-test admissions; it is a source-derived
-prediction, not a reported test result. A missing compiler, setup failure,
-queued job or an earlier unrelated test failure does not establish causal RED.
+The focused loader target must show zero unsafe admissions across the three negative cases and both positive controls admitted on the exact repaired source. Full fmt/tests/Clippy/rustdoc and owned-production statement/function/region/branch coverage must then be reacquired. The real hostile-loader witness and real rootless held-gate E2E remain independent evidence classes, and a dedicated positive effective-LSM lane remains mandatory.
 
-## Minimum owner repair after causal RED
+This loader repair still does not close issue #25. Canonical `RootlessPodmanAdapter::run_command_at` on PR #14 continues to make hostile consumer argv the OCI entrypoint and verifies live effective isolation only after `podman start`. After this child is exact-head GREEN, its complete delta must be adopted by ordinary/non-force integration into #14, followed by reacquisition of the parent hold → effective attestation → bounded one-time release → trusted pre-exec ACK → exact consumer exec lifecycle tests.
 
-In QSR infrastructure, enforce a bounded, structurally valid, image-independent
-loading profile before staging a gate. For the selected P0 profile reject
-`PT_INTERP` and external loader dependencies; preserve legitimately
-self-contained static PIE rather than rejecting every ET_DYN file. A binary
-hash, `musl` target name, or absence of a textual path match is not sufficient:
-parse the actual bounded ELF structures and verify the built artifact. Keep
-release provenance and a trusted expected digest as separate requirements.
+No protected merge, version/tag/package/GitHub Release, immutable consumer publication, or Agent-containment claim is authorized by this child alone.
 
-The existing positive staging fixtures based on `std::env::current_exe()` must
-be reconciled when that executable is dynamically linked. Replace them with
-valid self-contained fixtures; do not disable the new negative or widen the
-profile to make old fixture assumptions pass. After focused RED/GREEN, verify
-full tests, fmt, Clippy, rustdoc and the unchanged production coverage gates.
+## Primary references (APA 7)
 
-Real acceptance additionally requires a QSR/Podman experiment with a hostile
-image loader/library and zero image-code side effects before effective
-attestation and release. Absence of PT_INTERP alone is not complete sandbox
-safety. Gate artifact TOCTOU, inherited descriptors/environment, lifecycle
-integration, acquired-ID cleanup, runtime/LSM enforcement, output authority and
-published consumer contracts retain their own acceptance criteria.
+Linux man-pages project. (n.d.). *execve(2) — Linux manual page*. https://man7.org/linux/man-pages/man2/execve.2.html
 
-## KPI and handoff
+Xinuos. (n.d.). *ELF Object File Format: Program header*. https://gabi.xinuos.com/elf/07-pheader.html
 
-For the focused Rust target, record executed/attempted tests, setup failures,
-unsafe admissions per three negative cases, and accepted positives per two
-positive cases. Targets are zero unsafe admissions and two accepted controls;
-current Rust baseline is **unmeasured**, not zero. Log exact source SHA and
-platform separately for each run. Local mechanism comparisons are 6/6 across
-two builds and stay in their own evidence class.
-
-The active #14 writer retains production ownership. Integrate this child only
-by ordinary, non-force preservation of its tests and evidence; do not import a
-mutable child into consumers. Do not close #25, mark #14 Ready, merge, publish,
-or advertise Agent containment based on this supplement. Consumer port/ACL and
-no-host-fallback tests can proceed independently while the runtime is repaired.
-
-## Primary reference (APA 7)
-
-Linux man-pages project. (n.d.). *execve(2) — Linux manual page*.
-https://man7.org/linux/man-pages/man2/execve.2.html
-
-Relevant contract: DESCRIPTION, dynamically linked ELF and PT_INTERP. The
-source inspection above concerns the exact GitHub parent, not the manual.
+Xinuos. (n.d.). *ELF Object File Format: Program interpreter*. https://gabi.xinuos.com/elf/09-dynamic.html
