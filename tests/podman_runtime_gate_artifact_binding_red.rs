@@ -7,13 +7,16 @@
 
 #![cfg(target_os = "linux")]
 
-use std::fs;
+#[path = "support/runtime_gate_fixture.rs"]
+mod runtime_gate_fixture;
 
 use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
     RuntimeGateArtifact,
 };
+use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
+use tempfile::tempdir;
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -53,9 +56,9 @@ fn request() -> CommandExecutionRequest {
 
 #[test]
 fn configured_release_artifact_plans_read_only_gate_as_initial_process() {
-    let gate_source = std::env::current_exe().expect("current test executable should exist");
-    let gate_bytes = fs::read(&gate_source).expect("current test executable should be readable");
-    let gate_sha256 = format!("{:x}", Sha256::digest(gate_bytes));
+    let directory = tempdir().expect("temporary directory should be available");
+    let (gate_source, gate_bytes) = write_self_contained_gate(directory.path());
+    let gate_sha256 = format!("{:x}", Sha256::digest(&gate_bytes));
     let gate = RuntimeGateArtifact::stage(&gate_source, &gate_sha256, std::env::consts::ARCH)
         .expect("matching release-authorized gate artifact should stage");
     let staged_gate_path = gate.path().display().to_string();
