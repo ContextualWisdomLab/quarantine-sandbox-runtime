@@ -66,7 +66,10 @@ fn command_container_configures_a_positive_finite_runtime_log_storage_cap() {
     let adapter = RootlessPodmanAdapter::new(&program);
 
     let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
-    assert!(result.is_ok(), "otherwise-positive fake Podman must complete: {result:?}");
+    assert!(
+        result.is_ok(),
+        "otherwise-positive fake Podman must complete: {result:?}"
+    );
 
     let args = fs::read_to_string(create_args).expect("create argv must be recorded");
     let values = args.lines().collect::<Vec<_>>();
