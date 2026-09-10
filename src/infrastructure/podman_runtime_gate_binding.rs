@@ -114,6 +114,7 @@ impl RuntimeGatePodmanAdapter {
                 self.runtime_gate_artifact.path().display()
             ),
             format!("--entrypoint={RUNTIME_GATE_CONTAINER_PATH}"),
+            "--".to_owned(),
             request.image_reference.clone(),
             release_token.clone(),
         ];
