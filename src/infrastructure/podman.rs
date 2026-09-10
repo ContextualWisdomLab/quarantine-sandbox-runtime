@@ -862,8 +862,11 @@ impl RootlessPodmanAdapter {
             }
         }
 
-        // Best effort: the container may already be exiting on its own.
-        let _ = self.command_succeeded(&["kill".to_owned(), container_id.to_owned()]);
+        self.checked_output(
+            "command_kill",
+            &["kill".to_owned(), container_id.to_owned()],
+        )
+        .map_err(CommandExecutionError::Backend)?;
         let post_kill = self
             .checked_output(
                 "command_wait_after_kill",
