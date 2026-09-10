@@ -20,6 +20,13 @@ const EXIT_RELEASE_REJECTED: i32 = 77;
 const EXIT_EXEC_FAILED: i32 = 78;
 const EXIT_CONTROL_CHANNEL_FAILED: i32 = 79;
 
+/// Publishes one controller-visible marker and forces the shared stdout buffer out as one
+/// fail-closed control-channel operation.
+fn publish_control_marker(writer: &mut impl Write, marker: &str) -> io::Result<()> {
+    writer.write_all(marker.as_bytes())?;
+    writer.flush()
+}
+
 fn main() {
     let mut arguments = env::args_os().skip(1);
     let Some(expected_release_token) = arguments.next() else {
@@ -37,7 +44,7 @@ fn main() {
     }
 
     let mut stdout = io::stdout().lock();
-    if stdout.write_all(READY_MARKER.as_bytes()).is_err() || stdout.flush().is_err() {
+    if publish_control_marker(&mut stdout, READY_MARKER).is_err() {
         process::exit(EXIT_CONTROL_CHANNEL_FAILED);
     }
 
@@ -48,7 +55,7 @@ fn main() {
         process::exit(EXIT_RELEASE_REJECTED);
     }
 
-    if stdout.write_all(RELEASED_MARKER.as_bytes()).is_err() || stdout.flush().is_err() {
+    if publish_control_marker(&mut stdout, RELEASED_MARKER).is_err() {
         process::exit(EXIT_CONTROL_CHANNEL_FAILED);
     }
 
