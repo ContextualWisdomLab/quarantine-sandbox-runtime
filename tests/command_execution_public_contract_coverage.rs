@@ -3,8 +3,9 @@
 use std::{io, path::PathBuf};
 
 use quarantine_sandbox_runtime::{
-    CONTRACT_SCHEMA_VERSION, CommandExecutionError, CommandExecutionRequest, CommandExecutionResult,
-    IsolationPolicy, PrSourceArtifactError, PrSourceArtifactInput, ResourceRequest,
+    CONTRACT_SCHEMA_VERSION, CommandExecutionError, CommandExecutionRequest,
+    CommandExecutionResult, IsolationPolicy, PrSourceArtifactError, PrSourceArtifactInput,
+    ResourceRequest,
 };
 use serde_json::json;
 
@@ -149,7 +150,10 @@ fn command_request_validates_present_source_artifact_before_backend_dispatch() {
         revision_sha: "b".repeat(40),
         expected_tree_sha256: "c".repeat(64),
     };
-    assert_eq!(command_request_with_source(valid_source).validate(&policy), Ok(()));
+    assert_eq!(
+        command_request_with_source(valid_source).validate(&policy),
+        Ok(())
+    );
 
     let malformed_source = PrSourceArtifactInput {
         host_path: PathBuf::from("/tmp/qsr-source-contract"),
