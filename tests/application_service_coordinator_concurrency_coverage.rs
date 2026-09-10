@@ -238,3 +238,52 @@ fn terminating_lease_rejects_parallel_termination_and_relaunch() {
         ))
     );
 }
+
+#[test]
+fn changed_payload_cannot_reuse_an_active_idempotency_key() {
+    let coordinator = ApplicationServiceCoordinator::new(CoordinatorEdgeBackend::new(false, false));
+    let owner = owner();
+    coordinator
+        .launch_at(&owner, &request(), &policy(), 1_780_000_000)
+        .expect("original launch should become active");
+
+    let mut changed = request();
+    changed.command.push("--different".to_owned());
+    assert_eq!(
+        coordinator.launch_at(&owner, &changed, &policy(), 1_780_000_001),
+        Err(ApplicationServiceCoordinatorError::IdempotencyConflict)
+    );
+}
+
+#[test]
+fn changed_payload_cannot_reuse_a_terminating_idempotency_key() {
+    let backend = CoordinatorEdgeBackend::new(false, true);
+    let terminate_started = Arc::clone(&backend.terminate_started);
+    let coordinator = Arc::new(ApplicationServiceCoordinator::new(backend));
+    let owner = owner();
+    let lease = coordinator
+        .launch_at(&owner, &request(), &policy(), 1_780_000_000)
+        .expect("original launch should become active");
+
+    let worker_coordinator = Arc::clone(&coordinator);
+    let worker_owner = owner.clone();
+    let worker_lease = lease.clone();
+    let worker = thread::spawn(move || {
+        worker_coordinator.terminate_at(&worker_owner, &worker_lease, 1_780_000_010)
+    });
+
+    wait_until(&terminate_started);
+    let mut changed = request();
+    changed.command.push("--different".to_owned());
+    assert_eq!(
+        coordinator.launch_at(&owner, &changed, &policy(), 1_780_000_011),
+        Err(ApplicationServiceCoordinatorError::IdempotencyConflict)
+    );
+
+    assert_eq!(
+        worker.join().expect("termination worker should not panic"),
+        Err(ApplicationServiceCoordinatorError::Backend(
+            ApplicationServiceError::CleanupFailed
+        ))
+    );
+}
