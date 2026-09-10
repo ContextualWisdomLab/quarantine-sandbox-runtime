@@ -97,6 +97,35 @@ fn malformed_release_identity_fails_before_attach_spawn() {
 }
 
 #[test]
+fn exact_length_non_hex_release_identity_fails_before_attach_spawn() {
+    let directory = tempfile::tempdir().expect("fixture directory should exist");
+    let marker = directory.path().join("invoked");
+    let program = executable_script(
+        directory.path(),
+        &format!("touch '{}'; exit 90", marker.display()),
+    );
+    let adapter = RootlessPodmanAdapter::new(program)
+        .with_runtime_gate_artifact(runtime_gate_artifact(directory.path()));
+    let plan = adapter
+        .plan_command_binding(&request(), &policy())
+        .expect("valid binding should plan");
+    let invalid_identity = "g".repeat(64);
+
+    assert_eq!(
+        adapter.release_command_gate(&invalid_identity, plan),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "runtime_gate_release_identity",
+            }
+        ))
+    );
+    assert!(
+        !marker.exists(),
+        "non-hex identity must not authorize attach"
+    );
+}
+
+#[test]
 fn attach_spawn_failure_preserves_bounded_failure_class() {
     let directory = tempfile::tempdir().expect("fixture directory should exist");
     let adapter = RootlessPodmanAdapter::new(directory.path().join("missing-podman"))
@@ -122,6 +151,50 @@ fn contradictory_acknowledgement_fails_closed_after_attach_cleanup() {
     let program = executable_script(
         directory.path(),
         "IFS= read -r release_token\nprintf 'NOT_THE_ACK\\n'",
+    );
+    let adapter = RootlessPodmanAdapter::new(program)
+        .with_command_timeout(Duration::from_millis(250))
+        .with_runtime_gate_artifact(runtime_gate_artifact(directory.path()));
+    let plan = adapter
+        .plan_command_binding(&request(), &policy())
+        .expect("valid binding should plan");
+
+    assert_eq!(
+        adapter.release_command_gate(EXACT_CONTAINER_ID, plan),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "runtime_gate_release_ack",
+            }
+        ))
+    );
+}
+
+#[test]
+fn readiness_marker_before_exact_acknowledgement_is_accepted_within_budget() {
+    let directory = tempfile::tempdir().expect("fixture directory should exist");
+    let program = executable_script(
+        directory.path(),
+        "printf 'QSR_GATE_READY\\n'\nIFS= read -r release_token\nprintf 'QSR_GATE_RELEASED\\n'\nsleep 5",
+    );
+    let adapter = RootlessPodmanAdapter::new(program)
+        .with_command_timeout(Duration::from_millis(250))
+        .with_runtime_gate_artifact(runtime_gate_artifact(directory.path()));
+    let plan = adapter
+        .plan_command_binding(&request(), &policy())
+        .expect("valid binding should plan");
+
+    assert_eq!(
+        adapter.release_command_gate(EXACT_CONTAINER_ID, plan),
+        Ok(())
+    );
+}
+
+#[test]
+fn acknowledgement_without_newline_exhausts_control_budget() {
+    let directory = tempfile::tempdir().expect("fixture directory should exist");
+    let program = executable_script(
+        directory.path(),
+        "IFS= read -r release_token\nprintf '%064d' 0\nsleep 5",
     );
     let adapter = RootlessPodmanAdapter::new(program)
         .with_command_timeout(Duration::from_millis(250))
