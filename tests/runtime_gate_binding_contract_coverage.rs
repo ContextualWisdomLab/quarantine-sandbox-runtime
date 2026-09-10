@@ -95,7 +95,7 @@ fn gated_run_validates_request_before_any_backend_invocation() {
         Err(CommandExecutionError::Backend(
             ApplicationServiceError::ResourceLimitExceeded {
                 resource_name: "memory_bytes",
-            }
+            },
         ))
     );
 }
