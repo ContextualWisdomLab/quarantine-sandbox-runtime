@@ -60,7 +60,7 @@ fn eof_and_wrong_release_tokens_never_release_the_consumer() {
 
 #[test]
 fn oversized_release_input_fails_the_control_channel_closed() {
-    let output = run_gate(&["expected", "/bin/true"], &vec![b'x'; 129]);
+    let output = run_gate(&["expected", "/bin/true"], &[b'x'; 129]);
     assert_eq!(output.status.code(), Some(79));
     assert_eq!(output.stdout, READY_MARKER.as_bytes());
 }
