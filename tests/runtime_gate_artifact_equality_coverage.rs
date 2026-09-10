@@ -32,18 +32,11 @@ fn separately_staged_identical_gate_bytes_do_not_alias_runtime_authority() {
     assert_eq!(second_bytes, bytes);
     let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
 
-    let first = RuntimeGateArtifact::stage(
-        &first_source,
-        &expected_sha256,
-        std::env::consts::ARCH,
-    )
-    .expect("first matching gate should stage");
-    let second = RuntimeGateArtifact::stage(
-        &second_source,
-        &expected_sha256,
-        std::env::consts::ARCH,
-    )
-    .expect("second matching gate should stage");
+    let first = RuntimeGateArtifact::stage(&first_source, &expected_sha256, std::env::consts::ARCH)
+        .expect("first matching gate should stage");
+    let second =
+        RuntimeGateArtifact::stage(&second_source, &expected_sha256, std::env::consts::ARCH)
+            .expect("second matching gate should stage");
 
     assert_eq!(first.sha256(), second.sha256());
     assert_eq!(first.architecture(), second.architecture());
