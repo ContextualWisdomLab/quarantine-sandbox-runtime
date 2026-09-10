@@ -403,7 +403,7 @@ fn run_command_at_rejects_a_command_container_attached_to_a_network() {
 }
 
 #[test]
-fn run_command_at_cleans_up_when_container_create_returns_a_malformed_identifier() {
+fn run_command_at_does_not_cleanup_by_name_without_a_trusted_create_identifier() {
     let log = temporary_path("malformed-create-log");
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  \
@@ -427,8 +427,16 @@ fn run_command_at_cleans_up_when_container_create_returns_a_malformed_identifier
             operation: "container_create",
         })
     );
-    let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
-    assert!(calls.contains("rm --force"));
+    let calls = fs::read_to_string(&log).expect("backend calls should be recorded");
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("create --name ") && line.contains("--cidfile="))
+    );
+    assert!(
+        !calls.lines().any(|line| line.starts_with("rm --force ")),
+        "cleanup must not target a generated name when neither stdout nor cidfile proves ownership"
+    );
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
