@@ -82,7 +82,7 @@ fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
     let call_log = temporary_path("call-log");
     let acquired_id = "a".repeat(64);
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    cidfile=''\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n      esac\n    done\n    test -n \"$cidfile\"\n    printf '%s\\n' '{}' > \"$cidfile\"\n    printf '%s\\n' 'not-a-container-id'\n    ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    cidfile=''\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n      esac\n    done\n    test -n \"$cidfile\"\n    printf '%s\\n' '{}' > \"$cidfile\"\n    printf '%s\\n' 'not a container id'\n    ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         call_log.display(),
         acquired_id,
     );
