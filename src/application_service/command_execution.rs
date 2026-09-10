@@ -18,10 +18,11 @@
 //! budget contracts from [`super`] rather than duplicating them, and it does not
 //! change the existing service-lease lifecycle at all.
 //!
-//! No production backend exists yet: see `docs/adr/0007-bounded-command-execution-contract.md`
-//! for why this ships as a validated contract plus a fake/test backend only, and
-//! `docs/product-technical-gap-baseline.md` for the follow-on work (a real
-//! Podman-backed adapter and a CLI/HTTP entrypoint) this unblocks.
+//! The production one-shot path now has a rootless-Podman backend and CLI
+//! transport. ADR-0007 defines this bounded application-service contract;
+//! Proposed ADR-0008 records the concrete Podman/CLI runtime-gate implementation.
+//! The port remains independent from the long-lived service lease so consumers
+//! depend on this contract rather than infrastructure details.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
