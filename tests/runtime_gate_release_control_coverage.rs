@@ -1,11 +1,6 @@
 #![cfg(target_os = "linux")]
 
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::Path,
-    time::Duration,
-};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -13,8 +8,7 @@ use quarantine_sandbox_runtime::{
 };
 use sha2::{Digest, Sha256};
 
-const EXACT_CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const EXACT_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const ELF_HEADER_BYTES: usize = 64;
 const PROGRAM_HEADER_BYTES: usize = 56;
 const FILE_BYTES: usize = 512;
@@ -121,7 +115,10 @@ fn malformed_release_identity_fails_before_attach_spawn() {
             }
         ))
     );
-    assert!(!marker.exists(), "malformed identity must not authorize attach");
+    assert!(
+        !marker.exists(),
+        "malformed identity must not authorize attach"
+    );
 }
 
 #[test]
@@ -171,10 +168,7 @@ fn contradictory_acknowledgement_fails_closed_after_attach_cleanup() {
 #[test]
 fn missing_acknowledgement_times_out_and_terminates_attach_client() {
     let directory = tempfile::tempdir().expect("fixture directory should exist");
-    let program = executable_script(
-        directory.path(),
-        "IFS= read -r release_token\nsleep 5",
-    );
+    let program = executable_script(directory.path(), "IFS= read -r release_token\nsleep 5");
     let adapter = RootlessPodmanAdapter::new(program)
         .with_command_timeout(Duration::from_millis(50))
         .with_runtime_gate_artifact(runtime_gate_artifact(directory.path()));
@@ -206,5 +200,8 @@ fn exact_acknowledgement_releases_then_detaches_local_attach_client() {
         .plan_command_binding(&request(), &policy())
         .expect("valid binding should plan");
 
-    assert_eq!(adapter.release_command_gate(EXACT_CONTAINER_ID, plan), Ok(()));
+    assert_eq!(
+        adapter.release_command_gate(EXACT_CONTAINER_ID, plan),
+        Ok(())
+    );
 }
