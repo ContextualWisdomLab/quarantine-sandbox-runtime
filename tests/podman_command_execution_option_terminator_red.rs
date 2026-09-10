@@ -107,7 +107,10 @@ fn command_runtime_terminates_podman_options_before_consumer_image() {
         .position(|argument| *argument == request.image_reference)
         .expect("the exact consumer image must remain a positional create operand");
 
-    assert!(image_index > 0, "the image must not be the first create argument");
+    assert!(
+        image_index > 0,
+        "the image must not be the first create argument"
+    );
     assert_eq!(
         argv[image_index - 1],
         "--",
