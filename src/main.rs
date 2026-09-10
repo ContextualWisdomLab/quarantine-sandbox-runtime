@@ -207,15 +207,13 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
     ) {
         (Some(path), Some(sha256)) => (path, sha256),
         _ => {
-            eprintln!(
-                "error: runtime gate requires --runtime-gate-path and --runtime-gate-sha256"
-            );
+            eprintln!("error: runtime gate requires --runtime-gate-path and --runtime-gate-sha256");
             print_usage();
             return 2;
         }
     };
     let runtime_gate = match RuntimeGateArtifact::stage(
-        runtime_gate_path,
+        std::path::Path::new(runtime_gate_path),
         runtime_gate_sha256,
         std::env::consts::ARCH,
     ) {
@@ -245,8 +243,8 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         },
     };
 
-    let adapter = RootlessPodmanAdapter::new(parsed.podman_program)
-        .with_runtime_gate_artifact(runtime_gate);
+    let adapter =
+        RootlessPodmanAdapter::new(parsed.podman_program).with_runtime_gate_artifact(runtime_gate);
     match execute_command(&adapter, &request, &policy, epoch_seconds()) {
         Ok(result) => {
             match serde_json::to_string_pretty(&result) {
@@ -609,10 +607,8 @@ mod tests {
             bytes[header..header + 4].copy_from_slice(&1_u32.to_le_bytes());
             bytes[header + 4..header + 8].copy_from_slice(&5_u32.to_le_bytes());
             bytes[header + 16..header + 24].copy_from_slice(&0x400000_u64.to_le_bytes());
-            bytes[header + 32..header + 40]
-                .copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
-            bytes[header + 40..header + 48]
-                .copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+            bytes[header + 32..header + 40].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+            bytes[header + 40..header + 48].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
             bytes[header + 48..header + 56].copy_from_slice(&4096_u64.to_le_bytes());
             let path = write_executable(name, "");
             fs::write(&path, &bytes).expect("self-contained runtime gate should be writable");
