@@ -1315,19 +1315,11 @@ fn verify_command_container_configuration(
     )?;
     require_control(
         "isolated_uts_namespace",
-        container
-            .host_config
-            .uts_mode
-            .as_deref()
-            .is_none_or(|mode| mode == "private"),
+        container.host_config.uts_mode.as_deref() == Some("private"),
     )?;
     require_control(
         "isolated_cgroup_namespace",
-        container
-            .host_config
-            .cgroup_mode
-            .as_deref()
-            .is_none_or(|mode| mode == "private"),
+        container.host_config.cgroup_mode.as_deref() == Some("private"),
     )?;
     require_control(
         "external_egress_denied",
