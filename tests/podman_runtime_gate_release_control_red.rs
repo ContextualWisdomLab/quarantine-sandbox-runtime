@@ -9,6 +9,9 @@
 
 #![cfg(target_os = "linux")]
 
+#[path = "support/runtime_gate_fixture.rs"]
+mod runtime_gate_fixture;
+
 use std::{
     fs,
     os::unix::fs::symlink,
@@ -20,7 +23,9 @@ use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
     RuntimeGateArtifact,
 };
+use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
+use tempfile::tempdir;
 
 const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -125,9 +130,9 @@ fn remove_release_backend(program: PathBuf, log: PathBuf, token_capture: PathBuf
 #[test]
 fn controller_releases_only_the_exact_acquired_container_with_one_bounded_token() {
     let (program, log, token_capture) = write_release_backend();
-    let gate_source = std::env::current_exe().expect("current test executable should exist");
-    let gate_bytes = fs::read(&gate_source).expect("current test executable should be readable");
-    let gate_sha256 = format!("{:x}", Sha256::digest(gate_bytes));
+    let gate_directory = tempdir().expect("runtime-gate fixture directory should exist");
+    let (gate_source, gate_bytes) = write_self_contained_gate(gate_directory.path());
+    let gate_sha256 = format!("{:x}", Sha256::digest(&gate_bytes));
     let gate = RuntimeGateArtifact::stage(&gate_source, &gate_sha256, std::env::consts::ARCH)
         .expect("matching runtime gate artifact should stage");
     let adapter = RootlessPodmanAdapter::new(program.clone())
