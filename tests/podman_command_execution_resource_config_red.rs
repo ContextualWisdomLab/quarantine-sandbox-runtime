@@ -56,6 +56,7 @@ fn fake_podman(container_inspect: &str) -> (TempDir, PathBuf, PathBuf) {
         .expect("isolated fake-Podman directory");
     let program = directory.path().join("podman");
     let calls = directory.path().join("calls");
+    fs::write(&calls, "").expect("fake Podman call log should be initialized");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
