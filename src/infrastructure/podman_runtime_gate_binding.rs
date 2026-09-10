@@ -1,3 +1,5 @@
+//! Runtime-owned Podman hold-gate binding and one-time release control.
+
 use std::{
     io::{self, Read, Write},
     process::{Child, Command, Stdio},
@@ -208,6 +210,7 @@ impl RuntimeGatePodmanAdapter {
     }
 }
 
+/// Accept only the immutable 64-character lowercase Podman container ID as release authority.
 fn is_exact_container_id(container_id: &str) -> bool {
     container_id.len() == 64
         && container_id
@@ -215,6 +218,7 @@ fn is_exact_container_id(container_id: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+/// Read until the trusted gate's exact acknowledgement or the fixed control-byte budget is spent.
 fn read_release_ack(mut stdout: impl Read) -> io::Result<()> {
     let mut line = Vec::with_capacity(RUNTIME_GATE_RELEASE_ACK.len());
     let mut byte = [0_u8; 1];
@@ -239,10 +243,15 @@ fn read_release_ack(mut stdout: impl Read) -> io::Result<()> {
     ))
 }
 
+/// Convert an internal release-control failure into the stable provider-neutral error taxonomy.
 fn release_invocation_error(operation: &'static str) -> CommandExecutionError {
     CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed { operation })
 }
 
+/// Terminate and reap only the local attach client, never the released container process.
+///
+/// `release_command_gate` always starts attach with `--sig-proxy=false`; killing this child is
+/// therefore local control-channel cleanup rather than workload termination authority.
 fn terminate_release_client(child: &mut Child) -> Result<(), CommandExecutionError> {
     match child.try_wait() {
         Ok(Some(_)) => return Ok(()),
@@ -270,6 +279,7 @@ fn terminate_release_client(child: &mut Child) -> Result<(), CommandExecutionErr
         .map_err(|_| release_invocation_error(RUNTIME_GATE_RELEASE_DETACH_OPERATION))
 }
 
+/// Preserve cleanup failure precedence when a release-control operation already failed.
 fn fail_after_release_client_cleanup(
     child: &mut Child,
     original: CommandExecutionError,
@@ -277,6 +287,7 @@ fn fail_after_release_client_cleanup(
     terminate_release_client(child).err().unwrap_or(original)
 }
 
+/// Generate an unpredictable one-time release token without a deterministic fallback.
 fn runtime_gate_release_token() -> Result<String, CommandExecutionError> {
     let mut nonce = [0_u8; 32];
     getrandom::fill(&mut nonce).map_err(|_| {
