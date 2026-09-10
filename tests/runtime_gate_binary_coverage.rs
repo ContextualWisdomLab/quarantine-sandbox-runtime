@@ -9,7 +9,7 @@
 
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     process::{Command, Output, Stdio},
 };
 
@@ -96,6 +96,42 @@ fn unreadable_stdin_fails_the_control_channel_after_ready_marker() {
 
     assert_eq!(output.status.code(), Some(79));
     assert_eq!(output.stdout, READY_MARKER.as_bytes());
+}
+
+#[test]
+fn closed_acknowledgement_reader_fails_closed_before_consumer_exec() {
+    let mut child = Command::new(GATE_BINARY)
+        .args(["release", "/bin/true"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("runtime gate should spawn");
+    let mut stdout = child
+        .stdout
+        .take()
+        .expect("runtime gate stdout should be piped");
+    let mut ready = vec![0_u8; READY_MARKER.len()];
+    stdout
+        .read_exact(&mut ready)
+        .expect("runtime gate should publish readiness before release");
+    assert_eq!(ready, READY_MARKER.as_bytes());
+    drop(stdout);
+
+    child
+        .stdin
+        .take()
+        .expect("runtime gate stdin should be piped")
+        .write_all(b"release\n")
+        .expect("exact release token should be writable");
+
+    assert_eq!(
+        child
+            .wait()
+            .expect("runtime gate should terminate after acknowledgement failure")
+            .code(),
+        Some(79)
+    );
 }
 
 #[test]
