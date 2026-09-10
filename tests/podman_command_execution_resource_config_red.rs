@@ -8,7 +8,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{fs, os::unix::fs::symlink, path::PathBuf};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -56,22 +56,29 @@ fn fake_podman(container_inspect: &str) -> (TempDir, PathBuf, PathBuf) {
         .expect("isolated fake-Podman directory");
     let program = directory.path().join("podman");
     let calls = directory.path().join("calls");
+    let scenario = directory.path().join("scenario.sh");
+    let config = PathBuf::from(format!("{}.config", program.display()));
+    let dispatcher = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
     fs::write(&calls, "").expect("fake Podman call log should be initialized");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
-        calls.display(),
+        "set -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         info,
         container_inspect,
         top
     );
-    fs::write(&program, script).expect("fake Podman must be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata must exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman must be executable");
+    fs::write(&scenario, script).expect("fake Podman scenario should be writable");
+    fs::write(
+        &config,
+        format!(
+            "MODE=source_script\nLOG='{}'\nSCRIPT='{}'\n",
+            calls.display(),
+            scenario.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
+    symlink(&dispatcher, &program).expect("immutable fake Podman dispatcher should be linkable");
     (directory, program, calls)
 }
 
