@@ -8,7 +8,7 @@
 mod linux {
     use std::fs;
 
-    use quarantine_sandbox_runtime::RuntimeGateArtifact;
+    use quarantine_sandbox_runtime::{RuntimeGateArtifact, RuntimeGateArtifactError};
     use sha2::{Digest, Sha256};
 
     const ELF_HEADER_BYTES: usize = 64;
@@ -91,12 +91,16 @@ mod linux {
         bytes
     }
 
-    fn admits(bytes: &[u8]) -> bool {
+    fn stage(bytes: &[u8]) -> Result<RuntimeGateArtifact, RuntimeGateArtifactError> {
         let directory = tempfile::tempdir().expect("gate fixture directory must exist");
         let source = directory.path().join("gate-fixture");
         fs::write(&source, bytes).expect("gate fixture must be writable");
         let digest = format!("{:x}", Sha256::digest(bytes));
-        RuntimeGateArtifact::stage(&source, &digest, std::env::consts::ARCH).is_ok()
+        RuntimeGateArtifact::stage(&source, &digest, std::env::consts::ARCH)
+    }
+
+    fn admits(bytes: &[u8]) -> bool {
+        stage(bytes).is_ok()
     }
 
     #[test]
@@ -130,13 +134,13 @@ mod linux {
     }
 
     #[test]
-    fn unsupported_elf_data_encoding_cannot_enter_the_gate_boundary() {
+    fn unsupported_elf_data_encoding_is_a_loading_boundary_failure() {
         let mut bytes = elf_fixture(false, false);
         bytes[5] = 0;
-        assert!(
-            !admits(&bytes),
-            "an undeclared ELF byte order must fail closed before any multi-byte header field is trusted"
-        );
+        assert!(matches!(
+            stage(&bytes),
+            Err(RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary)
+        ));
     }
 
     #[test]
