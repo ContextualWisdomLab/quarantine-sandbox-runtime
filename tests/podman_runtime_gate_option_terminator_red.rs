@@ -72,7 +72,10 @@ fn runtime_gate_binding_terminates_podman_options_before_consumer_image() {
         .position(|argument| argument == &request.image_reference)
         .expect("the exact consumer image must remain a positional operand");
 
-    assert!(image_index > 0, "the image must not be the first binding argument");
+    assert!(
+        image_index > 0,
+        "the image must not be the first binding argument"
+    );
     assert_eq!(
         args[image_index - 1],
         "--",
