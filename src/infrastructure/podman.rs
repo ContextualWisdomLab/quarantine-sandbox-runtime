@@ -655,6 +655,7 @@ impl RootlessPodmanAdapter {
         )
         .to_string();
         create_args.push(format!("--entrypoint={command_entrypoint}"));
+        create_args.push("--".to_owned());
         create_args.push(request.image_reference.clone());
 
         let create_output = match self.checked_output("container_create", &create_args) {
