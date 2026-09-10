@@ -181,12 +181,7 @@ fn collect_regular_files(
         if metadata.is_dir() {
             collect_regular_files(root, &path, files)?;
         } else if metadata.is_file() {
-            files.push((
-                relative,
-                path,
-                metadata.mode() & 0o111 != 0,
-                metadata.len(),
-            ));
+            files.push((relative, path, metadata.mode() & 0o111 != 0, metadata.len()));
         } else {
             return Err(PrSourceArtifactError::UnsupportedEntry {
                 relative_path: relative.to_string_lossy().into_owned(),
