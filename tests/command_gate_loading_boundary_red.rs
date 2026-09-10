@@ -17,7 +17,9 @@ mod linux {
     const INTERPRETER_OFFSET: usize = 384;
     const INTERPRETER_PATH: &[u8] = b"/qsr-fixture/image-loader\0";
     const EXIT_X86_64: &[u8] = &[0xb8, 60, 0, 0, 0, 0xbf, 77, 0, 0, 0, 0x0f, 0x05];
-    const EXIT_AARCH64: &[u8] = &[0xa8, 0x0b, 0x80, 0xd2, 0xa0, 0x09, 0x80, 0xd2, 1, 0, 0, 0xd4];
+    const EXIT_AARCH64: &[u8] = &[
+        0xa8, 0x0b, 0x80, 0xd2, 0xa0, 0x09, 0x80, 0xd2, 1, 0, 0, 0xd4,
+    ];
 
     fn elf_fixture(has_interpreter: bool, position_independent: bool) -> Vec<u8> {
         let (machine, exit_code): (u16, &[u8]) = match std::env::consts::ARCH {
@@ -56,8 +58,7 @@ mod linux {
                 .copy_from_slice(INTERPRETER_PATH);
         }
 
-        let load_header =
-            ELF_HEADER_BYTES + usize::from(has_interpreter) * PROGRAM_HEADER_BYTES;
+        let load_header = ELF_HEADER_BYTES + usize::from(has_interpreter) * PROGRAM_HEADER_BYTES;
         bytes[load_header..load_header + 4].copy_from_slice(&1_u32.to_le_bytes());
         bytes[load_header + 4..load_header + 8].copy_from_slice(&5_u32.to_le_bytes());
         bytes[load_header + 16..load_header + 24].copy_from_slice(&load_address.to_le_bytes());
