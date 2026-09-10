@@ -16,10 +16,7 @@ fn cli_without_runtime_gate_identity_fails_before_spawning_podman() {
     let touched = fixture.path().join("podman-was-spawned");
     fs::write(
         &podman,
-        format!(
-            "#!/bin/sh\nset -eu\n: > '{}'\nexit 91\n",
-            touched.display()
-        ),
+        format!("#!/bin/sh\nset -eu\n: > '{}'\nexit 91\n", touched.display()),
     )
     .expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&podman)
@@ -35,7 +32,9 @@ fn cli_without_runtime_gate_identity_fails_before_spawning_podman() {
             "--image",
             &image,
             "--podman",
-            podman.to_str().expect("temporary Podman path should be UTF-8"),
+            podman
+                .to_str()
+                .expect("temporary Podman path should be UTF-8"),
             "--",
             "true",
         ])
