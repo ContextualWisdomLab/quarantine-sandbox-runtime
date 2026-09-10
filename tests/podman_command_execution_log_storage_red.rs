@@ -7,7 +7,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 use quarantine_sandbox_runtime::{
     CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
