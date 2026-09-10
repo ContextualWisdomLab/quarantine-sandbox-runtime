@@ -110,7 +110,8 @@ fn assert_invalid_output_is_rejected(invalid_stream: InvalidStream, request_id: 
     fake_podman(&program, &cleanup_marker, invalid_stream);
 
     let adapter = RootlessPodmanAdapter::new(&program);
-    let result = adapter.run_command_at(&request(request_id), &policy(), 1_780_000_000);
+    let result =
+        adapter.run_legacy_command_at_for_test(&request(request_id), &policy(), 1_780_000_000);
     let cleanup_observed = cleanup_marker.exists();
     let expected_stream = match invalid_stream {
         InvalidStream::Stdout => "stdout",

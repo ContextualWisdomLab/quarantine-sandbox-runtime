@@ -126,12 +126,12 @@ fn repeated_consumer_correlation_same_start_second_uses_distinct_runtime_resourc
     let first_adapter = adapter.clone();
     let first_handle = thread::spawn(move || {
         first_adapter
-            .run_command_at(&request(), &policy(), same_start_second)
+            .run_legacy_command_at_for_test(&request(), &policy(), same_start_second)
             .expect("first command invocation should complete")
     });
     let second_handle = thread::spawn(move || {
         adapter
-            .run_command_at(&request(), &policy(), same_start_second)
+            .run_legacy_command_at_for_test(&request(), &policy(), same_start_second)
             .expect("second command invocation should complete independently")
     });
     let first = first_handle

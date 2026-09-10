@@ -90,7 +90,7 @@ fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(

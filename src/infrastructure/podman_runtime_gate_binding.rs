@@ -215,10 +215,7 @@ impl RuntimeGatePodmanAdapter {
         drop(stdin);
 
         let acknowledgement = receiver.recv_timeout(self._inner.command_timeout());
-        let cleanup_result = terminate_release_client(&mut child);
-        if let Err(error) = cleanup_result {
-            return Err(error);
-        }
+        terminate_release_client(&mut child)?;
 
         match acknowledgement {
             Ok(Ok(())) => Ok(()),

@@ -120,7 +120,7 @@ fn invalid_prestart_evidence_is_rejected_after_init_without_releasing_payload() 
     let program = write_fake_podman(&directory, "init-hold-invalid-evidence", &script);
     let adapter = RootlessPodmanAdapter::new(program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000);
     assert!(
         result.is_err(),
         "invalid pre-start isolation evidence must fail closed"
@@ -177,7 +177,7 @@ fn unavailable_init_capability_fails_closed_without_releasing_payload() {
     let program = write_fake_podman(&directory, "init-hold-unavailable", &script);
     let adapter = RootlessPodmanAdapter::new(program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_001);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_001);
     assert!(
         result.is_err(),
         "an unavailable pre-start init capability must fail closed"

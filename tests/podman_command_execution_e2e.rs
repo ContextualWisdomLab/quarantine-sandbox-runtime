@@ -156,7 +156,7 @@ fn command_execution_reports_exit_status_and_bounded_output() {
     );
 
     let result = adapter
-        .run_command_at(&request, &policy(), started_at())
+        .run_legacy_command_at_for_test(&request, &policy(), started_at())
         .expect("digest-pinned fixture must run to completion under the P0 isolation policy");
 
     assert_eq!(
@@ -192,7 +192,7 @@ fn command_execution_cannot_see_host_filesystem_or_reach_the_network() {
         30,
     );
     let host_visibility_result = adapter
-        .run_command_at(&host_visibility_probe, &policy(), started_at())
+        .run_legacy_command_at_for_test(&host_visibility_probe, &policy(), started_at())
         .expect("host-visibility probe must run to completion");
     assert_eq!(
         host_visibility_result.exit_code(),
@@ -214,7 +214,7 @@ fn command_execution_cannot_see_host_filesystem_or_reach_the_network() {
         30,
     );
     let egress_result = adapter
-        .run_command_at(&egress_probe, &policy(), started_at())
+        .run_legacy_command_at_for_test(&egress_probe, &policy(), started_at())
         .expect("egress probe must run to completion");
     assert_eq!(
         egress_result.exit_code(),
@@ -244,7 +244,7 @@ fn command_execution_kills_and_reports_a_command_that_exceeds_its_timeout() {
 
     let started = Instant::now();
     let result = adapter
-        .run_command_at(&request, &policy(), started_at())
+        .run_legacy_command_at_for_test(&request, &policy(), started_at())
         .expect("a killed command is still a completed, successfully-observed run");
     let elapsed = started.elapsed();
 

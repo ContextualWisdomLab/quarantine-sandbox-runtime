@@ -120,7 +120,7 @@ fn assert_missing_namespace_fails_closed(
     let (_directory, program, calls_path) = fake_podman(namespace_mode);
     let adapter = RootlessPodmanAdapter::new(program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_200);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_200);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
     assert_eq!(

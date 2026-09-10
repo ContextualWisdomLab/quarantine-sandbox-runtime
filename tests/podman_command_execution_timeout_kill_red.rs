@@ -84,7 +84,7 @@ fn failed_timeout_kill_fails_closed_before_logs_and_still_cleans_up() {
     let (_directory, program, calls_path) = fake_podman();
     let adapter = RootlessPodmanAdapter::new(program).with_command_timeout(Duration::from_secs(2));
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
     assert_eq!(

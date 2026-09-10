@@ -94,7 +94,7 @@ fn malformed_wait_stdout_is_not_promoted_to_workload_exit_status() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_001)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_001)
         .unwrap_err();
 
     assert_eq!(

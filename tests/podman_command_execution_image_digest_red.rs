@@ -87,7 +87,7 @@ fn mismatched_applied_image_digest_fails_closed_before_command_evidence_is_trust
     let (_directory, program, calls_path) = fake_podman();
     let adapter = RootlessPodmanAdapter::new(program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_037);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_037);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
     assert_eq!(

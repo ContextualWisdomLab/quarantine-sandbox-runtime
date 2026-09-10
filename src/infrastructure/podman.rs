@@ -509,10 +509,10 @@ impl RootlessPodmanAdapter {
     /// egress denial than the service profile's internal, DNS-disabled
     /// network and needs no separate network object to create or clean up.
     ///
-    /// This low-level adapter method retains the historical direct-consumer path for migration
-    /// tests. Release-authorized production callers must use [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),
-    /// which composes the verified runtime gate so `podman start` runs only trusted hold code and
-    /// consumer argv cannot become runnable before live seccomp/LSM/capability attestation.
+    /// This method is compiled only with debug assertions so the legacy path remains testable
+    /// without being part of release artifacts. Production command callers must use
+    /// [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),
+    /// which binds the verified runtime gate before any consumer process can run.
     ///
     /// Completion is observed with `podman wait` (bounded by the requested
     /// lease) and output with `podman logs` against a `k8s-file`-backed log
@@ -527,7 +527,8 @@ impl RootlessPodmanAdapter {
     /// Returns [`CommandExecutionError`] when Podman cannot prove the
     /// required P0 isolation invariants, the sandbox cannot be created, or
     /// cleanup after the run cannot be proven complete.
-    pub fn run_command_at(
+    #[cfg(debug_assertions)]
+    pub fn run_legacy_command_at_for_test(
         &self,
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
@@ -772,9 +773,9 @@ impl RootlessPodmanAdapter {
         }
 
         if runtime_gate_binding_args.is_some() {
-            if let Err(error) = release_gate(&container_id) {
-                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));
-            }
+            release_gate(&container_id).map_err(|error| {
+                self.cleanup_owned_command_container_or_report(&container_id, error)
+            })?;
         }
 
         let (exit_code, timed_out) = match self.wait_for_command(&container_id, request) {

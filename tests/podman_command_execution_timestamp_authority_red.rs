@@ -82,7 +82,8 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
     let (_directory, program, calls_path) = fake_podman();
     let adapter = RootlessPodmanAdapter::new(program).with_command_timeout(Duration::from_secs(2));
 
-    let result = adapter.run_command_at(&request(), &policy(), CALLER_SUPPLIED_FUTURE_START);
+    let result =
+        adapter.run_legacy_command_at_for_test(&request(), &policy(), CALLER_SUPPLIED_FUTURE_START);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
     if let Ok(result) = result {

@@ -124,7 +124,7 @@ fn failed_create_with_owned_cidfile_receipt_is_cleaned_by_exact_id() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_002)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_002)
         .unwrap_err();
 
     assert_eq!(
@@ -163,7 +163,7 @@ fn cleanup_failure_for_owned_failed_create_surfaces_leak_risk() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_003)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_003)
         .unwrap_err();
 
     assert_eq!(
@@ -199,7 +199,7 @@ fn malformed_failed_create_receipt_fails_closed_without_name_cleanup() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_004)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_004)
         .unwrap_err();
 
     assert_eq!(
@@ -228,7 +228,7 @@ fn unreadable_failed_create_receipt_fails_closed_without_name_cleanup() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_005)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_005)
         .unwrap_err();
 
     assert_eq!(

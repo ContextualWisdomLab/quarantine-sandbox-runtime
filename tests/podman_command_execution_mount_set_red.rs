@@ -66,7 +66,7 @@ fn unexpected_effective_mount_fails_closed_before_output_is_trusted() {
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
     let adapter = RootlessPodmanAdapter::new(&program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000);
     let calls = fs::read_to_string(calls).expect("fake Podman calls must be recorded");
 
     assert_eq!(

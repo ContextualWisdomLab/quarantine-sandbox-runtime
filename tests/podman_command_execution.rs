@@ -17,9 +17,8 @@ use std::{
 use tempfile::TempDir;
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,
-    CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
-    RootlessPodmanAdapter,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    PrSourceArtifactInput, ResourceRequest, RootlessPodmanAdapter,
 };
 use sha2::{Digest, Sha256};
 
@@ -189,7 +188,7 @@ fn run_command_at_returns_a_successful_result_against_a_well_behaved_fake_backen
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .expect("well-behaved fake backend should run to completion");
 
     assert_eq!(result.exit_code(), 0);
@@ -221,7 +220,8 @@ fn run_command_at_rejects_an_invalid_policy_before_invoking_podman() {
     let mut invalid_policy = policy();
     invalid_policy.run_as_user_id = 0;
 
-    let result = adapter.run_command_at(&request(20), &invalid_policy, 1_780_000_000);
+    let result =
+        adapter.run_legacy_command_at_for_test(&request(20), &invalid_policy, 1_780_000_000);
 
     assert_eq!(
         result,
@@ -277,7 +277,7 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
     });
 
     let result = adapter
-        .run_command_at(&command_request, &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&command_request, &policy(), 1_780_000_000)
         .expect("verified staged source should execute");
 
     let create_args = fs::read_to_string(&create_log).expect("create args should be recorded");
@@ -306,7 +306,11 @@ fn run_command_at_mounts_only_staged_exact_revision_source_and_returns_its_recei
     let wrong_source_program = write_executable("pr-source-wrong-bind", &wrong_source_script);
     let wrong_source_adapter = RootlessPodmanAdapter::new(wrong_source_program.clone());
     assert_eq!(
-        wrong_source_adapter.run_command_at(&command_request, &policy(), 1_780_000_001),
+        wrong_source_adapter.run_legacy_command_at_for_test(
+            &command_request,
+            &policy(),
+            1_780_000_001
+        ),
         Err(CommandExecutionError::Backend(
             ApplicationServiceError::IsolationVerificationFailed {
                 control_name: "source_artifact_bind_source",
@@ -342,7 +346,7 @@ fn run_command_at_reports_a_nonzero_exit_status_as_a_successful_call() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .expect("a nonzero workload exit status must not be a CommandExecutionError");
 
     assert_eq!(result.exit_code(), 17);
@@ -361,7 +365,7 @@ fn run_command_at_rejects_a_backend_that_is_not_rootless() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -389,7 +393,7 @@ fn run_command_at_rejects_a_command_container_attached_to_a_network() {
     let program = write_executable("network-attached", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
-    let result = adapter.run_command_at(&request(20), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000);
 
     assert_eq!(
         result,
@@ -418,7 +422,7 @@ fn run_command_at_does_not_cleanup_by_name_without_a_trusted_create_identifier()
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -461,7 +465,7 @@ fn run_command_at_cleans_up_when_container_start_fails() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -499,7 +503,7 @@ fn run_command_at_cleans_up_when_isolation_verification_fails() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -543,7 +547,7 @@ fn run_command_at_kills_and_reports_a_command_that_exceeds_its_lease() {
         RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(2));
 
     let result = adapter
-        .run_command_at(&request(1), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(1), &policy(), 1_780_000_000)
         .expect("a killed workload is still a completed, successfully-observed run");
 
     assert!(result.timed_out());
@@ -575,7 +579,7 @@ fn run_command_at_fails_closed_when_log_retrieval_itself_hangs() {
         .with_command_timeout(Duration::from_millis(200));
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -609,43 +613,13 @@ fn run_command_at_reports_cleanup_failure_after_an_otherwise_successful_run() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
         error,
         CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed)
     );
-
-    let _ = fs::remove_file(program);
-}
-
-#[test]
-fn command_execution_backend_trait_forwards_to_run_command_at() {
-    let script = format!(
-        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
-         info:--format) printf '%s\\n' '{}' ;;\n  \
-         create:--name) printf 'fake-command-container-id\\n' ;;\n  \
-         start:*) : ;;\n  \
-         container:inspect) printf '%s\\n' '{}' ;;\n  \
-         top:*) printf '%s' '{}' ;;\n  \
-         wait:*) printf '0\\n' ;;\n  \
-         logs:*) : ;;\n  \
-         rm:--force) : ;;\n  \
-         *) exit 91 ;;\nesac\n",
-        security_info_json(),
-        container_inspect_json("fake-command-container-id"),
-        top_line_apparmor_confined(),
-    );
-    let program = write_executable("trait-forward", &script);
-    let adapter = RootlessPodmanAdapter::new(program.clone());
-    let backend: &dyn CommandExecutionBackend = &adapter;
-
-    let result = backend
-        .run_to_completion_at(&request(20), &policy(), 1_780_000_000)
-        .expect("the trait object must forward to the inherent run_command_at");
-
-    assert_eq!(result.exit_code(), 0);
 
     let _ = fs::remove_file(program);
 }
@@ -672,7 +646,7 @@ fn run_command_at_fails_closed_when_backend_loss_prevents_cleanup_during_wait() 
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -706,7 +680,7 @@ fn run_command_at_fails_closed_when_backend_loss_prevents_cleanup_during_log_ret
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(20), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(20), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(

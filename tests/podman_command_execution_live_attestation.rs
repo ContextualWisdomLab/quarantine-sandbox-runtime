@@ -87,7 +87,7 @@ fn missing_live_process_evidence_fails_closed_instead_of_falling_back_to_inspect
     let program = write_executable("fake-podman", &script);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000);
 
     assert_eq!(
         result,

@@ -114,7 +114,7 @@ fn successful_create_binds_every_lifecycle_operation_to_the_acquired_container_i
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_036)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_036)
         .expect("an owned container ID should remain lifecycle authority after create");
 
     assert_eq!(result.exit_code(), 0);

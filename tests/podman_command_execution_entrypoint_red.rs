@@ -91,7 +91,7 @@ fn requested_command_is_encoded_as_exact_entrypoint_argv() {
     let adapter = RootlessPodmanAdapter::new(program);
     let request = request();
 
-    let result = adapter.run_command_at(&request, &policy(), 1_780_000_038);
+    let result = adapter.run_legacy_command_at_for_test(&request, &policy(), 1_780_000_038);
     assert!(
         result.is_ok(),
         "fixture must stay positive through isolation so the RED is only argv semantics: {result:?}"

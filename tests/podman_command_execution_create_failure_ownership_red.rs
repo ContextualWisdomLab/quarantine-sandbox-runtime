@@ -99,7 +99,7 @@ fn failed_create_without_owned_container_id_does_not_delete_same_name_resource()
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_033)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_033)
         .unwrap_err();
 
     assert_eq!(

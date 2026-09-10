@@ -28,17 +28,6 @@ impl ApplicationServiceBackend for RootlessPodmanAdapter {
     }
 }
 
-impl CommandExecutionBackend for RootlessPodmanAdapter {
-    fn run_to_completion_at(
-        &self,
-        request: &CommandExecutionRequest,
-        policy: &IsolationPolicy,
-        started_at_epoch_seconds: u64,
-    ) -> Result<CommandExecutionResult, CommandExecutionError> {
-        RootlessPodmanAdapter::run_command_at(self, request, policy, started_at_epoch_seconds)
-    }
-}
-
 #[cfg(unix)]
 impl CommandExecutionBackend for RuntimeGatePodmanAdapter {
     fn run_to_completion_at(

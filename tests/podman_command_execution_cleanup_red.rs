@@ -103,7 +103,7 @@ fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -125,7 +125,7 @@ fn cleanup_failure_is_not_hidden_behind_container_start_failure() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -145,7 +145,7 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_failure() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -168,7 +168,7 @@ fn cleanup_failure_is_not_hidden_behind_container_logs_timeout() {
         RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(2));
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(
@@ -190,7 +190,7 @@ fn cleanup_failure_is_not_hidden_behind_effective_isolation_failure() {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let error = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_000)
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
         .unwrap_err();
 
     assert_eq!(

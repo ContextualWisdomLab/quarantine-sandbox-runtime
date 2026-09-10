@@ -65,7 +65,7 @@ fn command_container_configures_a_positive_finite_runtime_log_storage_cap() {
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
     let adapter = RootlessPodmanAdapter::new(&program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000);
     assert!(
         result.is_ok(),
         "otherwise-positive fake Podman must complete: {result:?}"

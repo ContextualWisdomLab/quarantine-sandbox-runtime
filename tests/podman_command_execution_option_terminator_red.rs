@@ -90,7 +90,7 @@ fn command_runtime_terminates_podman_options_before_consumer_image() {
     let adapter = RootlessPodmanAdapter::new(program);
     let request = request();
 
-    let result = adapter.run_command_at(&request, &policy(), 1_780_000_109);
+    let result = adapter.run_legacy_command_at_for_test(&request, &policy(), 1_780_000_109);
     assert!(
         result.is_ok(),
         "fixture must stay positive through isolation so the RED is only the provider option/data boundary: {result:?}"
