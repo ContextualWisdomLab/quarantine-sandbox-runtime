@@ -82,7 +82,7 @@ fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
     let call_log = temporary_path("call-log");
     let acquired_id = "a".repeat(64);
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    cidfile=''\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n      esac\n    done\n    test -n \"$cidfile\"\n    printf '%s\\n' '{}' > \"$cidfile\"\n    printf '%s\\n' 'not-a-container-id'\n    ;;\n  rm:--force)\n    test \"${{3:-}}\" = '{}'\n    ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name)\n    cidfile=''\n    for arg in \"$@\"; do\n      case \"$arg\" in\n        --cidfile=*) cidfile=${{arg#--cidfile=}} ;;\n      esac\n    done\n    test -n \"$cidfile\"\n    printf '%s\\n' '{}' > \"$cidfile\"\n    printf '%s\\n' 'not-a-container-id'\n    ;;\n  rm:--force)\n    test \"${{3:-}}\" = '--ignore'\n    test \"${{4:-}}\" = '{}'\n    ;;\n  *) exit 91 ;;\nesac\n",
         call_log.display(),
         acquired_id,
         acquired_id,
@@ -112,7 +112,7 @@ fn malformed_success_stdout_cleans_up_by_runtime_owned_cidfile_identity() {
         .filter(|line| line.starts_with("rm --force "))
         .collect();
     assert_eq!(removal_calls.len(), 1);
-    assert_eq!(removal_calls[0], format!("rm --force {acquired_id}"));
+    assert_eq!(removal_calls[0], format!("rm --force --ignore {acquired_id}"));
     assert!(!removal_calls[0].contains("qsr-cmd-"));
 
     let _ = fs::remove_file(program);
