@@ -139,24 +139,24 @@ fn security_info_json() -> &'static str {
 fn container_inspect_json(id: &str) -> String {
     format!(
         "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
-         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\"}},\
+         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
          \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\
-         \"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]"
+         \"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}}}}]"
     )
 }
 
 fn container_inspect_json_with_source(id: &str) -> String {
     format!(
         "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
-         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\"}},\
+         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
          \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\
-         \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
+         \"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\
          \"Mounts\":[{{\"Source\":\"SOURCE_PATH\",\"Destination\":\"/workspace\",\"Type\":\"bind\",\
          \"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
     )
@@ -518,6 +518,8 @@ fn run_command_at_cleans_up_when_isolation_verification_fails() {
 #[test]
 fn run_command_at_kills_and_reports_a_command_that_exceeds_its_lease() {
     let marker = temporary_path("timeout-marker");
+    let timeout_inspect = container_inspect_json("fake-command-container-id")
+        .replace("\"Timeout\":20", "\"Timeout\":1");
     let script = format!(
         "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  \
          info:--format) printf '%s\\n' '{}' ;;\n  \
@@ -531,7 +533,7 @@ fn run_command_at_kills_and_reports_a_command_that_exceeds_its_lease() {
          rm:--force) : ;;\n  \
          *) exit 91 ;;\nesac\n",
         security_info_json(),
-        container_inspect_json("fake-command-container-id"),
+        timeout_inspect,
         top_line_apparmor_confined(),
         marker.display(),
         marker.display(),
