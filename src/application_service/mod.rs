@@ -129,7 +129,7 @@ impl ServiceEndpoint {
 
     /// Return the declared service protocol.
     #[must_use]
-    pub const fn protocol(&self) -> ServiceProtocol {
+    pub const fn protocol(self) -> ServiceProtocol {
         self.protocol
     }
 }
@@ -259,16 +259,6 @@ pub struct ApplicationServiceLease {
 }
 
 impl ApplicationServiceLease {
-    /// Construct runtime-issued lease evidence and retain non-serializable cleanup authority.
-    pub(crate) fn new(
-        request: &ApplicationServiceRequest,
-        metadata: RuntimeLeaseMetadata,
-        endpoint: ServiceEndpoint,
-    ) -> Self {
-        let cleanup_sandbox_id = metadata.sandbox_id.clone();
-        Self::new_with_cleanup_sandbox_id(request, metadata, cleanup_sandbox_id, endpoint)
-    }
-
     /// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.
     pub(crate) fn new_with_cleanup_sandbox_id(
         request: &ApplicationServiceRequest,
