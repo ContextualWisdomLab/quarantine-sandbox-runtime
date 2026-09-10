@@ -130,6 +130,16 @@ mod linux {
     }
 
     #[test]
+    fn unsupported_elf_data_encoding_cannot_enter_the_gate_boundary() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[5] = 0;
+        assert!(
+            !admits(&bytes),
+            "an undeclared ELF byte order must fail closed before any multi-byte header field is trusted"
+        );
+    }
+
+    #[test]
     fn invalid_elf_ident_version_cannot_enter_the_gate_boundary() {
         let mut bytes = elf_fixture(false, false);
         bytes[6] = 0;
