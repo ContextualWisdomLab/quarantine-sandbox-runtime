@@ -53,7 +53,8 @@ mod linux {
                 .copy_from_slice(INTERPRETER_PATH);
         }
 
-        let load_header = ELF_HEADER_BYTES + usize::from(has_interpreter) * PROGRAM_HEADER_BYTES;
+        let load_header =
+            ELF_HEADER_BYTES + usize::from(has_interpreter) * PROGRAM_HEADER_BYTES;
         bytes[load_header..load_header + 4].copy_from_slice(&1_u32.to_le_bytes());
         bytes[load_header + 4..load_header + 8].copy_from_slice(&5_u32.to_le_bytes());
         bytes[load_header + 16..load_header + 24].copy_from_slice(&load_address.to_le_bytes());
