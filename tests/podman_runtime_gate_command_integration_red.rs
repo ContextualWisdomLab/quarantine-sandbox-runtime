@@ -147,6 +147,13 @@ esac
         .position(|line| line.starts_with("wait "))
         .expect("completion evidence must be collected after release");
     assert!(top_index < release_index && release_index < wait_index);
-    assert_eq!(calls[release_index], format!("attach --sig-proxy=false {OWNED_CONTAINER_ID}"));
-    assert!(calls.iter().any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")));
+    assert_eq!(
+        calls[release_index],
+        format!("attach --sig-proxy=false {OWNED_CONTAINER_ID}")
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}"))
+    );
 }
