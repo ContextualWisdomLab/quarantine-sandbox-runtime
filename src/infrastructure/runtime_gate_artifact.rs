@@ -96,6 +96,11 @@ impl RuntimeGateArtifact {
             return Err(RuntimeGateArtifactError::DigestMismatch);
         }
 
+        // Establish the complete executable loading boundary before interpreting
+        // machine identity. Malformed ELF class/data/version must therefore be
+        // classified as a loading-boundary failure rather than as an architecture
+        // mismatch derived from fields that are not yet safe to interpret.
+        validate_self_contained_elf_loading(&bytes)?;
         let actual_architecture = executable_architecture(&bytes);
         if actual_architecture != expected_architecture {
             return Err(RuntimeGateArtifactError::ArchitectureMismatch {
@@ -103,7 +108,6 @@ impl RuntimeGateArtifact {
                 actual: actual_architecture.to_owned(),
             });
         }
-        validate_self_contained_elf_loading(&bytes)?;
 
         let staging_directory = tempfile::Builder::new()
             .prefix("qsr-runtime-gate-")
