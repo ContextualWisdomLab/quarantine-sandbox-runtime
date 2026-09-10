@@ -35,7 +35,10 @@ fn request() -> CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
         request_id: "runtime-gate-binding-contract".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
-        command: vec!["payload-sentinel".to_owned(), "argument with spaces".to_owned()],
+        command: vec![
+            "payload-sentinel".to_owned(),
+            "argument with spaces".to_owned(),
+        ],
         source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
@@ -75,7 +78,9 @@ fn binding_plan_exposes_verified_gate_identity_without_reinterpreting_consumer_a
         "the image boundary must remain explicit before held consumer argv"
     );
     assert_eq!(
-        plan.container_create_binding_args().last().map(String::as_str),
+        plan.container_create_binding_args()
+            .last()
+            .map(String::as_str),
         Some("argument with spaces"),
         "consumer argv must remain a direct argument rather than shell text"
     );
