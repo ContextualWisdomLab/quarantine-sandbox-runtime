@@ -123,6 +123,7 @@ mod tests {
             publish_control_marker(&mut writer, READY_MARKER).map_err(|error| error.kind()),
             Err(ErrorKind::BrokenPipe)
         );
+        assert!(writer.flush().is_ok());
     }
 
     #[test]
