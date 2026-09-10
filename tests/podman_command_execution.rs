@@ -143,7 +143,7 @@ fn container_inspect_json(id: &str) -> String {
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
-         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}}}}]"
     )
 }
@@ -155,7 +155,7 @@ fn container_inspect_json_with_source(id: &str) -> String {
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
-         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"Memory\":268435456,\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\
          \"NanoCpus\":1000000000,\"PidsLimit\":16}},\
          \"Mounts\":[{{\"Source\":\"SOURCE_PATH\",\"Destination\":\"/workspace\",\"Type\":\"bind\",\
          \"Options\":[\"noexec\",\"nosuid\",\"nodev\"],\"RW\":false}}]}}]"
