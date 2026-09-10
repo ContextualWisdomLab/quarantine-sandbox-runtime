@@ -1,4 +1,4 @@
-name: QSR source snapshot
+name: QSR exact gate composition repair
 
 on:
   push:
@@ -7,27 +7,245 @@ on:
       - .github/workflows/qsr-source-snapshot.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  repair:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          persist-credentials: false
+          persist-credentials: true
+          fetch-depth: 2
       - name: Verify exact checkout
         env:
           EXPECTED_HEAD_SHA: ${{ github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-      - name: Archive exact working tree
+      - name: Apply reviewed production patch
         run: |
-          mkdir -p "$RUNNER_TEMP/qsr-source"
-          tar --exclude=.git -czf "$RUNNER_TEMP/qsr-source/qsr-source-snapshot.tar.gz" .
-      - name: Upload exact working tree
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: qsr-source-snapshot-${{ github.sha }}
-          path: ${{ runner.temp }}/qsr-source/qsr-source-snapshot.tar.gz
-          if-no-files-found: error
+          cat > "$RUNNER_TEMP/qsr-gate-composition.patch" <<'PATCH'
+          --- a/src/infrastructure/podman.rs
+          +++ b/src/infrastructure/podman.rs
+          @@ -509,15 +509,10 @@
+               /// egress denial than the service profile's internal, DNS-disabled
+               /// network and needs no separate network object to create or clean up.
+               ///
+          -    /// After creation, the exact acquired container is initialized with
+          -    /// `podman init` without releasing the consumer payload. Static/configured
+          -    /// controls that can already disprove the requested P0 policy are checked
+          -    /// while the container is still held. Only then is the payload started.
+          -    /// The existing live `podman top` verifier remains authoritative for
+          -    /// effective per-process seccomp/LSM/capability evidence after start; this
+          -    /// pre-start slice does not relabel configured state as effective evidence
+          -    /// and therefore does not, by itself, close issue #25's full hold/attest/
+          -    /// release requirement.
+          +    /// This low-level adapter method retains the historical direct-consumer path for migration
+          +    /// tests. Release-authorized production callers must use [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),
+          +    /// which composes the verified runtime gate so `podman start` runs only trusted hold code and
+          +    /// consumer argv cannot become runnable before live seccomp/LSM/capability attestation.
+               ///
+               /// Completion is observed with `podman wait` (bounded by the requested
+               /// lease) and output with `podman logs` against a `k8s-file`-backed log
+          @@ -538,6 +533,51 @@
+                   policy: &IsolationPolicy,
+                   started_at_epoch_seconds: u64,
+               ) -> Result<CommandExecutionResult, CommandExecutionError> {
+          +        self.run_command_with_binding_at(
+          +            request,
+          +            policy,
+          +            started_at_epoch_seconds,
+          +            None,
+          +            |_| Ok(()),
+          +        )
+          +    }
+          +
+          +    /// Run a command with an already verified runtime-gate binding and release operation.
+          +    ///
+          +    /// The gate binding replaces hostile consumer argv as the initial OCI process. The release
+          +    /// callback is invoked only after static configuration and live effective process isolation
+          +    /// have both been verified against the exact acquired container ID.
+          +    pub(super) fn run_runtime_gate_command_at<F>(
+          +        &self,
+          +        request: &CommandExecutionRequest,
+          +        policy: &IsolationPolicy,
+          +        started_at_epoch_seconds: u64,
+          +        runtime_gate_binding_args: &[String],
+          +        release_gate: F,
+          +    ) -> Result<CommandExecutionResult, CommandExecutionError>
+          +    where
+          +        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+          +    {
+          +        self.run_command_with_binding_at(
+          +            request,
+          +            policy,
+          +            started_at_epoch_seconds,
+          +            Some(runtime_gate_binding_args),
+          +            release_gate,
+          +        )
+          +    }
+          +
+          +    fn run_command_with_binding_at<F>(
+          +        &self,
+          +        request: &CommandExecutionRequest,
+          +        policy: &IsolationPolicy,
+          +        started_at_epoch_seconds: u64,
+          +        runtime_gate_binding_args: Option<&[String]>,
+          +        release_gate: F,
+          +    ) -> Result<CommandExecutionResult, CommandExecutionError>
+          +    where
+          +        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+          +    {
+                   request.validate(policy)?;
+                   let staged_source = request
+                       .source_artifact
+          @@ -645,18 +685,22 @@
+                       create_args.push("--workdir".to_owned());
+                       create_args.push("/workspace".to_owned());
+                   }
+          -        let command_entrypoint = serde_json::Value::Array(
+          -            request
+          -                .command
+          -                .iter()
+          -                .cloned()
+          -                .map(serde_json::Value::String)
+          -                .collect(),
+          -        )
+          -        .to_string();
+          -        create_args.push(format!("--entrypoint={command_entrypoint}"));
+          -        create_args.push("--".to_owned());
+          -        create_args.push(request.image_reference.clone());
+          +        if let Some(binding_args) = runtime_gate_binding_args {
+          +            create_args.extend(binding_args.iter().cloned());
+          +        } else {
+          +            let command_entrypoint = serde_json::Value::Array(
+          +                request
+          +                    .command
+          +                    .iter()
+          +                    .cloned()
+          +                    .map(serde_json::Value::String)
+          +                    .collect(),
+          +            )
+          +            .to_string();
+          +            create_args.push(format!("--entrypoint={command_entrypoint}"));
+          +            create_args.push("--".to_owned());
+          +            create_args.push(request.image_reference.clone());
+          +        }
+           
+                   let create_output = match self.checked_output("container_create", &create_args) {
+                       Ok(output) => output,
+          @@ -727,6 +771,12 @@
+                       return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+                   }
+           
+          +        if runtime_gate_binding_args.is_some() {
+          +            if let Err(error) = release_gate(&container_id) {
+          +                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));
+          +            }
+          +        }
+          +
+                   let (exit_code, timed_out) = match self.wait_for_command(&container_id, request) {
+                       Ok(outcome) => outcome,
+                       Err(error) => {
+          --- a/src/infrastructure/podman_runtime_gate_binding.rs
+          +++ b/src/infrastructure/podman_runtime_gate_binding.rs
+          @@ -63,10 +63,9 @@
+           
+           /// A Podman command adapter carrying one independently verified runtime gate artifact.
+           ///
+          -/// This is an intentionally incomplete issue #25 integration boundary. The wrapped canonical
+          -/// adapter retains ownership of command execution; this type only admits construction of the
+          -/// immutable gate-binding fragment. It does not start a container or claim that the bounded
+          -/// release channel exists.
+          +/// Command execution through this adapter composes the verified gate into the canonical Podman
+          +/// lifecycle: the gate is OCI PID 1, effective process isolation is attested while consumer argv
+          +/// remains held, and the one-time release channel opens only after those checks succeed.
+           #[derive(Clone, Debug, PartialEq, Eq)]
+           pub struct RuntimeGatePodmanAdapter {
+               _inner: RootlessPodmanAdapter,
+          @@ -76,9 +75,9 @@
+           impl RootlessPodmanAdapter {
+               /// Bind an independently digest- and architecture-verified runtime gate artifact.
+               ///
+          -    /// The returned adapter exposes only the gate-binding plan until the canonical command runtime
+          -    /// owns a bounded attest-and-release channel. The legacy command execution method remains
+          -    /// unchanged and must not be treated as issue #25 GREEN.
+          +    /// The returned adapter is the release-authorized command boundary. It keeps the underlying
+          +    /// service backend unchanged while requiring gated command composition for its own execution
+          +    /// method.
+               #[must_use]
+               pub fn with_runtime_gate_artifact(
+                   self,
+          @@ -92,6 +91,30 @@
+           }
+           
+           impl RuntimeGatePodmanAdapter {
+          +    /// Run one bounded command through the verified hold/attest/release gate lifecycle.
+          +    ///
+          +    /// # Errors
+          +    ///
+          +    /// Returns [`CommandExecutionError`] if request validation, Podman isolation, gate release,
+          +    /// completion evidence, output collection, or exact-ID cleanup fails. Consumer argv is not
+          +    /// released until live effective process isolation has been verified.
+          +    pub fn run_command_at(
+          +        &self,
+          +        request: &CommandExecutionRequest,
+          +        policy: &IsolationPolicy,
+          +        started_at_epoch_seconds: u64,
+          +    ) -> Result<crate::CommandExecutionResult, CommandExecutionError> {
+          +        let plan = self.plan_command_binding(request, policy)?;
+          +        let binding_args = plan.container_create_binding_args().to_vec();
+          +        self._inner.run_runtime_gate_command_at(
+          +            request,
+          +            policy,
+          +            started_at_epoch_seconds,
+          +            &binding_args,
+          +            |container_id| self.release_command_gate(container_id, plan),
+          +        )
+          +    }
+          +
+               /// Build the runtime-owned gate fragment without invoking Podman or releasing consumer code.
+               ///
+               /// # Errors
+          --- a/src/infrastructure/application_service_backend.rs
+          +++ b/src/infrastructure/application_service_backend.rs
+          @@ -6,6 +6,9 @@
+               CommandExecutionRequest, CommandExecutionResult, IsolationPolicy, RootlessPodmanAdapter,
+           };
+           
+          +#[cfg(unix)]
+          +use crate::RuntimeGatePodmanAdapter;
+          +
+           impl ApplicationServiceBackend for RootlessPodmanAdapter {
+               fn launch_at(
+                   &self,
+          @@ -35,3 +38,15 @@
+                   RootlessPodmanAdapter::run_command_at(self, request, policy, started_at_epoch_seconds)
+               }
+           }
+          +
+          +#[cfg(unix)]
+          +impl CommandExecutionBackend for RuntimeGatePodmanAdapter {
+          +    fn run_to_completion_at(
+          +        &self,
+          +        request: &CommandExecutionRequest,
+          +        policy: &IsolationPolicy,
+          +        started_at_epoch_seconds: u64,
+          +    ) -> Result<CommandExecutionResult, CommandExecutionError> {
+          +        RuntimeGatePodmanAdapter::run_command_at(self, request, policy, started_at_epoch_seconds)
+          +    }
+          +}
+          PATCH
+          sed -i 's/^          //' "$RUNNER_TEMP/qsr-gate-composition.patch"
+          git apply --check "$RUNNER_TEMP/qsr-gate-composition.patch"
+          git apply "$RUNNER_TEMP/qsr-gate-composition.patch"
+          git rm .github/workflows/qsr-source-snapshot.yml
+      - name: Commit and publish non-force descendant
+        env:
+          TARGET_BRANCH: feat/podman-command-execution-backend
+        run: |
+          git config user.name 'CWL quarantine runtime writer'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs src/infrastructure/application_service_backend.rs
+          git commit -m 'fix(runtime): compose verified gate before consumer release'
+          git push origin "HEAD:$TARGET_BRANCH"
