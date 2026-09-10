@@ -6,6 +6,7 @@ use std::{
     fs,
     net::TcpListener,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -13,6 +14,8 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+static TEMPORARY_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn policy(timeout_millis: u64) -> IsolationPolicy {
     IsolationPolicy {
@@ -53,8 +56,9 @@ fn temporary_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after the Unix epoch")
         .as_nanos();
+    let sequence = TEMPORARY_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
+        "quarantine-sandbox-runtime-{name}-{}-{nanos}-{sequence}",
         std::process::id()
     ))
 }
@@ -88,6 +92,7 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
         info, network, container,
     );
 
+    fs::write(&log, b"").expect("fake Podman log sink should exist before process launch");
     std::os::unix::fs::symlink(immutable_fixture_executable(), &program)
         .expect("fake Podman immutable symlink should be creatable");
     fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
