@@ -1,4 +1,5 @@
 #![cfg(target_os = "linux")]
+//! Runtime-gate release-control failure and success witnesses.
 
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
