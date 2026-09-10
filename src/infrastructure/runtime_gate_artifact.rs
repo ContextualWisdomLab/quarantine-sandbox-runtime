@@ -14,6 +14,18 @@ use thiserror::Error;
 
 const RUNTIME_GATE_FILE_NAME: &str = "qsr-runtime-gate";
 const ELF_HEADER_MINIMUM_BYTES: usize = 20;
+const ELF64_HEADER_BYTES: usize = 64;
+const ELF64_PROGRAM_HEADER_BYTES: usize = 56;
+const ELF_TYPE_EXECUTABLE: u16 = 2;
+const ELF_TYPE_SHARED_OBJECT: u16 = 3;
+const ELF_PROGRAM_TYPE_LOAD: u32 = 1;
+const ELF_PROGRAM_TYPE_INTERPRETER: u32 = 3;
+
+#[derive(Clone, Copy)]
+enum ElfDataEncoding {
+    LittleEndian,
+    BigEndian,
+}
 
 /// A digest-bound, architecture-matched runtime gate staged in a private directory.
 ///
@@ -43,14 +55,17 @@ impl RuntimeGateArtifact {
     /// Verify and stage a runtime gate from a trusted host release path.
     ///
     /// `expected_sha256` must be a canonical lowercase SHA-256 digest. The expected architecture
-    /// must equal the current host architecture and the executable's ELF machine identity. Symlink
+    /// must equal the current host architecture and the executable's ELF machine identity. The ELF
+    /// must be a self-contained ELF64 executable or static PIE with a bounded program-header table,
+    /// at least one loadable segment, and no `PT_INTERP` dependency on workload-image code. Symlink
     /// and non-regular-file sources fail closed before bytes are staged.
     ///
     /// # Errors
     ///
     /// Returns [`RuntimeGateArtifactError`] when the expected identity is malformed, the source is
-    /// not a regular file, the bytes do not match the expected digest or architecture, or private
-    /// read-only staging cannot be completed.
+    /// not a regular file, the bytes do not match the expected digest or architecture, the ELF
+    /// loading boundary is malformed or delegates to an external interpreter, or private read-only
+    /// staging cannot be completed.
     pub fn stage(
         source: &Path,
         expected_sha256: &str,
@@ -85,6 +100,7 @@ impl RuntimeGateArtifact {
                 actual: actual_architecture.to_owned(),
             });
         }
+        validate_self_contained_elf_loading(&bytes)?;
 
         let staging_directory = tempfile::Builder::new()
             .prefix("qsr-runtime-gate-")
@@ -155,6 +171,9 @@ pub enum RuntimeGateArtifactError {
         /// Observed architecture.
         actual: String,
     },
+    /// The executable cannot prove a self-contained, bounded ELF loading boundary.
+    #[error("runtime gate ELF loading boundary is malformed or uses an external interpreter")]
+    UnsafeExecutableLoadingBoundary,
     /// The verified bytes could not be materialized into a private read-only executable staging area.
     #[error("runtime gate private staging failed")]
     StagingFailed,
@@ -188,6 +207,101 @@ fn executable_architecture(bytes: &[u8]) -> String {
     }
 }
 
+fn validate_self_contained_elf_loading(bytes: &[u8]) -> Result<(), RuntimeGateArtifactError> {
+    let rejected = || RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary;
+    if bytes.len() < ELF64_HEADER_BYTES
+        || &bytes[..4] != b"\x7fELF"
+        || bytes[4] != 2
+        || bytes[6] != 1
+    {
+        return Err(rejected());
+    }
+
+    let encoding = match bytes[5] {
+        1 => ElfDataEncoding::LittleEndian,
+        2 => ElfDataEncoding::BigEndian,
+        _ => return Err(rejected()),
+    };
+    let object_type = read_u16(bytes, 16, encoding);
+    if !matches!(object_type, ELF_TYPE_EXECUTABLE | ELF_TYPE_SHARED_OBJECT)
+        || read_u32(bytes, 20, encoding) != 1
+        || usize::from(read_u16(bytes, 52, encoding)) != ELF64_HEADER_BYTES
+        || usize::from(read_u16(bytes, 54, encoding)) != ELF64_PROGRAM_HEADER_BYTES
+    {
+        return Err(rejected());
+    }
+
+    let program_header_count = usize::from(read_u16(bytes, 56, encoding));
+    if program_header_count == 0 {
+        return Err(rejected());
+    }
+    let program_header_offset = usize::try_from(read_u64(bytes, 32, encoding)).map_err(|_| rejected())?;
+    if program_header_offset < ELF64_HEADER_BYTES {
+        return Err(rejected());
+    }
+    let table_bytes = ELF64_PROGRAM_HEADER_BYTES
+        .checked_mul(program_header_count)
+        .ok_or_else(rejected)?;
+    let table_end = program_header_offset
+        .checked_add(table_bytes)
+        .ok_or_else(rejected)?;
+    if table_end > bytes.len() {
+        return Err(rejected());
+    }
+
+    let mut has_loadable_segment = false;
+    for index in 0..program_header_count {
+        let header_offset = program_header_offset + index * ELF64_PROGRAM_HEADER_BYTES;
+        match read_u32(bytes, header_offset, encoding) {
+            ELF_PROGRAM_TYPE_LOAD => has_loadable_segment = true,
+            ELF_PROGRAM_TYPE_INTERPRETER => return Err(rejected()),
+            _ => {}
+        }
+    }
+    if !has_loadable_segment {
+        return Err(rejected());
+    }
+    Ok(())
+}
+
+fn read_u16(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u16 {
+    let value = [bytes[offset], bytes[offset + 1]];
+    match encoding {
+        ElfDataEncoding::LittleEndian => u16::from_le_bytes(value),
+        ElfDataEncoding::BigEndian => u16::from_be_bytes(value),
+    }
+}
+
+fn read_u32(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u32 {
+    let value = [
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ];
+    match encoding {
+        ElfDataEncoding::LittleEndian => u32::from_le_bytes(value),
+        ElfDataEncoding::BigEndian => u32::from_be_bytes(value),
+    }
+}
+
+fn read_u64(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u64 {
+    let value = [
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ];
+    match encoding {
+        ElfDataEncoding::LittleEndian => u64::from_le_bytes(value),
+        ElfDataEncoding::BigEndian => u64::from_be_bytes(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs::PermissionsExt};
@@ -198,6 +312,47 @@ mod tests {
         RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture,
         validate_expected_digest,
     };
+
+    const ELF_HEADER_BYTES: usize = 64;
+    const PROGRAM_HEADER_BYTES: usize = 56;
+    const FILE_BYTES: usize = 512;
+
+    fn self_contained_gate_bytes() -> Vec<u8> {
+        let machine = match std::env::consts::ARCH {
+            "x86_64" => 62_u16,
+            "aarch64" => 183_u16,
+            other => panic!("runtime-gate test fixture does not support architecture {other}"),
+        };
+        let mut bytes = vec![0_u8; FILE_BYTES];
+        bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x400100_u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&(ELF_HEADER_BYTES as u64).to_le_bytes());
+        bytes[52..54].copy_from_slice(&(ELF_HEADER_BYTES as u16).to_le_bytes());
+        bytes[54..56].copy_from_slice(&(PROGRAM_HEADER_BYTES as u16).to_le_bytes());
+        bytes[56..58].copy_from_slice(&1_u16.to_le_bytes());
+        let header = ELF_HEADER_BYTES;
+        bytes[header..header + 4].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[header + 4..header + 8].copy_from_slice(&5_u32.to_le_bytes());
+        bytes[header + 16..header + 24].copy_from_slice(&0x400000_u64.to_le_bytes());
+        bytes[header + 32..header + 40].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+        bytes[header + 40..header + 48].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+        bytes[header + 48..header + 56].copy_from_slice(&4096_u64.to_le_bytes());
+        bytes
+    }
+
+    fn stage_fixture() -> (tempfile::TempDir, RuntimeGateArtifact, Vec<u8>) {
+        let directory = tempfile::tempdir().expect("runtime-gate fixture directory should exist");
+        let source = directory.path().join("self-contained-runtime-gate");
+        let bytes = self_contained_gate_bytes();
+        fs::write(&source, &bytes).expect("runtime-gate fixture should be writable");
+        let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let artifact = RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+            .expect("matching self-contained runtime gate should stage");
+        (directory, artifact, bytes)
+    }
 
     #[test]
     fn expected_digest_requires_exact_lowercase_sha256_shape() {
@@ -241,12 +396,7 @@ mod tests {
 
     #[test]
     fn clone_keeps_one_staged_gate_alive_without_copying_identity() {
-        let source = std::env::current_exe().expect("current test executable should exist");
-        let bytes = fs::read(&source).expect("current test executable should be readable");
-        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
-        let artifact =
-            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
-                .expect("matching runtime gate artifact should stage");
+        let (_directory, artifact, _bytes) = stage_fixture();
         let clone = artifact.clone();
         assert_eq!(artifact, clone);
         drop(artifact);
@@ -258,13 +408,7 @@ mod tests {
 
     #[test]
     fn staged_gate_permissions_survive_a_remapped_container_user() {
-        let source = std::env::current_exe().expect("current test executable should exist");
-        let bytes = fs::read(&source).expect("current test executable should be readable");
-        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
-        let artifact =
-            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
-                .expect("matching runtime gate artifact should stage");
-
+        let (_directory, artifact, _bytes) = stage_fixture();
         let mode = fs::metadata(artifact.path())
             .expect("staged runtime gate metadata should exist")
             .permissions()
