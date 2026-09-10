@@ -202,6 +202,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
         with:
           toolchain: 1.97.1
+          targets: x86_64-unknown-linux-musl
       - name: Verify dedicated positive LSM runner contract
         run: |
           test -n "$RUNNER_NAME"
@@ -219,6 +220,11 @@ jobs:
         run: |
           podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
           podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Execute production-gated command timeout acceptance
+        run: >-
+          cargo test --locked
+          --test podman_command_execution_e2e
+          -- --ignored --exact production_gated_command_execution_kills_and_reports_a_command_that_exceeds_its_timeout --nocapture
       - name: Execute real positive LSM isolation and cleanup acceptance
         run: >-
           cargo test --locked
