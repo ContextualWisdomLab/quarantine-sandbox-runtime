@@ -2,9 +2,16 @@
 
 #![cfg(target_os = "linux")]
 
-use std::{fs, path::PathBuf, sync::atomic::{AtomicU64, Ordering}, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use quarantine_sandbox_runtime::{PrSourceArtifactError, PrSourceArtifactInput, stage_pr_source_artifact};
+use quarantine_sandbox_runtime::{
+    PrSourceArtifactError, PrSourceArtifactInput, stage_pr_source_artifact,
+};
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
