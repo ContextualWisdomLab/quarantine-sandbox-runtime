@@ -101,7 +101,10 @@ mod linux {
             .read_to_string(&mut consumer_output)
             .expect("released consumer stdout should be readable");
         let status = child.wait().expect("runtime gate child should be reapable");
-        assert!(status.success(), "released /bin/cat should exit successfully");
+        assert!(
+            status.success(),
+            "released /bin/cat should exit successfully"
+        );
         assert!(
             consumer_output.is_empty(),
             "release-channel bytes written after trusted acknowledgement must never become consumer stdin: {consumer_output:?}"
