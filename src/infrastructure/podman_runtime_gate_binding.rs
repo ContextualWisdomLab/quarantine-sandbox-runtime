@@ -296,6 +296,36 @@ mod tests {
     use super::RootlessPodmanAdapter;
     use crate::{CommandExecutionRequest, IsolationPolicy, ResourceRequest, RuntimeGateArtifact};
 
+    const ELF_HEADER_BYTES: usize = 64;
+    const PROGRAM_HEADER_BYTES: usize = 56;
+    const FILE_BYTES: usize = 512;
+
+    fn self_contained_gate_bytes() -> Vec<u8> {
+        let machine = match std::env::consts::ARCH {
+            "x86_64" => 62_u16,
+            "aarch64" => 183_u16,
+            other => panic!("runtime-gate test fixture does not support architecture {other}"),
+        };
+        let mut bytes = vec![0_u8; FILE_BYTES];
+        bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x400100_u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&(ELF_HEADER_BYTES as u64).to_le_bytes());
+        bytes[52..54].copy_from_slice(&(ELF_HEADER_BYTES as u16).to_le_bytes());
+        bytes[54..56].copy_from_slice(&(PROGRAM_HEADER_BYTES as u16).to_le_bytes());
+        bytes[56..58].copy_from_slice(&1_u16.to_le_bytes());
+        let header = ELF_HEADER_BYTES;
+        bytes[header..header + 4].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[header + 4..header + 8].copy_from_slice(&5_u32.to_le_bytes());
+        bytes[header + 16..header + 24].copy_from_slice(&0x400000_u64.to_le_bytes());
+        bytes[header + 32..header + 40].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+        bytes[header + 40..header + 48].copy_from_slice(&(FILE_BYTES as u64).to_le_bytes());
+        bytes[header + 48..header + 56].copy_from_slice(&4096_u64.to_le_bytes());
+        bytes
+    }
+
     fn policy() -> IsolationPolicy {
         IsolationPolicy {
             policy_id: "runtime_gate_stdin_policy_v1".to_owned(),
@@ -331,9 +361,11 @@ mod tests {
 
     #[test]
     fn gate_binding_keeps_container_stdin_open_for_bounded_release() {
-        let source = std::env::current_exe().expect("current test executable should exist");
-        let bytes = fs::read(&source).expect("current test executable should be readable");
-        let expected_sha256 = format!("{:x}", Sha256::digest(bytes));
+        let directory = tempfile::tempdir().expect("runtime-gate fixture directory should exist");
+        let source = directory.path().join("self-contained-runtime-gate");
+        let bytes = self_contained_gate_bytes();
+        fs::write(&source, &bytes).expect("runtime-gate fixture should be writable");
+        let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
         let artifact =
             RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
                 .expect("matching runtime gate artifact should stage");
