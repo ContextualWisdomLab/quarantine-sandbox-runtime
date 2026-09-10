@@ -265,8 +265,19 @@ impl ApplicationServiceLease {
         metadata: RuntimeLeaseMetadata,
         endpoint: ServiceEndpoint,
     ) -> Self {
+        let cleanup_sandbox_id = metadata.sandbox_id.clone();
+        Self::new_with_cleanup_sandbox_id(request, metadata, cleanup_sandbox_id, endpoint)
+    }
+
+    /// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.
+    pub(crate) fn new_with_cleanup_sandbox_id(
+        request: &ApplicationServiceRequest,
+        metadata: RuntimeLeaseMetadata,
+        cleanup_sandbox_id: String,
+        endpoint: ServiceEndpoint,
+    ) -> Self {
         let cleanup_authority = ApplicationServiceCleanupAuthority {
-            sandbox_id: metadata.sandbox_id.clone(),
+            sandbox_id: cleanup_sandbox_id,
             network_id: metadata.network_id.clone(),
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
         };
