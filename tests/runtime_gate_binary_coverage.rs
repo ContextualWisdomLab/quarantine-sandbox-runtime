@@ -79,7 +79,12 @@ fn exact_bounded_release_acknowledges_before_successful_exec() {
 #[test]
 fn released_consumer_cannot_read_the_controller_release_channel() {
     let output = run_gate(
-        &["release", "/bin/sh", "-c", "read value && exit 90 || exit 0"],
+        &[
+            "release",
+            "/bin/sh",
+            "-c",
+            "read value && exit 90 || exit 0",
+        ],
         b"release\nconsumer-secret\n",
     );
     assert_eq!(output.status.code(), Some(0));
@@ -91,16 +96,11 @@ fn released_consumer_cannot_read_the_controller_release_channel() {
 
 #[test]
 fn exec_failure_is_typed_by_exit_status_after_release_acknowledgement() {
-    let output = run_gate(
-        &["release", "/definitely-not-a-qsr-consumer"],
-        b"release\n",
-    );
+    let output = run_gate(&["release", "/definitely-not-a-qsr-consumer"], b"release\n");
     assert_eq!(output.status.code(), Some(78));
     assert_eq!(
         output.stdout,
         format!("{READY_MARKER}{RELEASED_MARKER}").as_bytes()
     );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("qsr runtime gate exec failed")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("qsr runtime gate exec failed"));
 }
