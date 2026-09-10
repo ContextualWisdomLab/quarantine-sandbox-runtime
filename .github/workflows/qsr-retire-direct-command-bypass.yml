@@ -30,7 +30,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           podman = Path('src/infrastructure/podman.rs')
           s = podman.read_text()
@@ -56,7 +55,18 @@ jobs:
               '    /// which binds the verified runtime gate before any consumer process can run.\n',
               1,
           )
-          podman.write_text(s)
+          nested_release = '''        if runtime_gate_binding_args.is_some() {\n            if let Err(error) = release_gate(&container_id) {\n                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));\n            }\n        }\n'''
+          flat_release = '''        if runtime_gate_binding_args.is_some() {\n            release_gate(&container_id).map_err(|error| {\n                self.cleanup_owned_command_container_or_report(&container_id, error)\n            })?;\n        }\n'''
+          if nested_release not in s:
+              raise SystemExit('expected release callback block not found')
+          podman.write_text(s.replace(nested_release, flat_release, 1))
+
+          gate_binding = Path('src/infrastructure/podman_runtime_gate_binding.rs')
+          s = gate_binding.read_text()
+          old_cleanup = '''        let cleanup_result = terminate_release_client(&mut child);\n        if let Err(error) = cleanup_result {\n            return Err(error);\n        }\n'''
+          if old_cleanup not in s:
+              raise SystemExit('expected release-client cleanup block not found')
+          gate_binding.write_text(s.replace(old_cleanup, '        terminate_release_client(&mut child)?;\n', 1))
 
           backend = Path('src/infrastructure/application_service_backend.rs')
           s = backend.read_text()
@@ -82,8 +92,11 @@ jobs:
 
           primary = Path('tests/podman_command_execution.rs')
           text = primary.read_text()
-          text = text.replace('    ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,\n',
-                              '    ApplicationServiceError, CommandExecutionError,\n', 1)
+          text = text.replace(
+              '    ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,\n',
+              '    ApplicationServiceError, CommandExecutionError,\n',
+              1,
+          )
           marker = '#[test]\nfn command_execution_backend_trait_forwards_to_run_command_at() {'
           start = text.find(marker)
           if start == -1:
@@ -112,6 +125,6 @@ jobs:
           test "$(git rev-parse origin/$TARGET_BRANCH)" = "$EXPECTED_HEAD_SHA"
           git config user.name 'CWL quarantine runtime writer'
           git config user.email 'actions@users.noreply.github.com'
-          git add src/infrastructure/podman.rs src/infrastructure/application_service_backend.rs tests
+          git add src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs src/infrastructure/application_service_backend.rs tests
           git commit -m 'fix(runtime): retire direct command bypass from release API'
           git push origin "HEAD:$TARGET_BRANCH"
