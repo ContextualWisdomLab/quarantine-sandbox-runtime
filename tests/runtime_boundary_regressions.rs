@@ -5,7 +5,7 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::symlink,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -55,12 +55,22 @@ fn request(digest: &str) -> ApplicationServiceRequest {
 
 fn write_executable(fixture_directory: &Path, name: &str, script: &str) -> PathBuf {
     let program = fixture_directory.join(name);
-    fs::write(&program, script).expect("fake runtime executable should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake runtime executable metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake runtime executable should run");
+    let scenario = fixture_directory.join(format!("{name}.scenario"));
+    let dispatcher_log = fixture_directory.join(format!("{name}.dispatcher-calls"));
+    let config = PathBuf::from(format!("{}.config", program.display()));
+    let dispatcher = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
+
+    fs::write(&scenario, script).expect("fake runtime scenario should be writable");
+    fs::write(
+        &config,
+        format!(
+            "MODE=source_script\nLOG='{}'\nSCRIPT='{}'\n",
+            dispatcher_log.display(),
+            scenario.display()
+        ),
+    )
+    .expect("fake runtime dispatcher config should be writable");
+    symlink(&dispatcher, &program).expect("immutable fake Podman dispatcher should be linkable");
     program
 }
 
