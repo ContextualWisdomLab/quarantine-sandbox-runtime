@@ -10,7 +10,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use quarantine_sandbox_runtime::{PrSourceArtifactInput, stage_pr_source_artifact};
+use quarantine_sandbox_runtime::{
+    PrSourceArtifactError, PrSourceArtifactInput, stage_pr_source_artifact,
+};
 use sha2::{Digest, Sha256};
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -99,5 +101,34 @@ fn rejects_symlinks_and_digest_mismatches_fail_closed() {
     fs::remove_file(source.join("link")).expect("remove symlink");
     let error = stage_pr_source_artifact(&input).expect_err("digest mismatch must be rejected");
     assert!(error.to_string().contains("digest mismatch"));
+    let _ = fs::remove_dir_all(source);
+}
+
+#[test]
+fn rejects_sparse_regular_file_above_total_byte_budget_before_copying() {
+    const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+
+    let source = temporary_path("oversized-source");
+    fs::create_dir_all(&source).expect("source directory");
+    let oversized = source.join("oversized.bin");
+    fs::File::create(&oversized)
+        .expect("sparse source file")
+        .set_len(MAX_SOURCE_BYTES + 1)
+        .expect("sparse source length");
+    let input = PrSourceArtifactInput {
+        host_path: source.clone(),
+        revision_sha: "d".repeat(40),
+        expected_tree_sha256: "e".repeat(64),
+    };
+
+    let error = stage_pr_source_artifact(&input)
+        .expect_err("metadata-declared source size above the staging budget must fail closed");
+    assert!(matches!(
+        error,
+        PrSourceArtifactError::LimitExceeded {
+            limit_name: "total_bytes"
+        }
+    ));
+
     let _ = fs::remove_dir_all(source);
 }
