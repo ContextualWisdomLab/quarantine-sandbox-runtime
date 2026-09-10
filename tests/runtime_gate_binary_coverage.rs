@@ -11,13 +11,23 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     process::{Command, Output, Stdio},
+    sync::{Mutex, MutexGuard},
 };
 
 const GATE_BINARY: &str = env!("CARGO_BIN_EXE_qsr_runtime_gate");
 const READY_MARKER: &str = "QSR_GATE_READY\n";
 const RELEASED_MARKER: &str = "QSR_GATE_RELEASED\n";
 
+static GATE_PROCESS_LOCK: Mutex<()> = Mutex::new(());
+
+fn gate_process_lock() -> MutexGuard<'static, ()> {
+    GATE_PROCESS_LOCK
+        .lock()
+        .expect("runtime-gate process witness lock should not be poisoned")
+}
+
 fn run_gate(arguments: &[&str], release_input: &[u8]) -> Output {
+    let _guard = gate_process_lock();
     let mut child = Command::new(GATE_BINARY)
         .args(arguments)
         .stdin(Stdio::piped())
@@ -68,6 +78,7 @@ fn oversized_release_input_fails_the_control_channel_closed() {
 
 #[test]
 fn unwritable_stdout_fails_the_control_channel_before_release_read() {
+    let _guard = gate_process_lock();
     let failing_stdout = OpenOptions::new()
         .write(true)
         .open("/dev/full")
@@ -85,6 +96,7 @@ fn unwritable_stdout_fails_the_control_channel_before_release_read() {
 
 #[test]
 fn unreadable_stdin_fails_the_control_channel_after_ready_marker() {
+    let _guard = gate_process_lock();
     let unreadable_stdin = File::open("/").expect("root directory should open as a directory fd");
     let output = Command::new(GATE_BINARY)
         .args(["release", "/bin/true"])
@@ -100,6 +112,7 @@ fn unreadable_stdin_fails_the_control_channel_after_ready_marker() {
 
 #[test]
 fn closed_acknowledgement_reader_fails_closed_before_consumer_exec() {
+    let _guard = gate_process_lock();
     let mut child = Command::new(GATE_BINARY)
         .args(["release", "/bin/true"])
         .stdin(Stdio::piped())
