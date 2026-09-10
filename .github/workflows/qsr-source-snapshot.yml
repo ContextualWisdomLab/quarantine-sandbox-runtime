@@ -22,10 +22,10 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Archive exact working tree
-        run: tar --exclude=.git -czf qsr-source-snapshot.tar.gz .
+        run: tar --exclude=.git -czf ../qsr-source-snapshot.tar.gz .
       - name: Upload exact working tree
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: qsr-source-snapshot-${{ github.sha }}
-          path: qsr-source-snapshot.tar.gz
+          path: ../qsr-source-snapshot.tar.gz
           if-no-files-found: error
