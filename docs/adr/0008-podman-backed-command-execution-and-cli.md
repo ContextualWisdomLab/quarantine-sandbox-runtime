@@ -2,82 +2,180 @@
 
 - **Status:** Proposed
 - **Date:** 2026-09-02
+- **Last reviewed:** 2026-09-11
 
-This ADR remains Proposed while PR #14 is Draft. Acceptance requires protected integration of the prerequisite stack, a pre-payload effective-isolation boundary that makes issue #25 GREEN, fresh exact-head execution of the current cleanup and isolation regressions, effective-isolation proof on an eligible LSM-capable backend, and release-grade evidence under live governance.
+This ADR remains Proposed while PR #14 is Draft. The original pre-attestation execution defect is repaired in the active lineage, but acceptance still requires one unchanged integrated candidate with complete owned-production coverage, real rootless resource/timeout evidence, positive effective-LSM evidence, qualifying review/security gates, protected-head verification, and immutable release/SBOM/provenance/reproducibility/rollback evidence.
 
 ## Context
 
-ADR-0007 defines a bounded run-to-completion contract but intentionally ships no production backend or transport. The next slice needs a real rootless-Podman implementation that reuses the existing isolation policy and process supervisor, plus a minimal transport usable by CI/security consumers.
+ADR-0007 defined a bounded run-to-completion contract without a production backend or transport. The required next capability was a rootless-Podman implementation that reused the repository's isolation policy and bounded process supervision while preserving consumer-neutral contracts.
 
-A security review corrected an earlier design idea: static `podman container inspect` configuration is evidence of requested/configured state, not positive proof of effective per-process seccomp/LSM/capability enforcement. `run_command_at` therefore fails closed when live process evidence cannot be obtained; it does not fall back to static-only attestation.
+The main security constraint is temporal, not merely configurational: hostile consumer argv must not become runnable before the selected P0 isolation profile is positively established at the effective process boundary. Static `podman container inspect` state is useful contradiction evidence, but it is not proof that the running process actually has the required seccomp, capability, LSM, namespace, resource, and network confinement.
 
-Issue #25 exposed a stronger lifecycle defect. Exact PR #14 head `ed9318ba96d876341866d84a892d0145e12f6469`, native CI `34340070150`, executed `podman_command_execution_pre_attestation_red::command_payload_is_not_runnable_before_effective_process_attestation` and failed because the consumer command was already the OCI process when `podman start` was invoked. A later live-attestation error and cleanup cannot undo hostile code that became runnable before that evidence was sampled. The previous prose saying the runtime inspected the running process before allowing the requested command to execute was therefore incorrect and is superseded by this Proposed decision.
+Issue #25 demonstrated the consequence. Exact historical PR #14 head `ed9318ba96d876341866d84a892d0145e12f6469`, native CI `34340070150`, executed `podman_command_execution_pre_attestation_red::command_payload_is_not_runnable_before_effective_process_attestation` and failed because the consumer command itself was already the OCI initial process when `podman start` made it runnable. A later attestation failure and cleanup cannot undo hostile code that was already allowed to execute.
 
-The next RED narrowed one usable hold primitive without closing the P0. Test-bearing `9e36766abc0a553f45c62fa327b34f1315dc0db9`, executed after immutable-fixture prerequisites on exact `eb2330ffb6689b07706a305e55c81871414e9fe5` / native CI `34353894509`, proved the command path did not invoke `podman init`: an unavailable init primitive did not fail closed and invalid configured isolation was not rejected while the container was still held. Production `40313a2a8fe058f3cb25d3580b4f1fecbb4ec2e1` plus formatter-only `f1a037931ecc7fcbd6e87836f8fb7048c2c3544e` now orders an acquired container ID through `podman init`, pre-start configuration verification, and only then `podman start`, while retaining the existing post-start live-process verifier. This is a minimum partial repair for the executed init-hold counterexample, not effective-process attestation.
+A subsequent `podman init` experiment proved a useful earlier hold point, but not the complete boundary. Test-bearing `9e36766abc0a553f45c62fa327b34f1315dc0db9`, executed on exact `eb2330ffb6689b07706a305e55c81871414e9fe5` / CI `34353894509`, proved production did not yet hold and validate the created container before start. Production `40313a2a8fe058f3cb25d3580b4f1fecbb4ec2e1` plus formatter-only `f1a037931ecc7fcbd6e87836f8fb7048c2c3544e` added `create -> exact ID -> init -> configured-state verification -> start`, but that remained a partial repair because the hostile consumer was still the process that would run at start.
 
-OCI runtime lifecycle semantics explain both the value and the limit of that repair. OCI `create` establishes the runtime environment without running the user-specified program, and Podman `init` performs the work needed to start an already-created container without starting it. During `start`, OCI `startContainer` hooks execute before the user-specified process. By contrast, OCI explicitly notes that `createRuntime` and `createContainer` hooks may run before cgroups and SELinux/AppArmor setup is complete. A production pre-payload boundary must preserve these distinctions rather than promoting configured state to effective process evidence.
+Real backend feasibility was then established independently. Exact `7da7d3b36ec8830ab16d776e5ed1a93f7a16b8ad`, CI `34379177369`, hosted rootless-Podman job `102559489017` proved that a runtime-owned static gate can be mounted read-only as the OCI entrypoint, remain the only running process while the consumer is held, expose effective seccomp/capability/security-label evidence, retain its SHA-256 identity, and release exact consumer argv only after an explicit control event. That proof answered whether the mechanism was implementable; it did not by itself integrate the mechanism into production.
 
-A real backend capability proof now closes the feasibility question for the selected gate mechanism, but not the production defect. Exact `7da7d3b36ec8830ab16d776e5ed1a93f7a16b8ad`, native CI `34379177369`, hosted negative rootless/AppArmor job `102559489017` completed GREEN on Ubuntu 24.04 with rootless Podman 4.9.3. The test compiles a checked-in runtime-owned gate as a static `x86_64-unknown-linux-musl` executable, hashes it, mounts it read-only as the OCI entrypoint, holds before consumer execution, samples effective seccomp/capability/security-label evidence, verifies ambient capabilities from `/proc/<hpid>/status`, and releases the exact consumer argv only after an explicit token. Gate SHA-256 remains unchanged and exact-ID cleanup plus the leak scan pass. The same hosted lane still proves unavailable positive LSM fails closed; it is not positive-LSM acceptance.
-
-That GREEN proves that a runtime-owned hold/attest/release primitive is implementable on a supported real rootless backend. It does not make current `RootlessPodmanAdapter::run_command_at` GREEN: exact `7da7d3...`, verify job `102559489320`, still reaches and fails the original P0 payload-side-effect regression after the neighboring command-runtime contracts pass because production still installs consumer argv as the initial OCI entrypoint. The gate fixture is also CI-built rather than a released runtime artifact, so immutable packaging, architecture selection, delivery identity and release-channel ownership remain open production contracts.
+The active PR #14 lineage now performs that production composition. Historical evidence remains traceability, not current-head GREEN. No predecessor check transfers after source or documentation changes.
 
 ## Decision
 
-### Backend
+### Bounded contexts and ownership
 
-`RootlessPodmanAdapter::run_command_at` implements `CommandExecutionBackend` and reuses the existing P0 isolation policy and `BoundedCommandRunner`. The command sandbox uses a digest-pinned image, read-only root filesystem, non-root identity, all-capability drop, no-new-privileges, isolated namespaces, bounded CPU/RAM/PID/tmpfs/lifetime, and `--network none`.
+`CommandExecutionRequest` and `CommandExecutionResult` remain consumer-neutral application-service/supporting contracts. Sandbox lifecycle, isolation policy enforcement, resource bounds, attestation, timeout, and cleanup remain owned by this repository's `sandbox_execution`/infrastructure boundary. Consumer authorization, tool policy, secrets, verdicts, incidents, and business decisions stay outside this runtime behind versioned ACLs.
 
-The current Draft implementation has a partial hold boundary. After successful `podman create` yields an admitted exact container ID, the runtime calls `podman init <id>`, fails closed and cleans up that exact ID if init fails, validates static/configuration evidence while the container remains held, then calls `podman start <id>` and retains the existing live effective-process verifier. The pre-start verifier rejects configured state that already disproves the P0 profile; it is deliberately not labeled effective seccomp/LSM/capability proof.
+Podman is an infrastructure adapter. Consumers do not call Podman directly and do not own its CLI/inspection DTOs.
 
-That sequence does **not** close issue #25. Final seccomp/LSM/capability state can be established at or near process exec, while `podman init` and static inspection occur before the consumer process exists. The selected production direction is therefore a runtime-owned two-phase execution gate: the initial OCI program is an immutable runtime gate rather than hostile consumer argv; the gate is started under final process controls and held; the runtime observes and evaluates effective isolation evidence for that exact running gate; and only positive policy evaluation permits the gate to `execve` the exact consumer argv.
+### Production command backend
 
-The real rootless capability proof establishes the backend mechanism but not the production integration. Production adoption requires all of the following through RED-driven tests and same-head real-backend acceptance:
+Release callers use `RuntimeGatePodmanAdapter`. The lower-level `RootlessPodmanAdapter::run_legacy_command_at_for_test` is compiled only with debug assertions so historical/focused tests can still exercise the ungated lower-level lifecycle without making it a release surface.
 
-1. the consumer process cannot become runnable before positive attestation;
-2. attestation/gate code is runtime-owned rather than supplied by the hostile image;
-3. the gate is immutably identified, architecture-compatible and delivered through a versioned runtime-owned contract;
-4. the gate mount, control channel and release channel are separately bounded and included in the isolation proof;
-5. backend capability and supported evidence descriptors are detected explicitly; absence/malformed evidence fails closed;
-6. applied mount/resource/namespace checks and live seccomp/LSM/capability evidence are obtained before consumer release;
-7. positive policy evaluation is the only state transition that permits release, and release occurs exactly once;
-8. the exact consumer argv is preserved across the gate-to-consumer `execve` transition;
-9. the exact acquired container identity remains the sole post-create lifecycle/destructive authority; and
-10. an eligible positive-LSM runner independently proves the effective boundary.
+The production sequence is:
 
-Podman 4.9.3 evidence handling is an explicit backend ACL rather than a display-string assumption. Supported `podman top` descriptors include seccomp, capability sets, host PID and security label, but not `capamb`; ambient capability evidence is therefore taken from `/proc/<hpid>/status`. Equivalent empty-capability renderings such as `none` and all-zero hexadecimal are normalized semantically while any non-empty set remains a hard failure. Unknown `top` descriptors must not be used because Podman may fall through to host `ps` behavior.
+```text
+verify/stage immutable runtime gate
+→ stage optional exact-revision source
+→ verify rootless backend/security capability
+→ create container with runtime gate as OCI PID 1
+   while exact consumer argv is held behind a one-time token
+→ acquire exact container ID from runtime-owned --cidfile
+→ reject configured image/resource/tmpfs/namespace/network/mount contradictions
+→ start the gate only
+→ obtain and evaluate live effective seccomp/capability/LSM evidence
+→ authorize one-time release scoped to the exact container ID
+→ require trusted QSR_GATE_RELEASED acknowledgement
+→ detach the release stdin/control channel
+→ exec exact consumer argv
+→ bounded wait / timeout termination / log retrieval
+→ exact-ID cleanup
+```
 
-Podman's `--hooks-dir` can inject OCI hooks, but hook support alone is not acceptance. OCI requires a `startContainer` hook path to resolve in the container namespace, so an arbitrary hostile tool image cannot be assumed to contain a trusted attestor. Any hook-based implementation must deliver the runtime-owned attestor through an explicitly reviewed narrow path rather than trusting image content.
+The consumer command therefore does not become the OCI initial process. Positive policy evaluation at the running gate is the only transition that can release hostile argv.
 
-Completion remains observed with bounded `podman wait`; bounded output is collected with `podman logs` using a retaining log driver. A nonzero workload exit code remains a structured workload result. Administrative Podman timeout, output-bound overflow, invocation failure, malformed evidence, or cleanup failure remains a runtime error.
+### Runtime-gate identity and loading boundary
 
-Every post-create failure path must attempt cleanup against the acquired exact container identity. If cleanup itself fails, that failure is explicit evidence and must not be hidden behind an earlier isolation/log/wait error.
+`RuntimeGateArtifact` is a runtime-owned host artifact, not workload-image content. Admission requires:
+
+1. an exact lowercase 64-hex SHA-256 release identity;
+2. a declared architecture equal to the runtime host architecture;
+3. a no-follow regular-file source;
+4. source bytes matching the configured digest;
+5. a bounded self-contained ELF64 `ET_EXEC` or `ET_DYN` program-header table;
+6. at least one `PT_LOAD` and no `PT_INTERP` dependency on workload-image code; and
+7. executable `e_machine` equal to the declared/host architecture.
+
+Verified bytes are copied into a private read-only/executable staging area and that exact staged path is bound into the command container. Separately staged artifacts with identical bytes are equal only when their runtime authority identity is the same; independent private staging lifetimes must not alias by digest alone.
+
+### Container identity and destructive authority
+
+Before successful create, no container identity exists. Successful create writes a runtime-owned `--cidfile`; the admitted exact container ID becomes the sole post-create lifecycle/destructive authority. Generated `qsr-cmd-*` names remain correlation metadata. Malformed create stdout does not authorize `rm --force` against the generated name; cleanup uses an admitted runtime receipt or fails closed.
+
+This decision avoids treating same-principal namespace names as ownership proof.
+
+### Command isolation profile
+
+The command sandbox requires a digest-pinned image, no pull, read-only root filesystem, explicit bounded `/tmp`, non-root numeric identity, all-capability drop, no-new-privileges, isolated user/PID/IPC/UTS/cgroup namespaces, bounded CPU/RAM/PID/lifetime, no service publication, and `--network none`.
+
+Configured command state must include a nonzero exact `Config.Timeout`, exactly one hardened `/tmp` tmpfs matching the requested size and `rw,noexec,nosuid,nodev`, the expected resource limits, the expected image identity, required namespace state, and no network attachment. These checks are early contradiction gates. They are never relabeled as kernel-enforcement proof.
+
+The runtime obtains live effective process evidence after starting only the gate. Unsupported/malformed evidence fails closed. Podman top/process-security evidence is treated as a backend ACL rather than a display-string assumption; unavailable positive LSM remains incomplete evidence rather than success.
+
+### Timeout and output
+
+Completion is observed with bounded `podman wait`. On lease expiry, the runtime requires `podman kill` success before post-kill wait evidence can be accepted; an ignored kill is a runtime failure, not a timeout result. Output is collected after exit through a finite retaining `k8s-file` log path and bounded by the command output contract. Administrative Podman timeout, output-bound overflow, invocation failure, malformed evidence, or cleanup failure remains a runtime error; nonzero workload exit is a structured workload result.
+
+### Optional exact-revision source transport
+
+A source input is accepted only as the complete tuple of absolute trusted host directory, canonical lowercase Git SHA-1/SHA-256 revision identity, and expected canonical tree SHA-256. The consumer path is never mounted directly.
+
+The runtime:
+
+- checks the caller-supplied root with no-follow metadata before canonicalization and requires root device/inode continuity across that initial resolution;
+- walks only regular directories/files, rejects symlinks and special entries, and preserves exact Unix pathname bytes including literal backslashes and non-UTF-8 names;
+- bounds regular-file count and total bytes;
+- hashes sorted pathname length/path bytes/content length/content bytes;
+- strips all executable bits in the staged copy;
+- keeps the host staging root owner-only; and
+- mounts only the staged tree at `/workspace` as `ro,noexec,nosuid,nodev`.
+
+The current root-object repair does not claim that every later pathname traversal operation is fully race-free against concurrent same-principal mutation. A stronger descriptor/capability-based traversal is a separate hardening decision if required; the expected tree digest still binds accepted bytes and paths.
 
 ### Transport
 
-Add the synchronous `quarantine-sandbox-runtime run` CLI using direct argv after `--`. The CLI validates against an operator policy ceiling, invokes the production backend, prints a structured JSON result on success, and does not add an HTTP listener or shell-string parser.
+The synchronous `quarantine-sandbox-runtime run` CLI uses direct argv after `--`. It validates against operator policy, requires the production runtime-gate identity for release operation, invokes the production backend, emits structured JSON on success, and does not add an HTTP listener or shell-string parser.
 
-An optional PR-source input is accepted only as a complete tuple: an absolute host path to a trusted caller's materialized tree, an exact lower-case Git SHA-1/SHA-256 revision, and the expected canonical tree SHA-256. The runtime never mounts that path directly. It copies only regular files into a bounded temporary tree, rejects links and special files, strips every executable bit, verifies the sorted path-and-content manifest digest, and mounts only the verified staging tree at `/workspace` with `ro,noexec,nosuid,nodev`. Container inspection must confirm those mount controls before the result can carry the exact-revision receipt. The receipt binds the asserted revision to the verified tree digest, file/byte totals, and executable-bit removal count; it does not claim that the runtime fetched or authorized the revision.
+## Constraints and evidence semantics
 
-## Alternatives
+OCI lifecycle ordering and Podman's process model require a distinction between pre-start configuration and effective post-start process state. A release decision must therefore retain all three evidence classes without conflating them:
 
-- **Static-inspect fallback or static inspection alone before `start`:** rejected because configured/applied state is not effective-runtime proof and does not establish the consumer process's actual confinement. Pre-start static verification remains useful only as an early rejection gate.
-- **Treat `podman init` plus static inspection as complete issue #25 GREEN:** rejected. `init` holds the payload and permits earlier rejection, but it does not by itself prove the effective seccomp/LSM/capability state that will apply to the consumer process at exec.
-- **Start an inert container and later invoke the consumer with ordinary `podman exec`:** rejected as insufficient because the same pre-attestation race moves to the exec process unless an equivalent pre-exec attestation/release boundary is proven.
-- **Use `createRuntime` or `createContainer` alone as the attestation point:** rejected because OCI does not guarantee cgroups and SELinux/AppArmor are already applied at those stages.
-- **Treat `startContainer` hook support as sufficient without a runtime-owned attestor:** rejected because the hook path resolves in the container namespace and hostile image content cannot become the security authority.
-- **First transport as an HTTP service:** rejected because the current contract is one-shot and does not require listener/lifecycle semantics.
-- **Attach directly to workload pipes as the sole completion mechanism:** rejected because `podman wait` provides a clearer authoritative container exit-code boundary for this detached-verification flow.
-- **Consumer-owned Podman calls:** rejected because that would duplicate isolation policy and backend-specific security logic outside the canonical runtime.
-- **Mount the consumer checkout directly:** rejected because mutable files, links, executable modes, and path races would cross the host/runtime trust boundary without a verified immutable staging identity.
+- **immutable-input evidence:** image/gate/source digest and architecture/path identity;
+- **configured-state evidence:** create args and exact-container inspection that can reject contradictions before release;
+- **effective-runtime evidence:** live process/kernel facts sampled while only the trusted gate is runnable.
+
+Fake-Podman/process fixtures are appropriate for deterministic lifecycle/error/ownership contracts but cannot substitute for real rootless isolation evidence. Positive LSM, cgroup-v2, live tmpfs, timeout, and negative-egress claims require a real backend that can actually demonstrate them.
+
+## Alternatives considered
+
+- **Static inspection alone before start:** rejected because configured state is not effective-runtime proof.
+- **Treat `podman init` plus static inspection as complete issue #25 repair:** rejected because the final consumer process security state is not proven before hostile argv becomes runnable.
+- **Start the hostile consumer and clean up on failed attestation:** rejected because cleanup cannot retract execution that already happened.
+- **Start an inert image process then use ordinary `podman exec`:** rejected unless an equivalent pre-exec hold/attest/release boundary is proven for the exec process; merely moving the race does not remove it.
+- **Use OCI `createRuntime`/`createContainer` hooks as the sole attestation point:** rejected because those stages do not guarantee all cgroup/SELinux/AppArmor process state is final.
+- **Use `startContainer` hook support without a runtime-owned attestor:** rejected because hostile image content cannot become the isolation authority.
+- **Use a workload-supplied gate:** rejected because the workload would then control the security mechanism that is supposed to constrain it.
+- **Treat generated container names as ownership:** rejected after create because same-principal names are correlation identifiers, not an authoritative backend receipt.
+- **Mount the consumer checkout directly:** rejected because mutable files, links, executable modes, and host pathname authority would cross the trust boundary without exact staged identity.
+- **First transport as an HTTP service:** rejected because the present contract is one-shot and does not need listener/session semantics.
+- **Consumer-owned Podman calls:** rejected because they duplicate isolation policy and backend-specific security logic outside the canonical runtime.
+
+## Remaining risks and follow-up
+
+The production composition closes the historical direct-consumer pre-attestation defect, but the Draft is not release-ready. Remaining release evidence includes:
+
+- 100% owned-production statement/function/region/branch coverage without exclusions or denominator games;
+- real rootless cgroup-v2 CPU/RAM/PID enforcement evidence;
+- live `/tmp` mount/options/size evidence;
+- behavioral wall-time kill/wait/cleanup evidence through `RuntimeGatePodmanAdapter`;
+- dedicated positive effective-LSM execution on an eligible SELinux runner;
+- negative egress and runtime-owned resource leak checks on the same candidate;
+- fresh qualifying review/thread and central security/dependency checks;
+- protected-head CI;
+- version/CHANGELOG/package smoke;
+- immutable tag/package or equivalent publication plus SBOM, provenance, reproducibility, and rollback evidence.
+
+The active exact head must reacquire these checks after every source or documentation move. Queued, skipped, predecessor, static-only, fake-backend-only, or locally asserted evidence is not release authority.
+
+## Consequences
+
+The design adds a runtime-owned executable and a bounded control/acknowledgement channel, so the command path is more complex than direct `podman start`. That complexity is accepted because it creates an explicit security state transition: hostile code is held while the runtime samples the final running isolation boundary.
+
+The design also makes backend ownership stricter. Exact IDs and runtime receipts must propagate through wait/log/kill/cleanup instead of reusing friendly names. This increases test surface but prevents correlation metadata from silently becoming destructive authority.
+
+Source staging adds host I/O and hashing cost. That cost is bounded and accepted because untrusted mutable source must not become executable host/container authority. Performance claims must measure actual staging and container execution rather than bypassing this contract.
 
 ## Verification rule
 
-The executed `podman init` capability RED and its minimum production repair must remain GREEN on the current owner lineage: init unavailability must fail closed before start, and configuration that already contradicts the P0 profile must be rejected while the exact acquired container remains held. Those checks are necessary but not sufficient for issue #25.
+Keep the historical #25 payload-side-effect RED and init-hold RED as causal evidence. Current acceptance is stronger: on one exact candidate, tests must prove consumer argv cannot become runnable before positive effective attestation, gate identity/architecture/loading are immutable and self-contained, release is one-time and exact-ID scoped, acknowledgement precedes consumer execution, stdin/control ownership is separated, timeout kill is enforced, and cleanup leaves no runtime-owned container.
 
-Backend feasibility is now proven on real rootless Podman by exact `7da7d3...` / CI `34379177369` / hosted job `102559489017`. The next causal RED must therefore target production integration rather than re-proving the primitive: `RootlessPodmanAdapter::run_command_at` itself must create the runtime-owned gate as the initial OCI program, bind its immutable identity and architecture, keep consumer argv unreleased while effective evidence is evaluated, fail closed on gate/evidence/release failures, and release the exact consumer argv only after positive policy evaluation. The original hostile payload-side-effect RED must become GREEN on that same implementation. The real capability regression must remain GREEN, and a separate eligible positive-LSM runner must supply positive effective-confinement evidence.
-
-Release claims require all of the following on one immutable integrated source identity: exact-head unit/property/coverage evidence; real rootless-Podman command E2E; positive effective LSM/seccomp/capability/resource/network proof on an eligible backend; hostile negative fixtures; cleanup leak rejection; package/SBOM/provenance/reproducibility evidence; and current review/governance gates. Queued, skipped, predecessor, static-only, fake-backend-only, or locally reported evidence is not release authority.
+Real backend verification must prove the effective security boundary rather than infer it from inspect JSON. Issue #35 therefore remains open for cgroup-v2/tmpfs/wall-time enforcement evidence and issue #43 remains coupled to the real production-gated timeout witness. The dedicated positive-LSM job must actually execute; runner unavailability is a blocker, not a passing result.
 
 ## Traceability
 
-See `docs/doctoring/COMMAND_PRE_ATTESTATION_TRACEABILITY.md` for the original #25 RED and init-hold partial repair, and `docs/doctoring/COMMAND_HOLD_ATTEST_RELEASE_TRACEABILITY.md` for the real rootless held-gate capability proof, Podman 4.9 evidence constraints, remaining production-integration RED, rejected shortcuts, and APA 7th references to the OCI Runtime Specification, Podman lifecycle/top documentation, Linux process-security semantics, and NIST SP 800-190.
+- `src/infrastructure/podman.rs`
+- `src/infrastructure/podman_runtime_gate_binding.rs`
+- `src/infrastructure/runtime_gate_artifact.rs`
+- `src/bin/qsr_runtime_gate.rs`
+- `src/pr_source_artifact.rs`
+- `tests/podman_command_execution_e2e.rs`
+- `tests/command_gate_loading_boundary_red.rs`
+- `tests/podman_command_execution_gate_ack_red.rs`
+- `tests/podman_command_execution_resource_config_red.rs`
+- `docs/doctoring/COMMAND_PRE_ATTESTATION_TRACEABILITY.md`
+- `docs/doctoring/COMMAND_HOLD_GATE_BINDING_TRACEABILITY.md`
+- `docs/doctoring/COMMAND_HOLD_ATTEST_RELEASE_TRACEABILITY.md`
+- `docs/doctoring/COMMAND_GATE_LOADING_BOUNDARY.md`
+- `docs/product-technical-gap-baseline.md`
+
+Authoritative standards/references and APA 7th bibliographic details remain centralized in the linked doctoring/TRACEABILITY documents. Any future reference update must distinguish historical evidence date/version from the currently consulted standard version rather than silently rewriting old causal evidence.
