@@ -129,7 +129,7 @@ impl ServiceEndpoint {
 
     /// Return the declared service protocol.
     #[must_use]
-    pub const fn protocol(self) -> ServiceProtocol {
+    pub const fn protocol(&self) -> ServiceProtocol {
         self.protocol
     }
 }
