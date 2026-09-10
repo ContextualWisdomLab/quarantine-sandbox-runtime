@@ -9,7 +9,7 @@ use std::{
     env,
     io::{self, Read, Write},
     os::unix::{ffi::OsStrExt, process::CommandExt},
-    process::{self, Command},
+    process::{self, Command, Stdio},
 };
 
 const READY_MARKER: &str = "QSR_GATE_READY\n";
@@ -54,6 +54,7 @@ fn main() {
 
     let error = Command::new(consumer_program)
         .args(consumer_arguments)
+        .stdin(Stdio::null())
         .exec();
     eprintln!("qsr runtime gate exec failed: {}", error.kind());
     process::exit(EXIT_EXEC_FAILED);
