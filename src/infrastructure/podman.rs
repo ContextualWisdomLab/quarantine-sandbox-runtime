@@ -352,9 +352,9 @@ impl RootlessPodmanAdapter {
             }
         };
 
-        let start_args = ["start".to_owned(), plan.sandbox_name().to_owned()];
+        let start_args = ["start".to_owned(), container_id.clone()];
         if let Err(error) = self.checked_output("container_start", &start_args) {
-            self.cleanup_created_container(&plan)?;
+            self.cleanup_acquired_container(&plan, &container_id)?;
             return Err(error);
         }
 
@@ -362,17 +362,25 @@ impl RootlessPodmanAdapter {
             match self.verify_effective_isolation(&plan, request, policy, &info, &container_id) {
                 Ok(value) => value,
                 Err(error) => {
-                    self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+                    self.cleanup_started_container(
+                        &plan,
+                        &container_id,
+                        policy.shutdown_grace_seconds,
+                    )?;
                     return Err(error);
                 }
             };
 
         if wait_for_readiness(host_port, policy).is_err() {
-            self.cleanup_started_container(&plan, policy.shutdown_grace_seconds)?;
+            self.cleanup_started_container(
+                &plan,
+                &container_id,
+                policy.shutdown_grace_seconds,
+            )?;
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
 
-        Ok(ApplicationServiceLease::new(
+        Ok(ApplicationServiceLease::new_with_cleanup_sandbox_id(
             request,
             RuntimeLeaseMetadata {
                 backend_id: PODMAN_BACKEND_ID,
@@ -384,6 +392,7 @@ impl RootlessPodmanAdapter {
                 expires_at_epoch_seconds: plan.expires_at_epoch_seconds(),
                 shutdown_grace_seconds: policy.shutdown_grace_seconds,
             },
+            container_id,
             ServiceEndpoint::loopback(host_port, request.protocol),
         ))
     }
@@ -446,7 +455,7 @@ impl RootlessPodmanAdapter {
             "inspect".to_owned(),
             "--format".to_owned(),
             "json".to_owned(),
-            plan.sandbox_name().to_owned(),
+            container_id.to_owned(),
         ];
         let container_output = self.checked_output("container_inspect", &container_args)?;
         let container: ContainerInspection =
@@ -459,7 +468,7 @@ impl RootlessPodmanAdapter {
 
         let process_args = [
             "top".to_owned(),
-            plan.sandbox_name().to_owned(),
+            container_id.to_owned(),
             "pid".to_owned(),
             "seccomp".to_owned(),
             "capeff".to_owned(),
@@ -544,7 +553,7 @@ impl RootlessPodmanAdapter {
 
         let port_args = [
             "port".to_owned(),
-            plan.sandbox_name().to_owned(),
+            container_id.to_owned(),
             format!("{}/tcp", request.container_port),
         ];
         let port_output = self.checked_output("port_query", &port_args)?;
@@ -620,21 +629,41 @@ impl RootlessPodmanAdapter {
         }
     }
 
+    fn cleanup_acquired_container(
+        &self,
+        plan: &PodmanLaunchPlan,
+        container_id: &str,
+    ) -> Result<(), ApplicationServiceError> {
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            container_id.to_owned(),
+        ];
+        let container_removed = self.command_succeeded(&remove_args);
+        let network_removed = self.cleanup_network(plan).is_ok();
+        if container_removed && network_removed {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
     fn cleanup_started_container(
         &self,
         plan: &PodmanLaunchPlan,
+        container_id: &str,
         shutdown_grace_seconds: u32,
     ) -> Result<(), ApplicationServiceError> {
         let stop_args = [
             "stop".to_owned(),
             "--time".to_owned(),
             shutdown_grace_seconds.to_string(),
-            plan.sandbox_name().to_owned(),
+            container_id.to_owned(),
         ];
         let remove_args = [
             "rm".to_owned(),
             "--force".to_owned(),
-            plan.sandbox_name().to_owned(),
+            container_id.to_owned(),
         ];
         let stopped = self.command_succeeded(&stop_args);
         let container_removed = self.command_succeeded(&remove_args);
