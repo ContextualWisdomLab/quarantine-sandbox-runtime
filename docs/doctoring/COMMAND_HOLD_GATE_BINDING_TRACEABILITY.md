@@ -1,95 +1,111 @@
 # Command hold-gate binding traceability
 
-Status: active Draft evidence for issue #25 and ADR-0008. This document does not authorize release.
+Status: active Draft evidence for issue #25 and Proposed ADR-0008. This document does not authorize release.
 
-## Problem
+## Problem and current code truth
 
-`RootlessPodmanAdapter::run_command_at` still serializes the requested consumer argv into Podman's OCI entrypoint during `create`. `podman start` can therefore make hostile consumer code runnable before the runtime has positively sampled effective seccomp, capability and LSM state. Cleanup after a failed attestation does not undo code execution.
+`RootlessPodmanAdapter::run_command_at` still serializes the consumer-requested argv into Podman's OCI `--entrypoint`, creates and initializes that container, starts it, and only then samples live effective seccomp, capability and LSM evidence. The consumer is therefore the OCI initial process. Once `podman start` succeeds, cleanup after a failed attestation cannot undo code execution that was already possible.
 
-The package already contains the runtime-owned `qsr_runtime_gate`, and the dedicated real-rootless capability test has shown that the gate can remain the sole running process, expose effective process evidence and `exec()` exact consumer argv after explicit release. The missing production boundary is now decomposed so gate artifact authority, gate delivery/initial-process binding, stdin control-channel liveness and later release-channel ownership can be proven independently before they are integrated into the canonical command lifecycle.
+The repository now contains the prerequisites for a stronger boundary, but they are not yet composed into `run_command_at`:
 
-## Causal evidence
+- `qsr_runtime_gate` blocks on a runtime-generated one-time token, emits `QSR_GATE_RELEASED` only after exact token acceptance, flushes that trusted acknowledgement, detaches consumer stdin, and then `exec`s the exact consumer argv;
+- `RuntimeGateArtifact` stages only an independently expected SHA-256/architecture-matching self-contained ELF64 ET_EXEC/ET_DYN gate, requires a bounded valid program-header table and at least one `PT_LOAD`, and rejects `PT_INTERP` as an unsafe loading boundary;
+- `RuntimeGatePodmanAdapter::plan_command_binding` keeps stdin open, mounts that verified artifact read-only as `/qsr-runtime-gate`, selects it as OCI entrypoint, and carries the exact consumer argv behind a fresh 256-bit release token;
+- `RuntimeGatePodmanAdapter::release_command_gate` addresses only an admitted exact 64-lowerhex container ID, uses bounded `podman attach --sig-proxy=false`, consumes the token once, requires the trusted acknowledgement, closes the control stdin, and reaps only the local attach client.
 
-- Original hostile payload-side-effect RED: exact `ed9318ba96d876341866d84a892d0145e12f6469`, native CI `34340070150`, verify `102428599037` and branch coverage `102428599228`. The payload became runnable at `start` before live attestation failed.
-- Packaged gate capability: minimum production `3bd5d4319aba7c23982bbd18c77d424c25c3a510` introduced `src/bin/qsr_runtime_gate.rs`; exact CI `34381498621` made the focused packaging regression GREEN before the unchanged pre-attestation RED stopped the broader run.
-- Real held-gate capability: the dedicated rootless-Podman test compiles the production gate source as a static `x86_64-unknown-linux-musl` executable, mounts it read-only at `/qsr-runtime-gate`, creates the container with interactive stdin, verifies the gate is the only process before release, samples seccomp/capability/ambient/label evidence, then releases exact consumer argv through `podman attach --sig-proxy=false`.
-- Gate-binding RED: test-only `98b75125a619c981086ec1babb07fbc298ca7601` added `tests/podman_command_execution_hold_gate_binding_red.rs`. Native CI `34393277076` stopped at rustfmt before semantic execution; formatter-only `5a591a582ca955ccd24b8666a779de279062fae7` changed no assertion or production behavior.
-- Exact `5a591a582ca955ccd24b8666a779de279062fae7`, native CI `34393466321`, verify `102607270660`, then passed repository policy, dependency lock, coverage-parser checks, rustfmt and all preceding command-runtime tests through the exact ENTRYPOINT regression. It failed `podman_create_binds_runtime_gate_as_initial_process_before_consumer_argv` for the intended cause: the observed `create` invocation still contained `--entrypoint=["payload-sentinel","argument with spaces"]` and no runtime-owned `/qsr-runtime-gate` delivery/binding.
-- Intervening owner work then introduced `RuntimeGateArtifact` plus `RuntimeGatePodmanAdapter::plan_command_binding`: an independently digest- and architecture-verified staged gate is bound read-only at `/qsr-runtime-gate`, selected as OCI entrypoint, and receives a fresh 256-bit one-time release token plus exact consumer argv. This is a planning boundary only; it does not claim that `run_command_at` has adopted the gate.
-- Stdin-liveness RED: test-only `9dc5b7740a26322891715c84902170e3b411a735`, formatted by `0ec969b70d647eef9c69149875070136648b21e7`, requires the planned container to keep stdin open. Native CI `34402406692`, verify `102637216130`, passed exact checkout, dependency lock, repository policy, coverage-parser checks and rustfmt, then executed `gate_binding_keeps_container_stdin_open_for_bounded_release` for the intended cause: observed first create argument `--volume`, required `--interactive`; 35 other unit tests passed.
-- Minimum stdin-liveness production repair `b35fce53527c872abd00cffb34b0b831cfa7af74` adds only `--interactive` to the gate-binding create fragment. Test-only `d6a3078e5b9b1983b72101aacfb4111b110fc501` aligns the independent artifact-binding regression with that required argv order.
-- Exact `d6a3078e5b9b1983b72101aacfb4111b110fc501`, native CI `34402589899`, verify `102638265681`, proves the stdin-liveness repair focused GREEN: all 36 library unit tests pass, including `gate_binding_keeps_container_stdin_open_for_bounded_release`; repository policy, dependency lock, coverage-parser checks and rustfmt also pass. The broader verify lane later fails an inherited fake-Podman process-spawn specimen in `podman_cleanup_regression` (`BackendSpawnFailed { operation: "backend_security_info", failure_kind: Other }` versus the fixture's intended `CleanupFailed`). This is not promoted to whole-head GREEN, and no retry or semantic weakening is authorized. Hosted negative rootless/AppArmor on the same run reaches and passes the real held-gate capability, unavailable-LSM fail-closed cleanup and leak-rejection steps. Dedicated positive-LSM remains a separate gate.
+These components are prerequisite capability, not containment proof. The canonical production path must own one lifecycle from artifact verification through cleanup.
 
-No predecessor GREEN transfers to a moved head. The evidence above proves the missing gate binding and stdin-liveness prerequisites independently; it does not prove a completed production hold/attest/release adapter.
+## Causal evidence ledger
 
-## Why interactive stdin is a security prerequisite
+### Pre-attestation execution
 
-`qsr_runtime_gate` reads the release token from its stdin before it can `exec()` the consumer. Podman's current `start` contract states that a non-interactive container has empty/closed stdin, while an interactive detached container can remain blocked until a later attach. Podman's `create -i/--interactive` contract likewise keeps stdin available for the container process. Omitting `--interactive` therefore creates a deterministic protocol contradiction: the gate can receive EOF and exit before controller-side attestation/release, even though the gate artifact and token syntax are otherwise correct.
+Exact `ed9318ba96d876341866d84a892d0145e12f6469`, native CI `34340070150`, verify `102428599037` and branch coverage `102428599228` executed `podman_command_execution_pre_attestation_red::command_payload_is_not_runnable_before_effective_process_attestation`. The hostile fixture observed a consumer side effect after `podman start` and before effective-process attestation failed. This is the controlling P0 counterexample.
 
-This repair does **not** make stdin itself a trust anchor. Release authorization still requires a controller-owned bounded attach/write operation tied to the exact acquired container ID, exact one-time token, timeout, cancellation and cleanup semantics. The gate must fail closed on EOF, wrong token, duplicate/late release or channel failure, and none of those failures may permit the consumer argv to run.
+### Earlier init/configuration hold
 
-## Constraints and invariants
+Test-bearing `9e36766abc0a553f45c62fa327b34f1315dc0db9`, executed on exact `eb2330ffb6689b07706a305e55c81871414e9fe5` / CI `34353894509`, proved production did not invoke `podman init`: unavailable init and invalid configured isolation both reached start/payload execution. Minimum production `40313a2a8fe058f3cb25d3580b4f1fecbb4ec2e1` plus formatter-only `f1a037931ecc7fcbd6e87836f8fb7048c2c3544e` introduced `create -> exact ID -> init -> pre-start configured-state contradiction checks -> start -> live process verification`. This rejects disproven configuration earlier but deliberately does not relabel static configuration as effective process evidence.
 
-The repair must keep these existing contracts intact:
+### Real held-gate capability and packaging
 
-- exact requested argv semantics, including whitespace and argument boundaries;
-- immutable acquired container ID as destructive lifecycle authority;
-- digest-pinned/no-pull hostile images;
-- rootless execution, read-only rootfs, no-new-privileges, capability drop, private namespaces, deny-by-default network, resource limits and bounded `/tmp`;
-- read-only/noexec/nosuid/nodev source staging when present;
-- pre-start configured-state contradiction checks without relabeling them effective evidence;
-- effective seccomp, capability and LSM evidence sampled while hostile consumer argv is still non-runnable;
-- bounded output, workload timeout semantics and cleanup-error precedence;
-- fail closed on gate absence, identity mismatch, evidence failure, release-channel failure or cleanup uncertainty.
+Exact `7da7d3b36ec8830ab16d776e5ed1a93f7a16b8ad`, CI `34379177369`, hosted negative rootless/AppArmor job `102559489017` demonstrated on Ubuntu 24.04/rootless Podman that a static runtime-owned gate can remain the only running process, expose effective seccomp/capability/ambient/LSM evidence, preserve its digest, and `exec` the exact consumer argv after explicit release.
 
-The gate must be runtime-owned and immutably identified. A binary supplied by the hostile image cannot be an attestation authority. Architecture compatibility is part of the delivery contract; the current real E2E's explicit static musl build is capability evidence, not yet a general distribution mechanism.
+Packaging RED `304d63c2722a35b9f05f8466bbea81492a1533a6`, CI `34381329199`, verify `102566637062` proved the Cargo package exposed no gate. Minimum production `3bd5d4319aba7c23982bbd18c77d424c25c3a510` added `qsr_runtime_gate`; CI `34381498621` made the packaging regression GREEN before the unchanged pre-attestation RED. Subsequent E2E uses the production gate source rather than a duplicate test-only implementation.
 
-## Alternatives considered
+### Gate binding and stdin liveness
 
-### Keep consumer argv as OCI entrypoint and attest after `start`
+Gate-binding exact `5a591a582ca955ccd24b8666a779de279062fae7`, CI `34393466321`, verify `102607270660` failed for the intended cause: observed create argv still used consumer `--entrypoint=[...]` and did not deliver `/qsr-runtime-gate`.
 
-Rejected. This is the exact P0 demonstrated by the original payload-side-effect RED and the gate-binding RED.
+`RuntimeGateArtifact` and `RuntimeGatePodmanAdapter::plan_command_binding` then modeled immutable gate delivery and one-time release data. Stdin-liveness RED `0ec969b70d647eef9c69149875070136648b21e7`, CI `34402406692`, verify `102637216130` failed because the create fragment lacked `--interactive`; minimum production `b35fce53527c872abd00cffb34b0b831cfa7af74` added only that requirement. Exact `d6a3078e5b9b1983b72101aacfb4111b110fc501`, CI `34402589899`, verify `102638265681` made that focused regression GREEN.
 
-### Move only `container inspect` or `podman init` before `start`
+### Bounded release and trusted acknowledgement
 
-Retained as an earlier contradiction check, rejected as effective process proof. Configured state cannot establish the final running process's seccomp/LSM/capability state.
+The release-control lineage added exact-ID `podman attach --sig-proxy=false`, one-time token consumption, bounded acknowledgement parsing, attach-client timeout/kill/reap behavior, and consumer-stdin separation. A later real-gate regression exposed a protocol contradiction: the controller required `QSR_GATE_RELEASED`, but the trusted gate originally proceeded directly from token validation to consumer `exec`. The gate now emits and flushes `QSR_GATE_RELEASED\n` after exact token equality and before `exec`; failure to write/flush is fail-closed. Focused gate ACK/stdin regressions pass in the later command-runtime lineage before the inherited hold-gate integration RED.
 
-### Start an inert hostile-image command and later use plain `podman exec`
+### Runtime-gate loader boundary
 
-Rejected as the canonical boundary. It moves trust to image content and does not by itself bind the consumer transition to the attested runtime-owned process identity.
+Issue/PR #109 proved digest and ELF machine identity were insufficient if an admitted gate contained `PT_INTERP`: image-controlled interpreter resolution could execute before trusted gate `main`. Exact predecessor `cbd43c9378b64f8fd678b478439b9214ac7515ff`, CI `34436990992`, verify `102744034365` made all five loader-admission cases GREEN: self-contained ET_EXEC/ET_DYN positive controls, `PT_INTERP` rejection, truncated program-header rejection, and overflowing `e_phoff` rejection. Gate packaging/binding/release/ACK/stdin also passed before inherited #25. Docs/rustdoc descendant `866acee2c1a3dca36ca2b028cb64c5229783daeb` was a strict descendant of canonical #14 and was normally fast-forward adopted; GitHub records #109 merged into the canonical development ancestry at that exact SHA. This is not protected-branch or release acceptance.
 
-### Runtime-owned hold gate
+### Current canonical source
 
-Selected as the current Proposed ADR-0008 direction. The gate is the initial OCI process, remains held while effective isolation is sampled, and replaces itself with exact consumer argv only after a bounded positive release decision. Production acceptance still requires immutable architecture-compatible delivery/digest binding and a bounded one-time release channel.
+After #109 adoption, test-only `01e023b60c0f2cf5c3687c784029484bcfe86907` copied the valid #105/#106 malformed-successful-create ownership regressions onto current ancestry without importing stale child production/workflow state. Those tests address a separate exact-ID cleanup authority defect and do not weaken or replace #25. The production `run_command_at` at that head still selects the hostile consumer as OCI entrypoint, so the original P0 remains open.
 
-### Detached gate without interactive stdin
+No predecessor GREEN transfers to a moved head. Every current integrated candidate must reacquire full tests, owned-production coverage, review/security gates, real rootless evidence and dedicated positive effective-LSM evidence.
 
-Rejected by causal RED. The gate's one-time release protocol is stdin-based; a detached non-interactive Podman container can present EOF instead of a held control channel. The minimum create contract therefore includes `--interactive`, while later release remains controller-owned and exact-ID scoped.
+## Required production lifecycle
 
-## Minimum next source slice
+The selected boundary is:
 
-The gate artifact and create-fragment prerequisites are now independently modeled, including required interactive stdin. The next causal source slice must add a bounded controller-owned release primitive before integrating it into `run_command_at`. That primitive must:
+```text
+verify immutable gate artifact
+  -> create trusted gate as OCI PID 1 with exact consumer argv held behind token
+  -> acquire exact container ID
+  -> initialize without running consumer
+  -> reject pre-start configuration contradictions
+  -> start trusted gate only
+  -> sample live effective seccomp/capability/LSM evidence from that running gate process
+  -> make positive policy decision
+  -> bounded one-time exact-ID release
+  -> require trusted pre-exec acknowledgement
+  -> keep consumer stdin detached
+  -> gate execve(exact consumer argv)
+  -> bounded wait/log collection
+  -> exact-ID cleanup
+```
 
-1. address only the exact acquired container ID;
-2. write exactly one runtime-generated release token to the held gate without exposing a reusable interactive session to the consumer;
-3. distinguish spawn/write/wait/timeout/cancellation failures without retry-based masking;
-4. prove EOF/wrong-token/channel-failure cleanup leaves consumer argv non-runnable;
-5. compose with existing bounded command supervision and cleanup precedence rather than creating an unbounded `podman attach` subprocess.
+EOF, wrong token, duplicate/late release, attach spawn/write/read/wait failure, malformed or missing acknowledgement, timeout/cancellation, missing effective evidence, or cleanup uncertainty must not authorize consumer execution. Generated `qsr-cmd-*` names are correlation/result metadata only after a concrete ID can exist; they are never a fallback destructive authority.
 
-Only after those REDs execute may the canonical `run_command_at` lifecycle adopt the release-authorized `RuntimeGateArtifact`, create the interactive held gate as PID 1, perform static contradiction checks, start only that gate, attest effective seccomp/capability/LSM state, release once, and then wait/log/clean up by exact ID. Rerun the gate-binding RED and the original payload-side-effect RED on that same integrated exact head. Focused gate-plan GREEN without integrated release/effective attestation/positive-LSM evidence is not release authority.
+## Why start cannot precede the gate
+
+OCI Runtime Specification v1.3.0 defines `create` so the user-specified process must not yet run, and defines `start` as the operation that runs the configured process. Therefore putting hostile consumer argv in OCI `process.args`/Podman entrypoint and attempting effective-process attestation only after `start` creates the exact ordering defect demonstrated by the hostile side-effect regression. The runtime-owned gate changes the configured process itself: `start` runs the trusted gate, not the consumer; effective evidence can then be sampled while the consumer remains blocked.
+
+Podman's current create/start documentation is consistent with the control-channel prerequisite: an interactive container keeps stdin available; when detached, reads block until later attachment. Podman also warns that stdin may be consumed as soon as input becomes available, which is why host-side write success is not release proof. Release authority requires exact token validation plus a trusted gate acknowledgement, not merely an open interactive session.
+
+## Invariants retained during integration
+
+- exact requested argv semantics and argument boundaries; no shell;
+- immutable digest-pinned/no-pull hostile image identity;
+- runtime-owned independently expected gate digest and architecture, self-contained ELF loading boundary;
+- exact acquired container ID as lifecycle/destructive authority;
+- rootless execution, read-only rootfs, no-new-privileges, all capabilities dropped, private namespaces, deny-by-default network, non-root identity, CPU/RAM/PID/tmpfs/lease bounds;
+- source artifact read-only/noexec/nosuid/nodev staging when present;
+- configured-state checks remain distinct from effective-process evidence;
+- bounded output/wait semantics and cleanup-error precedence;
+- no retry/sleep masking, static-only attestation fallback, hostile-image attestor, name rebinding, reusable consumer-facing interactive session, or generated-name cleanup fallback.
+
+## Remaining source work
+
+The release primitive, trusted acknowledgement and loader admission are no longer the missing pieces. The next causal implementation slice is composition: `RootlessPodmanAdapter::run_command_at` must consume a release-authorized `RuntimeGateArtifact`/gate binding rather than constructing the consumer as OCI entrypoint. The current gate-binding RED and original hostile side-effect RED must both be rerun against that integrated implementation. The public/CLI construction path must also receive immutable gate identity without embedding a mutable sibling path or trusting a gate found inside the hostile image.
+
+A separate current-lineage RED candidate for #105/#106 proves malformed successful-create stdout must use a valid runtime-owned cidfile exact ID for cleanup and must perform no generated-name destructive cleanup when no admitted ID exists. Resolve that ownership defect without allowing it to distract from or weaken the P0 hold/attest/release lifecycle.
 
 ## References
 
-Open Container Initiative. (2026). *Open Container Initiative runtime specification: Runtime and lifecycle*. https://github.com/opencontainers/runtime-spec/blob/main/runtime.md
+Open Container Initiative. (2025). *Open Container Initiative Runtime Specification, version 1.3.0: Runtime and lifecycle*. https://specs.opencontainers.org/runtime-spec/runtime/
 
-Open Container Initiative. (2026). *Open Container Initiative runtime specification: POSIX-platform hooks*. https://github.com/opencontainers/runtime-spec/blob/main/config.md
+Open Container Initiative. (2025). *Open Container Initiative Runtime Specification, version 1.3.0: Configuration*. https://specs.opencontainers.org/runtime-spec/config/
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
-Podman Authors. (2026). *podman-init — Initialize one or more containers*. https://docs.podman.io/en/latest/markdown/podman-init.1.html
-
 Podman Authors. (2026). *podman-start — Start one or more containers*. https://docs.podman.io/en/latest/markdown/podman-start.1.html
 
-Podman Authors. (2026). *podman — Podman documentation*. https://docs.podman.io/en/latest/markdown/podman.1.html
-
-Souppaya, M. P., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
+Souppaya, M. P., Morello, J., & Scarfone, K. (2017). *Application Container Security Guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
