@@ -71,6 +71,26 @@ mod linux {
         bytes
     }
 
+    fn big_endian_elf_fixture() -> Vec<u8> {
+        let machine = match std::env::consts::ARCH {
+            "x86_64" => 62_u16,
+            "aarch64" => 183_u16,
+            other => panic!("gate ELF fixture does not support architecture {other}"),
+        };
+        let mut bytes = elf_fixture(false, false);
+        bytes[5] = 2;
+        bytes[16..18].copy_from_slice(&2_u16.to_be_bytes());
+        bytes[18..20].copy_from_slice(&machine.to_be_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_be_bytes());
+        bytes[24..32].copy_from_slice(&0x400100_u64.to_be_bytes());
+        bytes[32..40].copy_from_slice(&(ELF_HEADER_BYTES as u64).to_be_bytes());
+        bytes[52..54].copy_from_slice(&(ELF_HEADER_BYTES as u16).to_be_bytes());
+        bytes[54..56].copy_from_slice(&(PROGRAM_HEADER_BYTES as u16).to_be_bytes());
+        bytes[56..58].copy_from_slice(&1_u16.to_be_bytes());
+        bytes[ELF_HEADER_BYTES..ELF_HEADER_BYTES + 4].copy_from_slice(&1_u32.to_be_bytes());
+        bytes
+    }
+
     fn admits(bytes: &[u8]) -> bool {
         let directory = tempfile::tempdir().expect("gate fixture directory must exist");
         let source = directory.path().join("gate-fixture");
@@ -90,11 +110,78 @@ mod linux {
     }
 
     #[test]
+    fn big_endian_self_contained_executable_remains_admissible() {
+        assert!(admits(&big_endian_elf_fixture()));
+    }
+
+    #[test]
     fn matching_digest_must_not_authorize_an_image_owned_elf_interpreter() {
         assert!(
             !admits(&elf_fixture(true, false)),
             "a matching gate digest must not authorize PT_INTERP code from the workload image"
         );
+    }
+
+    #[test]
+    fn elf32_class_cannot_enter_the_elf64_gate_boundary() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[4] = 1;
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn invalid_elf_ident_version_cannot_enter_the_gate_boundary() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[6] = 0;
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn unsupported_elf_object_type_cannot_enter_the_gate_boundary() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[16..18].copy_from_slice(&1_u16.to_le_bytes());
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn malformed_elf_header_sizes_cannot_enter_the_gate_boundary() {
+        let mut header_size = elf_fixture(false, false);
+        header_size[52..54].copy_from_slice(&63_u16.to_le_bytes());
+        assert!(!admits(&header_size));
+
+        let mut program_header_size = elf_fixture(false, false);
+        program_header_size[54..56].copy_from_slice(&55_u16.to_le_bytes());
+        assert!(!admits(&program_header_size));
+    }
+
+    #[test]
+    fn zero_program_headers_cannot_prove_image_independent_loading() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[56..58].copy_from_slice(&0_u16.to_le_bytes());
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn program_header_table_cannot_overlap_the_elf_header() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[32..40].copy_from_slice(&32_u64.to_le_bytes());
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn an_elf_without_a_loadable_segment_cannot_be_a_runtime_gate() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[ELF_HEADER_BYTES..ELF_HEADER_BYTES + 4].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(!admits(&bytes));
+    }
+
+    #[test]
+    fn unrelated_program_header_is_ignored_when_a_loadable_segment_is_present() {
+        let mut bytes = elf_fixture(false, false);
+        bytes[56..58].copy_from_slice(&2_u16.to_le_bytes());
+        let second_header = ELF_HEADER_BYTES + PROGRAM_HEADER_BYTES;
+        bytes[second_header..second_header + 4].copy_from_slice(&0x6474_e551_u32.to_le_bytes());
+        assert!(admits(&bytes));
     }
 
     #[test]
