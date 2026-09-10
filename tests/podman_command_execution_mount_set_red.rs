@@ -1,52 +1,22 @@
-//! RED for fail-closed command-container effective mount-set attestation.
+//! RED: command execution must reject unexpected effective mounts.
 //!
-//! A hostile command profile must not inherit unrequested host filesystem authority.
-//! `container inspect` is therefore required to prove the complete effective mount set,
-//! not merely locate one expected `/workspace` source bind when a source artifact exists.
+//! The command profile allows no bind mounts when `source_artifact` is absent.
+//! This fixture makes every existing modeled isolation field positive but reports
+//! an unexpected effective bind mount in Podman inspect. Production must fail
+//! closed instead of trusting output from a container with a wider mount set.
 
 #![cfg(target_os = "linux")]
 
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
     ResourceRequest, RootlessPodmanAdapter,
 };
 
-static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_path(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after the Unix epoch")
-        .as_nanos();
-    let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-mount-set-{name}-{}-{nanos}-{unique_id}",
-        std::process::id()
-    ))
-}
-
-fn write_executable(name: &str, script: &str) -> PathBuf {
-    let program = temporary_path(name);
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    program
-}
-
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
-        policy_id: "command_mount_set_policy_v1".to_owned(),
+        policy_id: "command_mount_set_red_v1".to_owned(),
         maximum_memory_bytes: 512 * 1024 * 1024,
         maximum_cpu_millicores: 2_000,
         maximum_processes: 64,
@@ -63,8 +33,8 @@ fn policy() -> IsolationPolicy {
 fn request() -> CommandExecutionRequest {
     CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
-        request_id: "unexpected-command-mount-request".to_owned(),
-        image_reference: format!("localhost/cwl/tool@sha256:{}", "b".repeat(64)),
+        request_id: "command-mount-set-red".to_owned(),
+        image_reference: format!("localhost/cwl/tool@sha256:{}", "e".repeat(64)),
         command: vec!["true".to_owned()],
         source_artifact: None,
         resources: ResourceRequest {
@@ -78,22 +48,26 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn command_without_source_rejects_an_unexpected_host_bind_and_cleans_up() {
-    let calls = temporary_path("calls");
-    let security_info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
-    let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{"io.podman.annotations.userns":"auto"},"PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16},"Mounts":[{"Source":"/etc","Destination":"/unexpected-host","Type":"bind","Options":["ro","noexec","nosuid","nodev"],"RW":false}]}]"#;
-    let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
+fn unexpected_effective_mount_fails_closed_before_output_is_trusted() {
+    let directory = tempfile::tempdir().expect("isolated fake Podman directory");
+    let program = directory.path().join("podman");
+    let calls = directory.path().join("calls");
+    let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":20},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}},"Mounts":[{"Source":"/unexpected-host","Destination":"/etc/unexpected","Type":"bind","Options":["ro","noexec","nosuid","nodev"],"RW":false}]}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) : ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'must-not-be-trusted\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
         calls.display(),
-        security_info,
         inspect,
-        top,
     );
-    let program = write_executable("unexpected-host-bind", &script);
-    let adapter = RootlessPodmanAdapter::new(program.clone());
+    fs::write(&program, script).expect("fake Podman should be writable");
+    let mut permissions = fs::metadata(&program)
+        .expect("fake Podman metadata should exist")
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    let adapter = RootlessPodmanAdapter::new(&program);
 
-    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_032);
+    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_000);
+    let calls = fs::read_to_string(calls).expect("fake Podman calls must be recorded");
 
     assert_eq!(
         result,
@@ -102,14 +76,18 @@ fn command_without_source_rejects_an_unexpected_host_bind_and_cleans_up() {
                 control_name: "command_mount_set",
             },
         )),
-        "an unrequested effective host bind must fail closed before hostile payload trust"
+        "unexpected effective mounts must be rejected before command evidence is trusted"
     );
-    let recorded_calls = fs::read_to_string(&calls).expect("backend calls should be recorded");
     assert!(
-        recorded_calls.contains("rm --force --ignore"),
-        "unexpected mount attestation failure must clean up the exact command sandbox"
+        calls.lines().any(|line| line.starts_with("rm --force ")),
+        "mount-set rejection must still clean up the exact command sandbox: {calls}"
     );
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(calls);
+    assert!(
+        !calls.lines().any(|line| line.starts_with("wait ")),
+        "rejected mount topology must not advance to workload completion evidence: {calls}"
+    );
+    assert!(
+        !calls.lines().any(|line| line.starts_with("logs ")),
+        "rejected mount topology must not advance to workload output evidence: {calls}"
+    );
 }
