@@ -509,15 +509,10 @@ impl RootlessPodmanAdapter {
     /// egress denial than the service profile's internal, DNS-disabled
     /// network and needs no separate network object to create or clean up.
     ///
-    /// After creation, the exact acquired container is initialized with
-    /// `podman init` without releasing the consumer payload. Static/configured
-    /// controls that can already disprove the requested P0 policy are checked
-    /// while the container is still held. Only then is the payload started.
-    /// The existing live `podman top` verifier remains authoritative for
-    /// effective per-process seccomp/LSM/capability evidence after start; this
-    /// pre-start slice does not relabel configured state as effective evidence
-    /// and therefore does not, by itself, close issue #25's full hold/attest/
-    /// release requirement.
+    /// This low-level adapter method retains the historical direct-consumer path for migration
+    /// tests. Release-authorized production callers must use [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),
+    /// which composes the verified runtime gate so `podman start` runs only trusted hold code and
+    /// consumer argv cannot become runnable before live seccomp/LSM/capability attestation.
     ///
     /// Completion is observed with `podman wait` (bounded by the requested
     /// lease) and output with `podman logs` against a `k8s-file`-backed log
@@ -538,6 +533,51 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
     ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        self.run_command_with_binding_at(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            None,
+            |_| Ok(()),
+        )
+    }
+
+    /// Run a command with an already verified runtime-gate binding and release operation.
+    ///
+    /// The gate binding replaces hostile consumer argv as the initial OCI process. The release
+    /// callback is invoked only after static configuration and live effective process isolation
+    /// have both been verified against the exact acquired container ID.
+    pub(super) fn run_runtime_gate_command_at<F>(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+        runtime_gate_binding_args: &[String],
+        release_gate: F,
+    ) -> Result<CommandExecutionResult, CommandExecutionError>
+    where
+        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+    {
+        self.run_command_with_binding_at(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            Some(runtime_gate_binding_args),
+            release_gate,
+        )
+    }
+
+    fn run_command_with_binding_at<F>(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+        runtime_gate_binding_args: Option<&[String]>,
+        release_gate: F,
+    ) -> Result<CommandExecutionResult, CommandExecutionError>
+    where
+        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+    {
         request.validate(policy)?;
         let staged_source = request
             .source_artifact
@@ -645,18 +685,22 @@ impl RootlessPodmanAdapter {
             create_args.push("--workdir".to_owned());
             create_args.push("/workspace".to_owned());
         }
-        let command_entrypoint = serde_json::Value::Array(
-            request
-                .command
-                .iter()
-                .cloned()
-                .map(serde_json::Value::String)
-                .collect(),
-        )
-        .to_string();
-        create_args.push(format!("--entrypoint={command_entrypoint}"));
-        create_args.push("--".to_owned());
-        create_args.push(request.image_reference.clone());
+        if let Some(binding_args) = runtime_gate_binding_args {
+            create_args.extend(binding_args.iter().cloned());
+        } else {
+            let command_entrypoint = serde_json::Value::Array(
+                request
+                    .command
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            )
+            .to_string();
+            create_args.push(format!("--entrypoint={command_entrypoint}"));
+            create_args.push("--".to_owned());
+            create_args.push(request.image_reference.clone());
+        }
 
         let create_output = match self.checked_output("container_create", &create_args) {
             Ok(output) => output,
@@ -725,6 +769,12 @@ impl RootlessPodmanAdapter {
             staged_source.as_ref().map(|staged| staged.path()),
         ) {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if runtime_gate_binding_args.is_some() {
+            if let Err(error) = release_gate(&container_id) {
+                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));
+            }
         }
 
         let (exit_code, timed_out) = match self.wait_for_command(&container_id, request) {

@@ -63,10 +63,9 @@ impl RuntimeGateCommandBindingPlan {
 
 /// A Podman command adapter carrying one independently verified runtime gate artifact.
 ///
-/// This is an intentionally incomplete issue #25 integration boundary. The wrapped canonical
-/// adapter retains ownership of command execution; this type only admits construction of the
-/// immutable gate-binding fragment. It does not start a container or claim that the bounded
-/// release channel exists.
+/// Command execution through this adapter composes the verified gate into the canonical Podman
+/// lifecycle: the gate is OCI PID 1, effective process isolation is attested while consumer argv
+/// remains held, and the one-time release channel opens only after those checks succeed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeGatePodmanAdapter {
     _inner: RootlessPodmanAdapter,
@@ -76,9 +75,9 @@ pub struct RuntimeGatePodmanAdapter {
 impl RootlessPodmanAdapter {
     /// Bind an independently digest- and architecture-verified runtime gate artifact.
     ///
-    /// The returned adapter exposes only the gate-binding plan until the canonical command runtime
-    /// owns a bounded attest-and-release channel. The legacy command execution method remains
-    /// unchanged and must not be treated as issue #25 GREEN.
+    /// The returned adapter is the release-authorized command boundary. It keeps the underlying
+    /// service backend unchanged while requiring gated command composition for its own execution
+    /// method.
     #[must_use]
     pub fn with_runtime_gate_artifact(
         self,
@@ -92,6 +91,30 @@ impl RootlessPodmanAdapter {
 }
 
 impl RuntimeGatePodmanAdapter {
+    /// Run one bounded command through the verified hold/attest/release gate lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandExecutionError`] if request validation, Podman isolation, gate release,
+    /// completion evidence, output collection, or exact-ID cleanup fails. Consumer argv is not
+    /// released until live effective process isolation has been verified.
+    pub fn run_command_at(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<crate::CommandExecutionResult, CommandExecutionError> {
+        let plan = self.plan_command_binding(request, policy)?;
+        let binding_args = plan.container_create_binding_args().to_vec();
+        self._inner.run_runtime_gate_command_at(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            &binding_args,
+            |container_id| self.release_command_gate(container_id, plan),
+        )
+    }
+
     /// Build the runtime-owned gate fragment without invoking Podman or releasing consumer code.
     ///
     /// # Errors
