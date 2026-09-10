@@ -1,0 +1,75 @@
+name: QSR CLI owner repair
+
+on:
+  push:
+    branches: [feat/podman-command-execution-backend]
+    paths:
+      - .github/workflows/qsr-cli-owner-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: true
+          fetch-depth: 2
+      - name: Verify exact checkout
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Repair compile boundary and format owner path
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/main.rs')
+          text = path.read_text()
+          old = '''    let runtime_gate = match RuntimeGateArtifact::stage(
+              runtime_gate_path,
+              runtime_gate_sha256,
+              std::env::consts::ARCH,
+          ) {'''
+          if old not in text:
+              old = '''    let runtime_gate = match RuntimeGateArtifact::stage(
+                  runtime_gate_path,
+                  runtime_gate_sha256,
+                  std::env::consts::ARCH,
+              ) {'''
+          new = '''    let runtime_gate = match RuntimeGateArtifact::stage(
+              std::path::Path::new(runtime_gate_path),
+              runtime_gate_sha256,
+              std::env::consts::ARCH,
+          ) {'''
+          if old not in text:
+              raise SystemExit('runtime-gate stage call no longer matches reviewed source')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          git diff --check
+      - name: Verify focused CLI and gated runtime behavior
+        run: |
+          cargo test --locked --bin quarantine-sandbox-runtime
+          cargo test --locked --test command_cli_runtime_gate_owner_red
+          cargo test --locked --test podman_runtime_gate_command_integration_red
+          cargo test --locked --test podman_runtime_gate_release_control_red
+      - name: Publish ordinary descendant and remove repair workflow
+        env:
+          TARGET_BRANCH: feat/podman-command-execution-backend
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD_SHA"
+          git rm .github/workflows/qsr-cli-owner-repair.yml
+          git config user.name 'CWL quarantine runtime writer'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/main.rs
+          git commit -m 'fix(cli): verify runtime gate path before backend spawn'
+          git push origin "HEAD:$TARGET_BRANCH"
