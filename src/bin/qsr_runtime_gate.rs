@@ -82,3 +82,56 @@ fn read_bounded_release_token() -> Option<Vec<u8>> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    struct WriteFailure;
+
+    impl Write for WriteFailure {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FlushFailure {
+        written: Vec<u8>,
+    }
+
+    impl Write for FlushFailure {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.written.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::from(ErrorKind::BrokenPipe))
+        }
+    }
+
+    #[test]
+    fn control_marker_write_failure_is_preserved() {
+        let mut writer = WriteFailure;
+        assert_eq!(
+            publish_control_marker(&mut writer, READY_MARKER).map_err(|error| error.kind()),
+            Err(ErrorKind::BrokenPipe)
+        );
+    }
+
+    #[test]
+    fn control_marker_flush_failure_is_preserved_after_complete_write() {
+        let mut writer = FlushFailure::default();
+        assert_eq!(
+            publish_control_marker(&mut writer, RELEASED_MARKER).map_err(|error| error.kind()),
+            Err(ErrorKind::BrokenPipe)
+        );
+        assert_eq!(writer.written, RELEASED_MARKER.as_bytes());
+    }
+}
