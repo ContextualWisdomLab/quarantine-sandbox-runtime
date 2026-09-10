@@ -1,15 +1,16 @@
-//! Regression requiring the trusted runtime gate to acknowledge release before consumer exec.
+//! Regression requiring trusted runtime-gate release evidence before consumer execution.
 
 #[cfg(target_os = "linux")]
 mod linux {
     use std::{
-        io::{BufRead, BufReader, Write},
+        io::{BufRead, BufReader, Read, Write},
         process::{Command, Stdio},
     };
 
     const READY_MARKER: &str = "QSR_GATE_READY\n";
     const RELEASED_MARKER: &str = "QSR_GATE_RELEASED\n";
     const RELEASE_TOKEN: &str = "release-token-for-runtime-gate-ack-red";
+    const CONSUMER_INPUT_SENTINEL: &str = "consumer-input-must-not-leak\n";
 
     #[test]
     fn runtime_gate_acknowledges_release_before_exec() {
@@ -52,6 +53,54 @@ mod linux {
         assert!(
             status.success(),
             "released /bin/true should exit successfully"
+        );
+    }
+
+    #[test]
+    fn runtime_gate_does_not_expose_release_channel_to_consumer_stdin() {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_qsr_runtime_gate"))
+            .args([RELEASE_TOKEN, "/bin/cat"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("runtime gate should spawn");
+
+        let stdout = child
+            .stdout
+            .take()
+            .expect("runtime gate stdout should exist");
+        let mut stdout = BufReader::new(stdout);
+        let mut line = String::new();
+        stdout
+            .read_line(&mut line)
+            .expect("runtime gate readiness marker should be readable");
+        assert_eq!(line, READY_MARKER);
+
+        let mut stdin = child.stdin.take().expect("runtime gate stdin should exist");
+        stdin
+            .write_all(format!("{RELEASE_TOKEN}\n{CONSUMER_INPUT_SENTINEL}").as_bytes())
+            .expect("release channel payload should be writable");
+        stdin
+            .flush()
+            .expect("release channel payload should flush");
+        drop(stdin);
+
+        line.clear();
+        stdout
+            .read_line(&mut line)
+            .expect("runtime gate release acknowledgement should be readable");
+        assert_eq!(line, RELEASED_MARKER);
+
+        let mut consumer_output = String::new();
+        stdout
+            .read_to_string(&mut consumer_output)
+            .expect("released consumer stdout should be readable");
+        let status = child.wait().expect("runtime gate child should be reapable");
+        assert!(status.success(), "released /bin/cat should exit successfully");
+        assert!(
+            consumer_output.is_empty(),
+            "release-channel bytes after the one-time token must never become consumer stdin: {consumer_output:?}"
         );
     }
 }
