@@ -1,0 +1,117 @@
+name: QSR retire direct command bypass
+
+on:
+  push:
+    branches: [feat/podman-command-execution-backend]
+    paths:
+      - .github/workflows/qsr-retire-direct-command-bypass.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: true
+          fetch-depth: 2
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.97.1
+          components: rustfmt,clippy
+      - name: Verify exact checkout and retire production bypass
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          podman = Path('src/infrastructure/podman.rs')
+          s = podman.read_text()
+          old = '    pub fn run_command_at(\n'
+          new = ('    #[cfg(debug_assertions)]\n'
+                 '    pub fn run_legacy_command_at_for_test(\n')
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one direct run_command_at signature, found {s.count(old)}')
+          s = s.replace(old, new, 1)
+          s = s.replace(
+              '    /// Run one bounded one-shot command in a fresh Podman container.\n',
+              '    /// Exercise the historical direct-consumer command lifecycle in debug/test builds only.\n',
+              1,
+          )
+          s = s.replace(
+              '    /// This low-level adapter method retains the historical direct-consumer path for migration\n'
+              '    /// tests. Release-authorized production callers must use [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),\n'
+              '    /// which composes the verified runtime gate so `podman start` runs only trusted hold code and\n'
+              '    /// consumer argv cannot become runnable before live seccomp/LSM/capability attestation.\n',
+              '    /// This method is compiled only with debug assertions so the legacy path remains testable\n'
+              '    /// without being part of release artifacts. Production command callers must use\n'
+              '    /// [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),\n'
+              '    /// which binds the verified runtime gate before any consumer process can run.\n',
+              1,
+          )
+          podman.write_text(s)
+
+          backend = Path('src/infrastructure/application_service_backend.rs')
+          s = backend.read_text()
+          block = '''impl CommandExecutionBackend for RootlessPodmanAdapter {\n    fn run_to_completion_at(\n        &self,\n        request: &CommandExecutionRequest,\n        policy: &IsolationPolicy,\n        started_at_epoch_seconds: u64,\n    ) -> Result<CommandExecutionResult, CommandExecutionError> {\n        RootlessPodmanAdapter::run_command_at(self, request, policy, started_at_epoch_seconds)\n    }\n}\n\n'''
+          if block not in s:
+              raise SystemExit('direct Rootless CommandExecutionBackend impl not found')
+          backend.write_text(s.replace(block, '', 1))
+
+          successor = Path('tests/podman_runtime_gate_command_integration_red.rs')
+          if not successor.exists():
+              raise SystemExit('gated successor regression is missing')
+
+          for path in Path('tests').glob('*.rs'):
+              if path.name in {
+                  'podman_runtime_gate_command_integration_red.rs',
+                  'podman_command_execution_hold_gate_binding_red.rs',
+                  'podman_command_execution_pre_attestation_red.rs',
+              }:
+                  continue
+              text = path.read_text()
+              if '.run_command_at(' in text:
+                  path.write_text(text.replace('.run_command_at(', '.run_legacy_command_at_for_test('))
+
+          primary = Path('tests/podman_command_execution.rs')
+          text = primary.read_text()
+          text = text.replace('    ApplicationServiceError, CommandExecutionBackend, CommandExecutionError,\n',
+                              '    ApplicationServiceError, CommandExecutionError,\n', 1)
+          marker = '#[test]\nfn command_execution_backend_trait_forwards_to_run_command_at() {'
+          start = text.find(marker)
+          if start == -1:
+              raise SystemExit('legacy trait forwarding test not found')
+          next_test = text.find('\n#[test]\n', start + len(marker))
+          if next_test == -1:
+              text = text[:start].rstrip() + '\n'
+          else:
+              text = text[:start].rstrip() + '\n\n' + text[next_test + 1:]
+          primary.write_text(text)
+
+          Path('tests/podman_command_execution_hold_gate_binding_red.rs').unlink()
+          Path('tests/podman_command_execution_pre_attestation_red.rs').unlink()
+          PY
+          cargo fmt --all
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          git rm .github/workflows/qsr-retire-direct-command-bypass.yml
+      - name: Publish validated non-force descendant
+        env:
+          TARGET_BRANCH: feat/podman-command-execution-backend
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH"
+          test "$(git rev-parse origin/$TARGET_BRANCH)" = "$EXPECTED_HEAD_SHA"
+          git config user.name 'CWL quarantine runtime writer'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/infrastructure/podman.rs src/infrastructure/application_service_backend.rs tests
+          git commit -m 'fix(runtime): retire direct command bypass from release API'
+          git push origin "HEAD:$TARGET_BRANCH"
