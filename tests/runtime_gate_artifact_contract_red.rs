@@ -86,3 +86,33 @@ fn runtime_gate_artifact_rejects_digest_architecture_and_symlink_authority_misma
         RuntimeGateArtifactError::SourceNotRegularFile
     ));
 }
+
+#[test]
+fn runtime_gate_artifact_rejects_missing_source_and_executable_machine_mismatch() {
+    let directory = tempdir().expect("temporary directory should be available");
+    let missing = directory.path().join("missing-runtime-gate");
+    let missing_error = RuntimeGateArtifact::stage(
+        &missing,
+        &"0".repeat(64),
+        std::env::consts::ARCH,
+    )
+    .expect_err("a missing release artifact must fail before staging");
+    assert!(matches!(
+        missing_error,
+        RuntimeGateArtifactError::SourceNotRegularFile
+    ));
+
+    let (source, mut gate_bytes) = write_self_contained_gate(directory.path());
+    gate_bytes[18..20].copy_from_slice(&7_u16.to_le_bytes());
+    fs::write(&source, &gate_bytes).expect("mismatched-machine fixture should be writable");
+    let expected_sha256 = format!("{:x}", Sha256::digest(&gate_bytes));
+    let machine_error = RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+        .expect_err("a digest-matching gate for another ELF machine must fail closed");
+    match machine_error {
+        RuntimeGateArtifactError::ArchitectureMismatch { expected, actual } => {
+            assert_eq!(expected, std::env::consts::ARCH);
+            assert_eq!(actual, "elf-machine-7");
+        }
+        other => panic!("expected executable architecture mismatch, got {other:?}"),
+    }
+}
