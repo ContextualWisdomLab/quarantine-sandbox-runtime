@@ -236,7 +236,6 @@ jobs:
           +    }
           +}
           PATCH
-          sed -i 's/^          //' "$RUNNER_TEMP/qsr-gate-composition.patch"
           git apply --check "$RUNNER_TEMP/qsr-gate-composition.patch"
           git apply "$RUNNER_TEMP/qsr-gate-composition.patch"
           git rm .github/workflows/qsr-source-snapshot.yml
