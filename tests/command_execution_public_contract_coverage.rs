@@ -1,9 +1,10 @@
 //! Public command-execution evidence accessors and error-classification coverage.
 
-use std::io;
+use std::{io, path::PathBuf};
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionError, CommandExecutionResult, PrSourceArtifactError,
+    CONTRACT_SCHEMA_VERSION, CommandExecutionError, CommandExecutionRequest, CommandExecutionResult,
+    IsolationPolicy, PrSourceArtifactError, PrSourceArtifactInput, ResourceRequest,
 };
 use serde_json::json;
 
@@ -100,5 +101,65 @@ fn source_staging_failures_map_to_stable_non_sensitive_command_reasons() {
     assert_source_error_reason(
         PrSourceArtifactError::Io(io::Error::other("private staging detail")),
         "staging_failed",
+    );
+}
+
+fn isolation_policy() -> IsolationPolicy {
+    IsolationPolicy {
+        policy_id: "ci_default_policy".to_owned(),
+        maximum_memory_bytes: 512 * 1024 * 1024,
+        maximum_cpu_millicores: 2_000,
+        maximum_processes: 64,
+        maximum_lease_seconds: 600,
+        maximum_tmpfs_bytes: 64 * 1024 * 1024,
+        readiness_timeout_millis: 5_000,
+        readiness_poll_interval_millis: 100,
+        shutdown_grace_seconds: 5,
+        run_as_user_id: 65_534,
+        run_as_group_id: 65_534,
+    }
+}
+
+fn bounded_resources() -> ResourceRequest {
+    ResourceRequest {
+        memory_bytes: 256 * 1024 * 1024,
+        cpu_millicores: 1_000,
+        maximum_processes: 16,
+        lease_seconds: 120,
+        tmpfs_bytes: 16 * 1024 * 1024,
+    }
+}
+
+fn command_request_with_source(source_artifact: PrSourceArtifactInput) -> CommandExecutionRequest {
+    CommandExecutionRequest {
+        schema_version: CONTRACT_SCHEMA_VERSION.to_owned(),
+        request_id: "coverage-source-contract".to_owned(),
+        image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
+        command: vec!["cargo".to_owned(), "test".to_owned()],
+        source_artifact: Some(source_artifact),
+        resources: bounded_resources(),
+    }
+}
+
+#[test]
+fn command_request_validates_present_source_artifact_before_backend_dispatch() {
+    let policy = isolation_policy();
+    let valid_source = PrSourceArtifactInput {
+        host_path: PathBuf::from("/tmp/qsr-source-contract"),
+        revision_sha: "b".repeat(40),
+        expected_tree_sha256: "c".repeat(64),
+    };
+    assert_eq!(command_request_with_source(valid_source).validate(&policy), Ok(()));
+
+    let malformed_source = PrSourceArtifactInput {
+        host_path: PathBuf::from("/tmp/qsr-source-contract"),
+        revision_sha: "g".repeat(40),
+        expected_tree_sha256: "c".repeat(64),
+    };
+    assert_eq!(
+        command_request_with_source(malformed_source).validate(&policy),
+        Err(CommandExecutionError::InvalidSourceArtifact {
+            reason: "invalid_input",
+        })
     );
 }
