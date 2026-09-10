@@ -205,10 +205,19 @@ pub fn stage_pr_source_artifact(
     input: &PrSourceArtifactInput,
 ) -> Result<StagedPrSourceArtifact, PrSourceArtifactError> {
     input.validate_contract()?;
+    // `canonicalize` follows a final symlink, so establish the caller-supplied
+    // root object's no-follow type and Unix identity before resolving its path.
+    let source_root = fs::symlink_metadata(&input.host_path).map_err(PrSourceArtifactError::Io)?;
+    if !source_root.file_type().is_dir() {
+        return Err(PrSourceArtifactError::InvalidInput {
+            field_name: "host_path",
+        });
+    }
     let source = fs::canonicalize(&input.host_path).map_err(PrSourceArtifactError::Io)?;
-    if !fs::metadata(&source)
-        .map_err(PrSourceArtifactError::Io)?
-        .is_dir()
+    let canonical_root = fs::metadata(&source).map_err(PrSourceArtifactError::Io)?;
+    if !canonical_root.is_dir()
+        || source_root.dev() != canonical_root.dev()
+        || source_root.ino() != canonical_root.ino()
     {
         return Err(PrSourceArtifactError::InvalidInput {
             field_name: "host_path",
