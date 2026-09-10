@@ -116,6 +116,8 @@ where
 struct ContainerConfig {
     #[serde(rename = "User")]
     user: String,
+    #[serde(default, rename = "Timeout")]
+    timeout: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -149,6 +151,8 @@ struct ContainerHostConfig {
     nano_cpus: u64,
     #[serde(rename = "PidsLimit")]
     pids_limit: i64,
+    #[serde(default, rename = "Tmpfs")]
+    tmpfs: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -1306,7 +1310,11 @@ fn verify_command_container_configuration(
     )?;
     require_control(
         "resource_limits",
-        resource_limits_match(&container.host_config, &request.resources),
+        command_resource_configuration_matches(
+            &container.config,
+            &container.host_config,
+            &request.resources,
+        ),
     )?;
     require_control(
         "command_mount_set",
@@ -1527,6 +1535,36 @@ fn resource_limits_match(effective: &ContainerHostConfig, resources: &ResourceRe
         && effective.pids_limit > 0
         && u64::try_from(effective.pids_limit)
             .is_ok_and(|value| value <= u64::from(resources.maximum_processes))
+}
+
+fn command_resource_configuration_matches(
+    config: &ContainerConfig,
+    effective: &ContainerHostConfig,
+    resources: &ResourceRequest,
+) -> bool {
+    if !resource_limits_match(effective, resources)
+        || config.timeout == 0
+        || config.timeout != u64::from(resources.lease_seconds)
+        || effective.tmpfs.len() != 1
+    {
+        return false;
+    }
+    let Some(options) = effective.tmpfs.get("/tmp") else {
+        return false;
+    };
+    let expected_size = format!("size={}", resources.tmpfs_bytes);
+    let mut applied = std::collections::BTreeSet::new();
+    for option in options.split(',').map(str::trim) {
+        if option.is_empty() || !applied.insert(option) {
+            return false;
+        }
+    }
+    applied.len() == 5
+        && applied.contains("rw")
+        && applied.contains("noexec")
+        && applied.contains("nosuid")
+        && applied.contains("nodev")
+        && applied.contains(expected_size.as_str())
 }
 
 fn require_control(
