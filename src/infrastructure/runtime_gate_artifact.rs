@@ -350,8 +350,9 @@ mod tests {
         let bytes = self_contained_gate_bytes();
         fs::write(&source, &bytes).expect("runtime-gate fixture should be writable");
         let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
-        let artifact = RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
-            .expect("matching self-contained runtime gate should stage");
+        let artifact =
+            RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
+                .expect("matching self-contained runtime gate should stage");
         (directory, artifact, bytes)
     }
 
