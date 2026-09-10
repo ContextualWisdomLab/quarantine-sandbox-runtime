@@ -14,8 +14,7 @@ use quarantine_sandbox_runtime::{
 };
 use tempfile::TempDir;
 
-const OWNED_CONTAINER_ID: &str =
-    "1111111111111111111111111111111111111111111111111111111111111111";
+const OWNED_CONTAINER_ID: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
