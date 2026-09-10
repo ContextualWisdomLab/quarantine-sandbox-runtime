@@ -19,8 +19,8 @@ fn root_symlink_is_rejected_before_source_tree_staging() {
     let input = PrSourceArtifactInput {
         host_path: linked_source,
         revision_sha: "a".repeat(40),
-        expected_tree_sha256:
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_owned(),
+        expected_tree_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            .to_owned(),
     };
 
     assert!(matches!(
