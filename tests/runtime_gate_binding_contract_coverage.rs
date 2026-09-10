@@ -8,8 +8,8 @@ mod runtime_gate_fixture;
 use std::path::Path;
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionError, CommandExecutionRequest, IsolationPolicy, ResourceRequest,
-    RootlessPodmanAdapter, RuntimeGateArtifact, SandboxExecutionError,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    ResourceRequest, RootlessPodmanAdapter, RuntimeGateArtifact,
 };
 use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
@@ -71,7 +71,7 @@ fn binding_plan_exposes_verified_gate_identity_without_reinterpreting_consumer_a
     assert!(
         plan.container_create_binding_args()
             .windows(2)
-            .any(|pair| pair == ["--", request.image_reference.as_str()]),
+            .any(|pair| pair[0] == "--" && pair[1] == request.image_reference),
         "the image boundary must remain explicit before held consumer argv"
     );
     assert_eq!(
@@ -93,17 +93,9 @@ fn gated_run_validates_request_before_any_backend_invocation() {
     assert_eq!(
         adapter.run_command_at(&invalid_request, &policy(), 1_700_000_000),
         Err(CommandExecutionError::Backend(
-            quarantine_sandbox_runtime::ApplicationServiceError::ResourceLimitExceeded {
+            ApplicationServiceError::ResourceLimitExceeded {
                 resource_name: "memory_bytes",
             }
         ))
     );
-
-    let direct_validation = invalid_request
-        .resources
-        .memory_bytes;
-    assert_eq!(direct_validation, 0);
-    let _ = SandboxExecutionError::ResourceLimitExceeded {
-        resource_name: "memory_bytes",
-    };
 }
