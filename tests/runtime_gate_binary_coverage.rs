@@ -8,6 +8,7 @@
 #![cfg(target_os = "linux")]
 
 use std::{
+    fs::{File, OpenOptions},
     io::Write,
     process::{Command, Output, Stdio},
 };
@@ -61,6 +62,38 @@ fn eof_and_wrong_release_tokens_never_release_the_consumer() {
 #[test]
 fn oversized_release_input_fails_the_control_channel_closed() {
     let output = run_gate(&["expected", "/bin/true"], &[b'x'; 129]);
+    assert_eq!(output.status.code(), Some(79));
+    assert_eq!(output.stdout, READY_MARKER.as_bytes());
+}
+
+#[test]
+fn unwritable_stdout_fails_the_control_channel_before_release_read() {
+    let read_only_stdout = File::open("/dev/null").expect("read-only /dev/null should open");
+    let status = Command::new(GATE_BINARY)
+        .args(["release", "/bin/true"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(read_only_stdout))
+        .stderr(Stdio::piped())
+        .status()
+        .expect("runtime gate should terminate");
+
+    assert_eq!(status.code(), Some(79));
+}
+
+#[test]
+fn unreadable_stdin_fails_the_control_channel_after_ready_marker() {
+    let write_only_stdin = OpenOptions::new()
+        .write(true)
+        .open("/dev/null")
+        .expect("write-only /dev/null should open");
+    let output = Command::new(GATE_BINARY)
+        .args(["release", "/bin/true"])
+        .stdin(Stdio::from(write_only_stdin))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("runtime gate should terminate");
+
     assert_eq!(output.status.code(), Some(79));
     assert_eq!(output.stdout, READY_MARKER.as_bytes());
 }
