@@ -58,7 +58,8 @@ fn write_executable(fixture_directory: &Path, name: &str, script: &str) -> PathB
     let scenario = fixture_directory.join(format!("{name}.scenario"));
     let dispatcher_log = fixture_directory.join(format!("{name}.dispatcher-calls"));
     let config = PathBuf::from(format!("{}.config", program.display()));
-    let dispatcher = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
+    let dispatcher =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
 
     fs::write(&scenario, script).expect("fake runtime scenario should be writable");
     fs::write(
