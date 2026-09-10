@@ -13,6 +13,7 @@ use std::{
 };
 
 const READY_MARKER: &str = "QSR_GATE_READY\n";
+const RELEASED_MARKER: &str = "QSR_GATE_RELEASED\n";
 const MAX_RELEASE_TOKEN_BYTES: usize = 128;
 const EXIT_INVALID_INVOCATION: i32 = 64;
 const EXIT_RELEASE_REJECTED: i32 = 77;
@@ -45,6 +46,10 @@ fn main() {
     };
     if release_token != expected_release_token.as_os_str().as_bytes() {
         process::exit(EXIT_RELEASE_REJECTED);
+    }
+
+    if stdout.write_all(RELEASED_MARKER.as_bytes()).is_err() || stdout.flush().is_err() {
+        process::exit(EXIT_CONTROL_CHANNEL_FAILED);
     }
 
     let error = Command::new(consumer_program)
