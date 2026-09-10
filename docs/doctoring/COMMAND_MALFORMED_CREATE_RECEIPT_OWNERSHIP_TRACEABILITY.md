@@ -14,7 +14,7 @@ The command runtime provisions a private runtime-owned `--cidfile=<path>` for cr
 
 That fallback violated the lifecycle-ownership invariant already established for the normal post-create path: once a concrete resource identity is available, destructive operations must be selected by that exact identity rather than by re-resolving a mutable name. The malformed-success path is especially important because stdout and a runtime-owned cidfile are independent observation channels for the same creation event.
 
-Podman documents both behaviors: `podman create` prints the created container ID and `--cidfile=file` writes the container ID to a caller-selected file. The runtime therefore treats an admitted value from its own receipt location as concrete lifecycle evidence while retaining malformed stdout as an evidence failure. NIST SP 800-190 is broader lifecycle authority: it supports fail-closed, auditable management of container resources, not a particular Podman CLI parsing rule.
+Podman documents both behaviors: `podman create` prints the created container ID and `--cidfile=file` writes the container ID to a caller-selected file. Its create documentation also distinguishes a merely `created` container from a started one. The current OCI Runtime Specification, published as a Standards Track specification in November 2025, defines lifecycle operations against the same container scope. Those authorities support keeping resource identity stable across create/start/delete operations; they do not by themselves prescribe this repository's stricter 64-lowerhex receipt grammar. NIST SP 800-190 is broader lifecycle authority and supports fail-closed, auditable management of container resources rather than a particular Podman CLI parsing rule.
 
 ## Historical causal RED
 
@@ -64,11 +64,13 @@ Without an admitted concrete identity the runtime cannot prove the target select
 
 ## Current verification and release gate
 
-Canonical #14 predecessor `3271a2694b57c4c3cc7c64d4d94f666b06e4cf0f` had full hosted verify GREEN and the current ownership regressions in its workspace suite. Test-only descendant `cd619aa648af03c7c40e0566a09d1c330f20108e` also completed verify GREEN before this documentation adoption. Those executions validate the inherited behavior but do not transfer exact-head release authority after this documentation commit.
+Canonical #14 exact `cd619aa648af03c7c40e0566a09d1c330f20108e`, native CI `34518251220`, completed hosted verify GREEN through exact checkout, dependency lock, repository policy, CI evidence contracts, rustfmt, full workspace tests with `--no-fail-fast`, Clippy `-D warnings`, and rustdoc `-D warnings`; its hosted negative rootless/AppArmor lane was also GREEN. Documentation-adoption predecessor `6878c3eaeff1d4b7fcd9916f4305c876eaf5ff44`, native CI `34518780485`, independently completed the same hosted verify and negative-runtime lanes GREEN. Those executions validate inherited semantics but do not transfer exact-head release authority after later source/test or documentation commits.
 
-The current canonical head must therefore reacquire exact checkout, repository validation, rustfmt, full workspace tests, Clippy, rustdoc, complete owned-production line/function/region/branch coverage, hosted negative confinement, qualifying review/security gates, and dedicated positive effective-LSM evidence. Real rootless-runtime evidence remains necessary for claims about effective isolation. Protected integration must precede immutable version/package/tag/release, SBOM, provenance, reproducibility, rollback evidence, and any consumer version bump.
+Every moved canonical head must reacquire exact checkout, repository validation, rustfmt, full workspace tests, Clippy, rustdoc, complete owned-production line/function/region/branch coverage, hosted negative confinement, qualifying review/security gates, and dedicated positive effective-LSM evidence. Real rootless-runtime evidence remains necessary for claims about effective isolation. Protected integration must precede immutable version/package/tag/release, SBOM, provenance, reproducibility, rollback evidence, and any consumer version bump.
 
 ## References
+
+Open Container Initiative. (2025). *Open Container Initiative Runtime Specification* (Standards Track; published November 2025). https://specs.opencontainers.org/runtime-spec/runtime/
 
 Podman. (n.d.). *podman-create — Podman documentation*. Retrieved September 11, 2026, from https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
