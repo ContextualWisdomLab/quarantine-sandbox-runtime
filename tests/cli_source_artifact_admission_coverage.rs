@@ -80,7 +80,7 @@ fn complete_source_flags_with_malformed_revision_fail_before_podman() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).expect("CLI stderr should be UTF-8");
     assert!(
-        stderr.contains("revision_sha"),
+        stderr.contains("PR source artifact rejected: invalid_input"),
         "malformed source revision must surface the source-artifact validation boundary: {stderr}"
     );
     assert!(
