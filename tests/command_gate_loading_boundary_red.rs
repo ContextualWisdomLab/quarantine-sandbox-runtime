@@ -1,7 +1,10 @@
 //! Admission regressions for the runtime gate's image-independent ELF loading boundary.
 //! Fixtures are data-only for these tests; staging must not execute their bytes.
 
-#[cfg(target_os = "linux")]
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 mod linux {
     use std::fs;
 
