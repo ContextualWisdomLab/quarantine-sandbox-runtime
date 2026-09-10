@@ -25,9 +25,7 @@ fn cli_rejects_command_execution_without_a_complete_runtime_gate_identity() {
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).expect("CLI stderr should be UTF-8");
-    assert!(stderr.contains(
-        "runtime gate requires --runtime-gate-path and --runtime-gate-sha256"
-    ));
+    assert!(stderr.contains("runtime gate requires --runtime-gate-path and --runtime-gate-sha256"));
 }
 
 #[test]
