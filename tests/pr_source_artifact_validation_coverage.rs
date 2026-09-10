@@ -71,3 +71,36 @@ fn rejects_an_absolute_regular_file_as_a_source_tree() {
 
     fs::remove_file(path).expect("temporary source file cleanup");
 }
+
+#[test]
+fn rejects_a_missing_absolute_source_before_tree_inspection() {
+    let path = temporary_file_path();
+    let input = valid_input(path);
+
+    assert!(matches!(
+        stage_pr_source_artifact(&input),
+        Err(PrSourceArtifactError::Io(_))
+    ));
+}
+
+#[test]
+fn rejects_source_trees_above_the_regular_file_budget() {
+    const MAX_SOURCE_FILES: usize = 10_000;
+
+    let source = temporary_file_path();
+    fs::create_dir_all(&source).expect("temporary source directory");
+    for index in 0..=MAX_SOURCE_FILES {
+        fs::File::create(source.join(format!("entry-{index:05}")))
+            .expect("bounded empty source fixture");
+    }
+    let input = valid_input(source.clone());
+
+    assert!(matches!(
+        stage_pr_source_artifact(&input),
+        Err(PrSourceArtifactError::LimitExceeded {
+            limit_name: "regular_file_count"
+        })
+    ));
+
+    fs::remove_dir_all(source).expect("temporary source directory cleanup");
+}
