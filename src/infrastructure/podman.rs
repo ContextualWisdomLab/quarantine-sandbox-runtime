@@ -366,6 +366,7 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy_sha256={}",
                 policy.effective_policy_sha256()
             ),
+            "--".to_owned(),
             request.image_reference.clone(),
         ];
         container_create_args.extend(request.command.iter().cloned());
@@ -746,9 +747,6 @@ impl RootlessPodmanAdapter {
             }
         };
         if logs_outcome.timed_out {
-            // The log driver failing to hand back already-written output
-            // promptly is an infrastructure fault, not a fact about the
-            // workload (whose own timeout is already captured above).
             return Err(self.cleanup_owned_command_container_or_report(
                 &container_id,
                 CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
@@ -756,11 +754,6 @@ impl RootlessPodmanAdapter {
                 }),
             ));
         }
-        // A `None` status only occurs on the timeout/output-budget kill
-        // paths already handled above (or by the truncation flags on
-        // success); anything else is `podman logs` itself failing (e.g. the
-        // log driver or container state is broken) and is an infrastructure
-        // fault, not empty workload output.
         if !logs_outcome.status.is_none_or(|status| status.success()) {
             return Err(self.cleanup_owned_command_container_or_report(
                 &container_id,
@@ -861,7 +854,6 @@ impl RootlessPodmanAdapter {
             }
         }
 
-        // Best effort: the container may already be exiting on its own.
         let _ = self.command_succeeded(&["kill".to_owned(), container_id.to_owned()]);
         let post_kill = self
             .checked_output(
@@ -877,12 +869,6 @@ impl RootlessPodmanAdapter {
 
     /// Verify configuration evidence while the exact acquired command container
     /// is initialized but still held before the consumer payload is released.
-    ///
-    /// This rejects configured state that already disproves required controls;
-    /// it is deliberately not effective-process attestation. Seccomp mode,
-    /// capability sets and the LSM label remain subject to the post-start live
-    /// verifier until a stronger runtime-owned hold/attest/release primitive is
-    /// proven for issue #25.
     fn verify_command_prestart_configuration(
         &self,
         request: &CommandExecutionRequest,
@@ -916,18 +902,6 @@ impl RootlessPodmanAdapter {
         Ok(container)
     }
 
-    /// Verify the same P0 isolation invariants as [`Self::verify_effective_isolation`]
-    /// for a command-execution sandbox, minus the network/port controls that
-    /// do not apply to a `--network none` one-shot command.
-    ///
-    /// A bounded command may exit before `podman top` samples its live PID 1.
-    /// That race does not authorize weaker evidence: static `container inspect`
-    /// records configured/requested state, not the effective per-process
-    /// seccomp/LSM/capability state required at this security boundary. When
-    /// live process evidence is unavailable this method therefore fails closed.
-    /// Supporting extremely short-lived commands in the future requires a
-    /// reviewed start/hold/attest/release handshake (or an equivalent stronger
-    /// backend primitive), not a static-only attestation fallback.
     fn verify_command_isolation(
         &self,
         request: &CommandExecutionRequest,
@@ -956,12 +930,6 @@ impl RootlessPodmanAdapter {
             "capamb".to_owned(),
             "label".to_owned(),
         ];
-        // A one-shot command can exit before `top` samples it, unlike the
-        // long-lived service-lease path this mirrors (`verify_effective_isolation`),
-        // which never falls back either. Static `container inspect` configuration
-        // proves what was requested, not the effective per-process seccomp/LSM/
-        // capability state the release boundary requires positive proof of --
-        // fail closed instead of downgrading to it when live evidence is gone.
         let live_process_output = self.checked_output("process_security_top", &process_args)?;
         let process = parse_process_security_top(&live_process_output.stdout)?;
 
@@ -1416,9 +1384,6 @@ fn effective_lsm_verified(
 
     if info.host.security.apparmor_enabled {
         let inspect_profile = container.apparmor_profile.trim();
-        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
-        // context as `<profile> (<mode>)`. A bare profile name is not positive
-        // enforcement evidence, and complain mode audits without enforcing.
         let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
             return false;
         };
@@ -1488,10 +1453,6 @@ fn parse_process_security_top(
             inheritable_caps: fields[4].to_owned(),
             permitted_caps: fields[5].to_owned(),
             ambient_caps: fields[6].to_owned(),
-            // Podman 6.1.0 was observed to pass through a trailing NUL byte
-            // from the underlying NUL-terminated `/proc/<pid>/attr/current`
-            // kernel interface into this column; a real LSM label never
-            // legitimately contains one, so it is always safe to strip.
             lsm_label: fields[7..].join(" ").replace('\0', ""),
         });
     }
@@ -1500,12 +1461,6 @@ fn parse_process_security_top(
     })
 }
 
-/// Confirm the container was created with an isolated (non-host) user namespace.
-///
-/// Checks both representations Podman has been observed to use across
-/// versions: the CI-pinned 5.8.4 reports `HostConfig.UsernsMode == "auto"`
-/// directly, while 6.1.0 leaves that field empty and records the same fact
-/// only as the `io.podman.annotations.userns` annotation.
 fn isolated_user_namespace_verified(host_config: &ContainerHostConfig) -> bool {
     host_config.userns_mode == "auto"
         || host_config
@@ -1648,11 +1603,6 @@ fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
     (port != 0).then_some(port)
 }
 
-/// Parse one successful `podman wait` stdout payload into the workload exit code.
-///
-/// Malformed or missing stdout is runtime evidence corruption, not a synthetic
-/// workload result. The caller supplies the exact wait operation so ordinary
-/// and post-kill failures retain distinct provenance.
 fn parse_wait_exit_code(
     stdout: &[u8],
     operation: &'static str,
