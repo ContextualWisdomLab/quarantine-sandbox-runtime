@@ -21,9 +21,12 @@ const ELF_TYPE_SHARED_OBJECT: u16 = 3;
 const ELF_PROGRAM_TYPE_LOAD: u32 = 1;
 const ELF_PROGRAM_TYPE_INTERPRETER: u32 = 3;
 
+/// Byte order declared by the ELF `EI_DATA` identification field.
 #[derive(Clone, Copy)]
 enum ElfDataEncoding {
+    /// Least-significant byte first.
     LittleEndian,
+    /// Most-significant byte first.
     BigEndian,
 }
 
@@ -179,6 +182,7 @@ pub enum RuntimeGateArtifactError {
     StagingFailed,
 }
 
+/// Require an exact 64-character lowercase hexadecimal SHA-256 release identity.
 fn validate_expected_digest(expected_sha256: &str) -> Result<(), RuntimeGateArtifactError> {
     if expected_sha256.len() != 64
         || !expected_sha256
@@ -190,6 +194,7 @@ fn validate_expected_digest(expected_sha256: &str) -> Result<(), RuntimeGateArti
     Ok(())
 }
 
+/// Decode the bounded ELF machine identity used to compare the gate with the runtime host.
 fn executable_architecture(bytes: &[u8]) -> String {
     if bytes.len() < ELF_HEADER_MINIMUM_BYTES || &bytes[..4] != b"\x7fELF" {
         return "non-elf".to_owned();
@@ -207,6 +212,11 @@ fn executable_architecture(bytes: &[u8]) -> String {
     }
 }
 
+/// Prove the staged ELF can reach the trusted gate without an image-owned program interpreter.
+///
+/// The parser accepts only a bounded ELF64 ET_EXEC/ET_DYN program-header table containing at
+/// least one `PT_LOAD`. Any malformed table or `PT_INTERP` fails closed before the bytes are
+/// admitted to the runtime-owned staging directory.
 fn validate_self_contained_elf_loading(bytes: &[u8]) -> Result<(), RuntimeGateArtifactError> {
     let rejected = || RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary;
     if bytes.len() < ELF64_HEADER_BYTES
@@ -265,6 +275,7 @@ fn validate_self_contained_elf_loading(bytes: &[u8]) -> Result<(), RuntimeGateAr
     Ok(())
 }
 
+/// Read one bounded ELF `u16` field using the file-declared byte order.
 fn read_u16(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u16 {
     let value = [bytes[offset], bytes[offset + 1]];
     match encoding {
@@ -273,6 +284,7 @@ fn read_u16(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u16 {
     }
 }
 
+/// Read one bounded ELF `u32` field using the file-declared byte order.
 fn read_u32(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u32 {
     let value = [
         bytes[offset],
@@ -286,6 +298,7 @@ fn read_u32(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u32 {
     }
 }
 
+/// Read one bounded ELF `u64` field using the file-declared byte order.
 fn read_u64(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u64 {
     let value = [
         bytes[offset],
