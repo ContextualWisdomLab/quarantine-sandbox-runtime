@@ -1514,8 +1514,7 @@ fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
 
 fn capability_set_is_empty(value: &str) -> bool {
     let normalized = value.trim();
-    if normalized.is_empty()
-        || normalized == "-"
+    if normalized == "-"
         || normalized.eq_ignore_ascii_case("none")
         || normalized == "0"
         || normalized.eq_ignore_ascii_case("0x0")
