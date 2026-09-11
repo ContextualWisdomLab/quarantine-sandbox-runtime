@@ -120,6 +120,19 @@ fn container_inspection_requires_exactly_one_runtime_record() {
 }
 
 #[test]
+fn container_inspection_must_match_the_acquired_runtime_identity() {
+    let foreign_identity = CONTAINER_INSPECTION.replace(
+        "fake-command-container-id",
+        "foreign-command-container-id",
+    );
+    assert_eq!(
+        execute_with_evidence("foreign-inspection-id", &foreign_identity, "unused"),
+        Err(malformed("container_inspect")),
+        "inspection evidence for a foreign container must not attest the acquired runtime identity"
+    );
+}
+
+#[test]
 fn process_security_top_requires_one_complete_pid_one_record() {
     let header = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL";
     let non_pid_one = format!("{header}\n2 filter - - - - - containers-default (enforce)");
