@@ -1,0 +1,139 @@
+name: Repair runtime gate mount attestation
+
+on:
+  push:
+    branches: [automation/command-chronology-owner-repair]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify single-writer source head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote "$remote" refs/heads/automation/command-chronology-owner-repair | cut -f1)" = "$GITHUB_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: Apply minimal causal repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact replacement, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "src/infrastructure/podman_runtime_gate_binding.rs",
+              """        self._inner.run_runtime_gate_command_at(\n            request,\n            policy,\n            started_at_epoch_seconds,\n            &binding_args,\n""",
+              """        self._inner.run_runtime_gate_command_at(\n            request,\n            policy,\n            started_at_epoch_seconds,\n            self.runtime_gate_artifact.path(),\n            &binding_args,\n""",
+          )
+
+          podman = "src/infrastructure/podman.rs"
+          replace_once(
+              podman,
+              """        self.run_command_with_binding_at(\n            request,\n            policy,\n            started_at_epoch_seconds,\n            None,\n            |_| Ok(()),\n        )\n""",
+              """        self.run_command_with_binding_at(\n            request,\n            policy,\n            started_at_epoch_seconds,\n            None,\n            None,\n            |_| Ok(()),\n        )\n""",
+          )
+          replace_once(
+              podman,
+              """        started_at_epoch_seconds: u64,\n        runtime_gate_binding_args: &[String],\n        release_gate: F,\n""",
+              """        started_at_epoch_seconds: u64,\n        runtime_gate_artifact_path: &Path,\n        runtime_gate_binding_args: &[String],\n        release_gate: F,\n""",
+          )
+          replace_once(
+              podman,
+              """            started_at_epoch_seconds,\n            Some(runtime_gate_binding_args),\n            release_gate,\n""",
+              """            started_at_epoch_seconds,\n            Some(runtime_gate_artifact_path),\n            Some(runtime_gate_binding_args),\n            release_gate,\n""",
+          )
+          replace_once(
+              podman,
+              """        _started_at_epoch_seconds: u64,\n        runtime_gate_binding_args: Option<&[String]>,\n        release_gate: F,\n""",
+              """        _started_at_epoch_seconds: u64,\n        runtime_gate_artifact_path: Option<&Path>,\n        runtime_gate_binding_args: Option<&[String]>,\n        release_gate: F,\n""",
+          )
+          replace_once(
+              podman,
+              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n        ) {\n""",
+              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n            runtime_gate_artifact_path,\n        ) {\n""",
+          )
+          replace_once(
+              podman,
+              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n        ) {\n            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));\n        }\n\n        if runtime_gate_binding_args.is_some() {\n""",
+              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n            runtime_gate_artifact_path,\n        ) {\n            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));\n        }\n\n        if runtime_gate_binding_args.is_some() {\n""",
+          )
+          replace_once(
+              podman,
+              """        container_id: &str,\n        staged_source_path: Option<&Path>,\n    ) -> Result<(), ApplicationServiceError> {\n        let container = self.inspect_command_container(container_id)?;\n        verify_command_container_configuration(request, policy, &container, staged_source_path)\n""",
+              """        container_id: &str,\n        staged_source_path: Option<&Path>,\n        runtime_gate_artifact_path: Option<&Path>,\n    ) -> Result<(), ApplicationServiceError> {\n        let container = self.inspect_command_container(container_id)?;\n        verify_command_container_configuration(\n            request,\n            policy,\n            &container,\n            staged_source_path,\n            runtime_gate_artifact_path,\n        )\n""",
+          )
+          replace_once(
+              podman,
+              """        container_id: &str,\n        staged_source_path: Option<&Path>,\n    ) -> Result<(), ApplicationServiceError> {\n        let container = self.inspect_command_container(container_id)?;\n        verify_command_container_configuration(request, policy, &container, staged_source_path)?;\n""",
+              """        container_id: &str,\n        staged_source_path: Option<&Path>,\n        runtime_gate_artifact_path: Option<&Path>,\n    ) -> Result<(), ApplicationServiceError> {\n        let container = self.inspect_command_container(container_id)?;\n        verify_command_container_configuration(\n            request,\n            policy,\n            &container,\n            staged_source_path,\n            runtime_gate_artifact_path,\n        )?;\n""",
+          )
+          replace_once(
+              podman,
+              """    container: &ContainerInspection,\n    staged_source_path: Option<&Path>,\n) -> Result<(), ApplicationServiceError> {\n""",
+              """    container: &ContainerInspection,\n    staged_source_path: Option<&Path>,\n    runtime_gate_artifact_path: Option<&Path>,\n) -> Result<(), ApplicationServiceError> {\n""",
+          )
+          replace_once(
+              podman,
+              """        container.mounts.len() == usize::from(request.source_artifact.is_some()),\n    )?;\n""",
+              """        container.mounts.len()\n            == usize::from(request.source_artifact.is_some())\n                + usize::from(runtime_gate_artifact_path.is_some()),\n    )?;\n""",
+          )
+          replace_once(
+              podman,
+              """    if request.source_artifact.is_some() {\n        let source_mount = container\n""",
+              """    if let Some(expected_gate_path) = runtime_gate_artifact_path {\n        let runtime_gate_mount = container\n            .mounts\n            .iter()\n            .find(|mount| mount.destination == \"/qsr-runtime-gate\");\n        require_control(\n            \"runtime_gate_read_only\",\n            runtime_gate_mount.is_some_and(|mount| !mount.read_write),\n        )?;\n        require_control(\n            \"runtime_gate_bind_source\",\n            runtime_gate_mount.is_some_and(|mount| {\n                mount.mount_type == \"bind\" && mount.source == expected_gate_path\n            }),\n        )?;\n    }\n    if request.source_artifact.is_some() {\n        let source_mount = container\n""",
+          )
+
+          integration = "tests/podman_runtime_gate_command_integration_red.rs"
+          replace_once(
+              integration,
+              """    let gate = RuntimeGateArtifact::stage(&gate_source, &gate_sha256, std::env::consts::ARCH)\n        .expect(\"verified self-contained gate should stage\");\n    let inspect = format!(\n""",
+              """    let gate = RuntimeGateArtifact::stage(&gate_source, &gate_sha256, std::env::consts::ARCH)\n        .expect(\"verified self-contained gate should stage\");\n    let gate_path = gate.path().display().to_string();\n    let inspect = format!(\n""",
+          )
+          old_line = '        "[{{\\\"Id\\\":\\\"{OWNED_CONTAINER_ID}\\\",\\\"AppArmorProfile\\\":\\\"containers-default\\\",\\\"ProcessLabel\\\":\\\"\\\",\\\"EffectiveCaps\\\":[],\\\"BoundingCaps\\\":[],\\\"Config\\\":{{\\\"User\\\":\\\"65532:65532\\\",\\\"Timeout\\\":20}},\\\"HostConfig\\\":{{\\\"ReadonlyRootfs\\\":true,\\\"Privileged\\\":false,\\\"SecurityOpt\\\":[\\\"no-new-privileges\\\"],\\\"UsernsMode\\\":\\\"auto\\\",\\\"PidMode\\\":\\\"private\\\",\\\"IpcMode\\\":\\\"none\\\",\\\"NetworkMode\\\":\\\"none\\\",\\\"UTSMode\\\":\\\"private\\\",\\\"CgroupMode\\\":\\\"private\\\",\\\"Memory\\\":268435456,\\\"NanoCpus\\\":1000000000,\\\"PidsLimit\\\":16,\\\"Tmpfs\\\":{{\\\"/tmp\\\":\\\"rw,noexec,nosuid,nodev,size=16777216\\\"}}}}}}]"\n'
+          new_line = '        "[{{\\\"Id\\\":\\\"{OWNED_CONTAINER_ID}\\\",\\\"AppArmorProfile\\\":\\\"containers-default\\\",\\\"ProcessLabel\\\":\\\"\\\",\\\"EffectiveCaps\\\":[],\\\"BoundingCaps\\\":[],\\\"Config\\\":{{\\\"User\\\":\\\"65532:65532\\\",\\\"Timeout\\\":20}},\\\"HostConfig\\\":{{\\\"ReadonlyRootfs\\\":true,\\\"Privileged\\\":false,\\\"SecurityOpt\\\":[\\\"no-new-privileges\\\"],\\\"UsernsMode\\\":\\\"auto\\\",\\\"PidMode\\\":\\\"private\\\",\\\"IpcMode\\\":\\\"none\\\",\\\"NetworkMode\\\":\\\"none\\\",\\\"UTSMode\\\":\\\"private\\\",\\\"CgroupMode\\\":\\\"private\\\",\\\"Memory\\\":268435456,\\\"NanoCpus\\\":1000000000,\\\"PidsLimit\\\":16,\\\"Tmpfs\\\":{{\\\"/tmp\\\":\\\"rw,noexec,nosuid,nodev,size=16777216\\\"}}}},\\\"Mounts\\\":[{{\\\"Source\\\":\\\"{gate_path}\\\",\\\"Destination\\\":\\\"/qsr-runtime-gate\\\",\\\"Type\\\":\\\"bind\\\",\\\"Options\\\":[\\\"ro\\\"],\\\"RW\\\":false}}]}}]"\n'
+          replace_once(integration, old_line, new_line)
+          PY
+          cargo fmt
+      - name: Verify causal GREEN and repository health
+        run: |
+          set -euo pipefail
+          cargo test --locked --test podman_runtime_gate_mount_attestation_red --test podman_runtime_gate_command_integration_red
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          python3 scripts/validate_repository.py
+          git diff --check
+      - name: Publish ordinary descendant and remove source-fix workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          test "$(git ls-remote "$remote" refs/heads/automation/command-chronology-owner-repair | cut -f1)" = "$GITHUB_SHA"
+          rm .github/workflows/repair-runtime-gate-mount-attestation.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs tests/podman_runtime_gate_command_integration_red.rs tests/podman_runtime_gate_mount_attestation_red.rs .github/workflows/repair-runtime-gate-mount-attestation.yml
+          git commit -m 'fix(runtime): attest runtime gate mount identity'
+          git push "$remote" HEAD:refs/heads/automation/command-chronology-owner-repair
