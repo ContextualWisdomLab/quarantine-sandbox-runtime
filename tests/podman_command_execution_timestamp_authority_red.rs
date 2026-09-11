@@ -104,7 +104,7 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
     assert!(
         calls
             .lines()
-            .any(|line| line.starts_with("rm --force --ignore fake-command-container-id")),
+            .any(|line| line == "rm --force --ignore fake-command-container-id"),
         "the chronology path must preserve exact-ID cleanup ownership: {calls}"
     );
 
