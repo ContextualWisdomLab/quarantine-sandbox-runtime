@@ -108,9 +108,17 @@ fn empty_network_inspection_fails_closed_and_cleans_started_resources() {
     );
 
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls should be recorded");
-    assert!(calls.lines().any(|line| line.starts_with("network inspect ")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("network inspect "))
+    );
     assert!(calls.lines().any(|line| line.starts_with("stop --time 2 ")));
-    assert!(calls.lines().any(|line| line.starts_with("rm --force qsr-app-")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("rm --force qsr-app-"))
+    );
     assert!(
         calls
             .lines()
