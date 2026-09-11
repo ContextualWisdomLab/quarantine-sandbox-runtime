@@ -10,14 +10,14 @@ fn lease_owner_identity_bounds_fail_closed_independently() {
     for invalid in ["".to_owned(), "x".repeat(129), "owner with space".to_owned()] {
         assert_eq!(
             LeaseOwnerId::new(&invalid),
-            Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId)
+            Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId),
         );
     }
 
     let non_ascii = "owner-é";
     assert_eq!(
         LeaseOwnerId::new(non_ascii),
-        Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId)
+        Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId),
     );
 
     let maximum = "x".repeat(128);
@@ -25,7 +25,7 @@ fn lease_owner_identity_bounds_fail_closed_independently() {
         LeaseOwnerId::new(&maximum)
             .expect("the exact maximum bounded ASCII owner should be admitted")
             .as_str(),
-        maximum
+        maximum,
     );
 }
 
@@ -43,7 +43,7 @@ fn lease_owner_identity_accepts_each_supported_separator() {
             LeaseOwnerId::new(owner)
                 .expect("documented separator should remain part of the public owner grammar")
                 .as_str(),
-            owner
+            owner,
         );
     }
 }
