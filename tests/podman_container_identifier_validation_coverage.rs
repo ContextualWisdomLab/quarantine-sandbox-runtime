@@ -12,7 +12,6 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
     ResourceRequest, RootlessPodmanAdapter,
 };
-use tempfile::TempDir;
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
