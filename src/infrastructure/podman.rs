@@ -372,11 +372,7 @@ impl RootlessPodmanAdapter {
             };
 
         if wait_for_readiness(host_port, policy).is_err() {
-            self.cleanup_started_container(
-                &plan,
-                &container_id,
-                policy.shutdown_grace_seconds,
-            )?;
+            self.cleanup_started_container(&plan, &container_id, policy.shutdown_grace_seconds)?;
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
 
