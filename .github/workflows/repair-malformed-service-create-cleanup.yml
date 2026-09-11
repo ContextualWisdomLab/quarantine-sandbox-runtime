@@ -8,10 +8,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: repair-malformed-service-create-cleanup
-  cancel-in-progress: false
-
 jobs:
   repair:
     runs-on: ubuntu-24.04
