@@ -7,7 +7,11 @@ use quarantine_sandbox_runtime::{ApplicationServiceCoordinatorError, LeaseOwnerI
 
 #[test]
 fn lease_owner_identity_bounds_fail_closed_independently() {
-    for invalid in ["".to_owned(), "x".repeat(129), "owner with space".to_owned()] {
+    for invalid in [
+        "".to_owned(),
+        "x".repeat(129),
+        "owner with space".to_owned(),
+    ] {
         assert_eq!(
             LeaseOwnerId::new(&invalid),
             Err(ApplicationServiceCoordinatorError::InvalidLeaseOwnerId),
