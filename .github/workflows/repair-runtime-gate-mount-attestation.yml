@@ -33,6 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/repair_runtime_gate_mount_attestation.py
+          python3 scripts/repair_runtime_gate_cli_fixture.py
           cargo fmt
       - name: Verify causal GREEN and repository health
         run: |
@@ -54,8 +55,9 @@ jobs:
           rm -f .github/workflows/repair-runtime-gate-mount-attestation.yml
           rm -f .github/workflows/repair-runtime-gate-mount-attestation-v2.yml
           rm -f scripts/repair_runtime_gate_mount_attestation.py
+          rm -f scripts/repair_runtime_gate_cli_fixture.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/main.rs src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs tests/podman_runtime_gate_command_integration_red.rs .github/workflows/repair-runtime-gate-mount-attestation.yml .github/workflows/repair-runtime-gate-mount-attestation-v2.yml scripts/repair_runtime_gate_mount_attestation.py
+          git add src/main.rs src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs tests/podman_runtime_gate_command_integration_red.rs .github/workflows/repair-runtime-gate-mount-attestation.yml .github/workflows/repair-runtime-gate-mount-attestation-v2.yml scripts/repair_runtime_gate_mount_attestation.py scripts/repair_runtime_gate_cli_fixture.py
           git commit -m 'fix(runtime): attest runtime gate mount identity'
           git push "$remote" HEAD:refs/heads/automation/command-chronology-owner-repair
