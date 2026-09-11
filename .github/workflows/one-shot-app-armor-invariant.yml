@@ -1,6 +1,6 @@
 name: One-shot AppArmor invariant repair
 
-on:
+'on':
   push:
     branches:
       - automation/command-chronology-owner-repair
@@ -26,54 +26,19 @@ jobs:
           git fetch origin "$BRANCH"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
-      - name: Apply admitted-LSM invariant repair
+      - name: Apply admitted LSM invariant repair
+        env:
+          OLD_BLOCK_B64: ICAgIGlmIGluZm8uaG9zdC5zZWN1cml0eS5hcHBhcm1vcl9lbmFibGVkIHsKICAgICAgICBsZXQgaW5zcGVjdF9wcm9maWxlID0gY29udGFpbmVyLmFwcGFybW9yX3Byb2ZpbGUudHJpbSgpOwogICAgICAgIC8vIGAvcHJvYy88cGlkPi9hdHRyL2N1cnJlbnRgIGV4cG9zZXMgdGhlIGN1cnJlbnQgdGFzaydzIEFwcEFybW9yCiAgICAgICAgLy8gY29udGV4dCBhcyBgPHByb2ZpbGU+ICg8bW9kZT4pYC4gQSBiYXJlIHByb2ZpbGUgbmFtZSBpcyBub3QgcG9zaXRpdmUKICAgICAgICAvLyBlbmZvcmNlbWVudCBldmlkZW5jZSwgYW5kIGNvbXBsYWluIG1vZGUgYXVkaXRzIHdpdGhvdXQgZW5mb3JjaW5nLgogICAgICAgIGxldCBTb21lKChydW50aW1lX3Byb2ZpbGUsIG1vZGVfd2l0aF9zdWZmaXgpKSA9IHJ1bnRpbWVfbGFiZWwucnNwbGl0X29uY2UoIiAoIikgZWxzZSB7CiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICB9OwogICAgICAgIGxldCBTb21lKG1vZGUpID0gbW9kZV93aXRoX3N1ZmZpeC5zdHJpcF9zdWZmaXgoJyknKSBlbHNlIHsKICAgICAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICAgIH07CiAgICAgICAgbGV0IHJ1bnRpbWVfcHJvZmlsZSA9IHJ1bnRpbWVfcHJvZmlsZS50cmltKCk7CiAgICAgICAgcmV0dXJuIG1vZGUuZXFfaWdub3JlX2FzY2lpX2Nhc2UoImVuZm9yY2UiKQogICAgICAgICAgICAmJiAhcnVudGltZV9wcm9maWxlLmlzX2VtcHR5KCkKICAgICAgICAgICAgJiYgIWluc3BlY3RfcHJvZmlsZS5pc19lbXB0eSgpCiAgICAgICAgICAgICYmICFpbnNwZWN0X3Byb2ZpbGUuZXFfaWdub3JlX2FzY2lpX2Nhc2UoInVuY29uZmluZWQiKQogICAgICAgICAgICAmJiBpbnNwZWN0X3Byb2ZpbGUgPT0gcnVudGltZV9wcm9maWxlOwogICAgfQoKICAgIGZhbHNlCg==
+          NEW_BLOCK_B64: ICAgIC8vIGB2YWxpZGF0ZV9iYWNrZW5kX3NlY3VyaXR5YCBhZG1pdHMgdGhpcyBzYW1lIGJhY2tlbmQgZXZpZGVuY2UgYmVmb3JlIGFueQogICAgLy8gY29udGFpbmVyIGlzIGNyZWF0ZWQuIEFmdGVyIHRoZSBTRUxpbnV4IGJyYW5jaCBhYm92ZSBpcyBmYWxzZSwgdGhhdAogICAgLy8gaW52YXJpYW50IG1lYW5zIEFwcEFybW9yIGlzIGVuYWJsZWQ7IHJldGFpbmluZyBhbiBBcHBBcm1vci1kaXNhYmxlZAogICAgLy8gZmFsbGJhY2sgaGVyZSB3b3VsZCBkZXNjcmliZSBhIHN0YXRlIHRoZSBwdWJsaWMgYWRhcHRlciBjYW5ub3QgcmVhY2guCiAgICBsZXQgaW5zcGVjdF9wcm9maWxlID0gY29udGFpbmVyLmFwcGFybW9yX3Byb2ZpbGUudHJpbSgpOwogICAgLy8gYC9wcm9jLzxwaWQ+L2F0dHIvY3VycmVudGAgZXhwb3NlcyB0aGUgY3VycmVudCB0YXNrJ3MgQXBwQXJtb3IKICAgIC8vIGNvbnRleHQgYXMgYDxwcm9maWxlPiAoPG1vZGU+KWAuIEEgYmFyZSBwcm9maWxlIG5hbWUgaXMgbm90IHBvc2l0aXZlCiAgICAvLyBlbmZvcmNlbWVudCBldmlkZW5jZSwgYW5kIGNvbXBsYWluIG1vZGUgYXVkaXRzIHdpdGhvdXQgZW5mb3JjaW5nLgogICAgbGV0IFNvbWUoKHJ1bnRpbWVfcHJvZmlsZSwgbW9kZV93aXRoX3N1ZmZpeCkpID0gcnVudGltZV9sYWJlbC5yc3BsaXRfb25jZSgiICgiKSBlbHNlIHsKICAgICAgICByZXR1cm4gZmFsc2U7CiAgICB9OwogICAgbGV0IFNvbWUobW9kZSkgPSBtb2RlX3dpdGhfc3VmZml4LnN0cmlwX3N1ZmZpeCgnKScpIGVsc2UgewogICAgICAgIHJldHVybiBmYWxzZTsKICAgIH07CiAgICBsZXQgcnVudGltZV9wcm9maWxlID0gcnVudGltZV9wcm9maWxlLnRyaW0oKTsKICAgIG1vZGUuZXFfaWdub3JlX2FzY2lpX2Nhc2UoImVuZm9yY2UiKQogICAgICAgICYmICFydW50aW1lX3Byb2ZpbGUuaXNfZW1wdHkoKQogICAgICAgICYmICFpbnNwZWN0X3Byb2ZpbGUuaXNfZW1wdHkoKQogICAgICAgICYmICFpbnNwZWN0X3Byb2ZpbGUuZXFfaWdub3JlX2FzY2lpX2Nhc2UoInVuY29uZmluZWQiKQogICAgICAgICYmIGluc3BlY3RfcHJvZmlsZSA9PSBydW50aW1lX3Byb2ZpbGUK
         run: |
           python3 - <<'PY'
+          import base64
+          import os
           from pathlib import Path
           path = Path('src/infrastructure/podman.rs')
           text = path.read_text()
-          old = '''    if info.host.security.apparmor_enabled {
-        let inspect_profile = container.apparmor_profile.trim();
-        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
-        // context as `<profile> (<mode>)`. A bare profile name is not positive
-        // enforcement evidence, and complain mode audits without enforcing.
-        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
-            return false;
-        };
-        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
-            return false;
-        };
-        let runtime_profile = runtime_profile.trim();
-        return mode.eq_ignore_ascii_case("enforce")
-            && !runtime_profile.is_empty()
-            && !inspect_profile.is_empty()
-            && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_profile;
-    }
-
-    false
-'''
-          new = '''    // `validate_backend_security` admits this same backend evidence before any
-    // container is created. After the SELinux branch above is false, that
-    // invariant means AppArmor is enabled; retaining an AppArmor-disabled
-    // fallback here would describe a state the public adapter cannot reach.
-    let inspect_profile = container.apparmor_profile.trim();
-    // `/proc/<pid>/attr/current` exposes the current task's AppArmor
-    // context as `<profile> (<mode>)`. A bare profile name is not positive
-    // enforcement evidence, and complain mode audits without enforcing.
-    let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
-        return false;
-    };
-    let Some(mode) = mode_with_suffix.strip_suffix(')') else {
-        return false;
-    };
-    let runtime_profile = runtime_profile.trim();
-    mode.eq_ignore_ascii_case("enforce")
-        && !runtime_profile.is_empty()
-        && !inspect_profile.is_empty()
-        && !inspect_profile.eq_ignore_ascii_case("unconfined")
-        && inspect_profile == runtime_profile
-'''
+          old = base64.b64decode(os.environ['OLD_BLOCK_B64']).decode()
+          new = base64.b64decode(os.environ['NEW_BLOCK_B64']).decode()
           if text.count(old) != 1:
               raise SystemExit('expected exact AppArmor branch once')
           path.write_text(text.replace(old, new))
@@ -81,6 +46,7 @@ jobs:
           git rm .github/workflows/one-shot-app-armor-invariant.yml
       - name: Validate causal repair
         run: |
+          python3 scripts/validate_repository.py
           cargo fmt --check
           cargo test --locked --test podman_command_lsm_shape_coverage
           cargo test --locked --workspace --all-targets --no-fail-fast
