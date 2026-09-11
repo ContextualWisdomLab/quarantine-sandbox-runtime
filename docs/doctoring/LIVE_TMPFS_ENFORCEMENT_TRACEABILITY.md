@@ -27,6 +27,12 @@ The ordinary hosted suite compiles this ignored real-runtime acceptance but cann
 
 The positive-LSM lane must execute these checks on the same exact candidate used for the release decision. A predecessor result, static inspect output, or a fake-Podman fixture cannot close issue #35.
 
+## Exact hosted evidence and baseline reconciliation
+
+Exact `47ceddd966ea9d20b0784ac52dc7452d346eea44`, CI `34606000110`, made verify `103284586110` and hosted negative rootless/AppArmor `103284585789` GREEN. Coverage `103284586438` and branch coverage `103284586128` generated immutable artifacts and failed only the repository-wide 100% admissions: 4745/4867 lines (97.49%), 439/450 functions (97.56%), 6358/6574 regions (96.71%), and 677/716 branches (94.55%). Coverage digest is `sha256:3cd5226b715383b2051800fda4c900d16fddb88e4ac59e7653aeec36d1af0516`; branch digest is `sha256:2ac1dd6eae68ae42d85266ebd350a008767e09fead820208358d57266f1e8d22`. Dedicated positive SELinux job `103284586010` remained runner-unassigned, so this is compilation/hosted-negative/coverage evidence, not positive live `/tmp` acceptance.
+
+One-shot baseline reconciliation run `34606332818`, job `103285543572`, passed rustfmt, the full workspace/all-target/no-fail-fast suite, Clippy, rustdoc, and `git diff --check`, then published ordinary descendant `9703c34a1600f804d809ee36eb926824aa429465` and removed its temporary workflow. `docs/product-technical-gap-baseline.md` now carries the exact `47ced...` evidence, the live `/tmp` witness contract, and the remaining positive-LSM/#35/#43/release gates without deleting the earlier causal ledger.
+
 ## Rationale
 
 Podman's current `podman create` documentation states that a tmpfs mount without explicit alternatives uses `rw,noexec,nosuid,nodev`, and documents the tmpfs size as a byte limit. Linux kernel tmpfs documentation defines `size` as the allocation limit for the tmpfs instance. The acceptance therefore observes both the effective filesystem/mount options and the live capacity exposed by the kernel, then adds a direct execution counterexample for `noexec`.
