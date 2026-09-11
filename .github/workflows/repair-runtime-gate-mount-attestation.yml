@@ -70,8 +70,8 @@ jobs:
           )
           replace_once(
               podman,
-              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n        ) {\n""",
-              """            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n            runtime_gate_artifact_path,\n        ) {\n""",
+              """        if let Err(error) = self.verify_command_prestart_configuration(\n            request,\n            policy,\n            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n        ) {\n""",
+              """        if let Err(error) = self.verify_command_prestart_configuration(\n            request,\n            policy,\n            &container_id,\n            staged_source.as_ref().map(|staged| staged.path()),\n            runtime_gate_artifact_path,\n        ) {\n""",
           )
           replace_once(
               podman,
