@@ -111,6 +111,18 @@ fn security_info_json(version_json: &str) -> String {
     )
 }
 
+fn container_inspect_json(id: &str) -> String {
+    format!(
+        "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
+         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
+         \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
+         \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
+         \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\
+         \"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\
+         \"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}}}}]"
+    )
+}
+
 fn assert_version_is_rejected(name: &str, version_json: &str) {
     let backend_info = security_info_json(version_json);
     let script = format!(
@@ -151,6 +163,27 @@ fn assert_create_identifier_is_rejected(name: &str, create_response: &str) {
     let _ = fs::remove_file(program);
 }
 
+fn assert_process_security_top_is_rejected(name: &str, top_payload: &str) {
+    let backend_info = security_info_json("\"6.1.0\"");
+    let inspect = container_inspect_json("fake-command-container-id");
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{backend_info}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{inspect}' ;;\n  top:*) printf '%s' '{top_payload}' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n"
+    );
+    let program = write_executable(name, &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "process_security_top",
+            },
+        ))
+    );
+
+    let _ = fs::remove_file(program);
+}
+
 #[test]
 fn backend_security_version_rejects_each_malformed_text_class() {
     assert_version_is_rejected("empty-version", "\"\"");
@@ -162,4 +195,20 @@ fn backend_security_version_rejects_each_malformed_text_class() {
 fn container_create_rejects_empty_and_whitespace_identifiers() {
     assert_create_identifier_is_rejected("empty-create-id", "printf '\\n'");
     assert_create_identifier_is_rejected("whitespace-create-id", "printf 'bad id\\n'");
+}
+
+#[test]
+fn process_security_top_rejects_missing_short_and_duplicate_pid_one_evidence() {
+    const HEADER: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n";
+    assert_process_security_top_is_rejected(
+        "missing-pid-one",
+        &format!("{HEADER}2 filter - - - - - containers-default (enforce)\\n"),
+    );
+    assert_process_security_top_is_rejected("short-pid-one", &format!("{HEADER}1 filter -\\n"));
+    assert_process_security_top_is_rejected(
+        "duplicate-pid-one",
+        &format!(
+            "{HEADER}1 filter - - - - - containers-default (enforce)\\n1 filter - - - - - containers-default (enforce)\\n"
+        ),
+    );
 }
