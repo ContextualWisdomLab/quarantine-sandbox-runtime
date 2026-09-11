@@ -13,16 +13,16 @@ The security significance is evidence integrity and auditability, not container 
 | Evidence | Authority | Repository consequence |
 | --- | --- | --- |
 | `CommandExecutionRequest.request_id` | Consumer correlation | Remains opaque correlation metadata; it is not clock authority. |
-| `started_at_epoch_seconds` method parameter | Current caller/test seam | May support deterministic tests, but must not be published unchanged as observed runtime time without validation or a reviewed clock abstraction. |
-| `SystemTime::now()` at completion | Runtime wall clock | Supplies presentation/audit time only; it must not be used for lease enforcement arithmetic. |
+| `started_at_epoch_seconds` method parameter | Compatibility/test seam | May support deterministic tests, but is not runtime-observed receipt authority. |
+| Runtime `SystemTime::now()` observations | Runtime wall clock | Supply presentation/audit timestamps and must fail closed on pre-epoch or contradictory chronology. |
 | `Instant`/bounded runner deadlines | Runtime monotonic clock | Remains the correct class of source for elapsed-time timeout enforcement. |
-| `CommandExecutionResult.started_at_epoch_seconds` / `finished_at_epoch_seconds` | Runtime-owned public evidence | Must be internally noncontradictory and must identify whether values are observed, supplied, or derived. |
+| `CommandExecutionResult.started_at_epoch_seconds` / `finished_at_epoch_seconds` | Runtime-owned public evidence | Must be internally noncontradictory and originate inside the runtime boundary. |
 
 ## RED authority
 
 Issue #44 is represented by `tests/podman_command_execution_timestamp_authority_red.rs`, first checked in at `ae38d9c9e594774f27943137e27a073b8743c2bc`.
 
-The fixture keeps the current fake-Podman isolation path positive and supplies `1_000_000_000_000` as the caller start. Current production is expected to return `Ok` while copying that value into the result, so the test fails when it requires either fail-closed behavior or a runtime-observed start that is not the caller's impossible future value.
+The fixture keeps the current fake-Podman isolation path positive and supplies `1_000_000_000_000` as the caller start. The repaired witness first proves that the same fake runtime can construct a normal result, then drives the future caller timestamp through live isolation, wait/log collection and exact-ID cleanup before testing chronology. Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16`, CI `34565196344`, failed at that intended assertion with the caller value still published unchanged. That is the causal RED.
 
 This RED is independent from:
 
@@ -31,13 +31,17 @@ This RED is independent from:
 - #34, which preserves output encoding integrity;
 - #36, which binds lifecycle operations to acquired container identity.
 
-## Smallest causal GREEN
+## Selected causal repair
 
-Prefer an internal clock abstraction that can expose wall-clock observation for receipts and monotonic elapsed time for enforcement. Production should observe start and finish inside the runtime boundary; deterministic tests can inject a clock implementation rather than inject authoritative receipt timestamps through a public execution method.
+The canonical repair keeps the existing `*_at` parameter only as a compatibility/test seam but removes it from evidence authority. `run_command_with_binding_at` observes start and finish with `SystemTime::now()` inside the runtime boundary, uses the observed start for sandbox identity and result evidence, and fails closed when either observation predates the Unix epoch or the finish observation precedes the start observation. It does not clamp, synthesize, or reorder timestamps. Existing `Instant`/`BoundedCommandRunner` deadlines remain the monotonic authority for lease and administrative timeout enforcement.
 
-A compatibility layer may temporarily retain `*_at` methods, but it must not silently convert contradictory caller input into plausible evidence. Rejecting an impossible supplied chronology is safer than clamping `finished_at` or copying the supplied value.
+Focused deterministic unit tests cover equal/ordered observations, a wall-clock rollback, pre-epoch failure, and exact epoch conversion. The executed #111 future-input witness verifies that the caller value is no longer emitted unchanged by the repaired implementation.
 
-The repair must preserve existing timeout behavior, request correlation, sandbox identity ownership, exact-head provenance, and schema compatibility. If timestamp provenance becomes explicit on the wire, that is a versioned contract change rather than an undocumented semantic shift.
+## Exact validation evidence
+
+Draft #112 exact `f811e37b230dd836da8b6b44c43d729d55815341`, CI `34569963535`, completed exact checkout, dependency lock, repository/CI-contract validation, rustfmt, `cargo test --locked --workspace --all-targets --no-fail-fast`, Clippy with `-D warnings`, rustdoc with `-D warnings`, and the hosted negative rootless/AppArmor lane successfully. Coverage evidence generation also completed; only the explicit repository-wide 100% admission checks failed. Measured coverage was lines `4691/4842 = 96.88%`, functions `435/446 = 97.53%`, regions `6302/6542 = 96.33%`, branches `657/728 = 90.25%`.
+
+A subsequent one-shot repair on exact `9700e1ec8f3d40d04ed9c8485d27da188e4322ec` removed an unreachable registry-split control-flow branch after running the focused malformed-image regression, full workspace tests, rustfmt, Clippy, rustdoc, and `git diff --check`. Run `34573368198`, job `103180204743`, completed successfully and published ordinary descendant `9a3bc933328cf90ad834bcd532ad13ac5bfc967b`; the workflow removed itself in the same commit. Because a `GITHUB_TOKEN`-originated push does not provide independent exact-head CI evidence for the descendant, this document update intentionally creates a normal owner-authored descendant so current-head CI can re-establish exact-SHA evidence rather than inheriting predecessor GREEN by assumption.
 
 ## Standards and research traceability
 
@@ -51,12 +55,4 @@ SP 800-92 documents the analytic harm caused by inaccurate and inconsistent time
 
 ## Release evidence
 
-A future GREEN is not release evidence by source inspection alone. The #44 RED must first execute for the intended caller-time cause. The repaired exact head must then reacquire full repository CI/coverage/security/review and real rootless-Podman/positive-LSM evidence together with the existing #25–#43 gates.
-
-## Executed causal RED and selected repair (2026-09-11)
-
-Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16`, CI `34565196344`, crossed exact checkout, dependency lock, repository policy, CI evidence contracts and rustfmt before the workspace Test step failed. The repaired witness first proves the same fake Podman runtime can construct a normal result, then drives the far-future caller timestamp through live isolation, wait/log collection and exact-ID cleanup before asserting chronology. Hosted negative rootless/AppArmor evidence on the same SHA is GREEN. This supersedes the earlier queued-only status and establishes the intended caller-time causal RED.
-
-The selected minimum repair keeps the existing `*_at` parameter only as a compatibility/test seam but removes it from evidence authority. `run_command_with_binding_at` observes start and finish with `SystemTime::now()` inside the runtime boundary, uses the observed start for sandbox identity and result evidence, and fails closed when either observation predates the Unix epoch or the finish observation precedes the start observation. It does not clamp, synthesize, or reorder timestamps. Existing `Instant`/`BoundedCommandRunner` deadlines remain the monotonic authority for lease and administrative timeout enforcement.
-
-Focused deterministic unit tests cover equal/ordered observations, a wall-clock rollback, pre-epoch failure, and exact epoch conversion. The executed #111 future-input witness proves the caller value is no longer emitted unchanged. Full exact-head CI, complete owned-production coverage, review/security, real Podman #35/#43, positive effective-LSM, protected integration and immutable release evidence remain independent gates.
+The causal RED and functional repair are established, but they are not sufficient release evidence by themselves. The repaired current head must reacquire exact-head repository CI and 100% owned-production line/function/region/branch coverage, independent review/security evidence, real rootless-Podman enforcement for #35/#43, positive effective-LSM evidence, protected-head verification, SBOM/provenance/reproducibility/rollback, and immutable publication before the command chronology repair can be called released.
