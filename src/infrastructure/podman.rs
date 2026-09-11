@@ -1687,9 +1687,7 @@ where
     if values.len() != 1 {
         return Err(ApplicationServiceError::MalformedIsolationInspection { operation });
     }
-    values
-        .pop()
-        .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
+    Ok(values.remove(0))
 }
 
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
