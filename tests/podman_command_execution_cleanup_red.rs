@@ -135,8 +135,8 @@ fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
 #[test]
 fn container_logs_timeout_is_backend_timeout_and_cleanup_is_attempted() {
     let (program, call_log) = create_fake_podman("logs-timeout", "command_logs_timeout");
-    let adapter =
-        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_millis(250));
+    let adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_timeout(Duration::from_millis(250));
 
     let error = adapter
         .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
