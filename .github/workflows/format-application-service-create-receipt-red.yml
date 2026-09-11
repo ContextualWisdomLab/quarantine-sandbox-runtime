@@ -13,7 +13,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_PARENT: e047aa7e8a671847e7095b4d68cd8c29a65ecf24
+      EXPECTED_PARENT: 24db66d40398ce1843e32abc29aad31efae55ca0
       TARGET_FILE: tests/podman_application_service_malformed_create_receipt_red.rs
       WORKFLOW_FILE: .github/workflows/format-application-service-create-receipt-red.yml
     steps:
@@ -33,30 +33,27 @@ jobs:
         with:
           toolchain: 1.97.0
           components: rustfmt
-      - name: Apply canonical rustfmt output
+      - name: Format only the causal RED test
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all
+          rustfmt --edition 2024 "$TARGET_FILE"
           if git diff --quiet -- "$TARGET_FILE"; then
             echo "Expected rustfmt to change the #113 RED test, but no target delta was produced." >&2
             exit 1
           fi
           test "$(git diff --name-only)" = "$TARGET_FILE"
-          cargo fmt --all -- --check
+          rustfmt --check --edition 2024 "$TARGET_FILE"
           git diff --check
-      - name: Validate repository policy
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/validate_repository.py
-      - name: Publish formatter-only descendant and remove temporary workflow
+      - name: Validate final repository state and publish formatter-only descendant
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           rm "$WORKFLOW_FILE"
+          python3 scripts/validate_repository.py
+          git diff --check
           git add "$TARGET_FILE" "$WORKFLOW_FILE"
           expected_paths=$(printf '%s\n%s\n' "$WORKFLOW_FILE" "$TARGET_FILE" | sort)
           actual_paths=$(git diff --cached --name-only | sort)
