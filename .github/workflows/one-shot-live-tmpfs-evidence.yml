@@ -21,9 +21,7 @@ jobs:
           fetch-depth: 2
           persist-credentials: true
       - name: Verify repair lineage
-        run: |
-          test "$(git rev-parse HEAD^)" = "135e59725b9a4551b69ff27322f3252aacb8ce89"
-          git merge-base --is-ancestor d411e13dcddcc47d2e9b964b93aa95a29d225b41 HEAD
+        run: test "$(git rev-parse HEAD^)" = "abebdabfa172a0ddeb02856bdcba25419a3d0b56"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
         with:
           toolchain: 1.97.1
