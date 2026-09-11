@@ -123,12 +123,9 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
                 result.finished_at_epoch_seconds()
             );
         }
-        Err(CommandExecutionError::Backend(
-            ApplicationServiceError::BackendInvocationFailed {
-                operation:
-                    "command_start_clock" | "command_finish_clock" | "command_chronology",
-            },
-        )) => {
+        Err(CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "command_start_clock" | "command_finish_clock" | "command_chronology",
+        })) => {
             // Runtime-owned wall-clock acquisition or chronology validation may fail closed.
         }
         Err(other) => panic!(
