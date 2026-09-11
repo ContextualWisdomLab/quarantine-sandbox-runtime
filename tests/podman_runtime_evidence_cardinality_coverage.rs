@@ -142,14 +142,9 @@ fn configured_effective_capabilities_fail_closed() {
         "\"EffectiveCaps\":null",
         "\"EffectiveCaps\":[\"CAP_NET_ADMIN\"]",
     );
-    let process_top =
-        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
+    let process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
     assert_eq!(
-        execute_with_evidence(
-            "configured-effective-cap",
-            &nonempty_effective,
-            process_top,
-        ),
+        execute_with_evidence("configured-effective-cap", &nonempty_effective, process_top,),
         Err(isolation_failure("all_capabilities_dropped")),
         "configured effective capabilities must not be treated as fully dropped"
     );
@@ -161,14 +156,9 @@ fn configured_bounding_capabilities_fail_closed() {
         "\"BoundingCaps\":null",
         "\"BoundingCaps\":[\"CAP_NET_ADMIN\"]",
     );
-    let process_top =
-        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
+    let process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
     assert_eq!(
-        execute_with_evidence(
-            "configured-bounding-cap",
-            &nonempty_bounding,
-            process_top,
-        ),
+        execute_with_evidence("configured-bounding-cap", &nonempty_bounding, process_top,),
         Err(isolation_failure("all_capabilities_dropped")),
         "configured bounding capabilities must not be treated as fully dropped"
     );
