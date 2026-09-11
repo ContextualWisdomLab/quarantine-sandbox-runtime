@@ -97,6 +97,22 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
+fn assert_exact_log_and_cleanup_calls(call_log: &Path) {
+    let calls = fs::read_to_string(call_log).expect("fake Podman calls should be recorded");
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == "logs fake-command-container-id"),
+        "log retrieval must target only the acquired container ID: {calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == "rm --force --ignore fake-command-container-id"),
+        "cleanup must target only the acquired container ID: {calls}"
+    );
+}
+
 #[test]
 fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
     let (program, call_log) = create_fake_podman("nonzero-logs", "command_nonzero_logs");
@@ -112,9 +128,27 @@ fn nonzero_container_logs_status_is_backend_failure_and_cleanup_is_attempted() {
             operation: "container_logs",
         })
     );
-    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
-    assert!(calls.lines().any(|line| line.starts_with("logs ")));
-    assert!(calls.lines().any(|line| line.starts_with("rm --force ")));
+    assert_exact_log_and_cleanup_calls(&call_log);
+    remove_fixture(&program, &call_log);
+}
+
+#[test]
+fn container_logs_timeout_is_backend_timeout_and_cleanup_is_attempted() {
+    let (program, call_log) = create_fake_podman("logs-timeout", "command_logs_timeout");
+    let adapter =
+        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_millis(250));
+
+    let error = adapter
+        .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
+            operation: "container_logs",
+        })
+    );
+    assert_exact_log_and_cleanup_calls(&call_log);
     remove_fixture(&program, &call_log);
 }
 
