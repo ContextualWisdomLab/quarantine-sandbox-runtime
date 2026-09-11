@@ -116,7 +116,9 @@ esac
 
     let calls = fs::read_to_string(call_log).expect("call log must remain readable");
     assert!(
-        calls.lines().any(|line| line == "wait fake-command-container-id"),
+        calls
+            .lines()
+            .any(|line| line == "wait fake-command-container-id"),
         "the regression must reach exact-ID wait rather than fail in an earlier fixture stage"
     );
     assert!(
