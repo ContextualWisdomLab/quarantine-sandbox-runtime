@@ -74,6 +74,14 @@ fn staging_classifies_digest_matching_loading_and_machine_mismatches_fail_closed
     let directory = tempfile::tempdir().expect("fixture directory should exist");
     let (source, mut bytes) = write_self_contained_gate(directory.path());
 
+    let non_elf_bytes = vec![0_u8; bytes.len()];
+    fs::write(&source, &non_elf_bytes).expect("non-ELF fixture should be writable");
+    let non_elf_digest = format!("{:x}", Sha256::digest(&non_elf_bytes));
+    assert!(matches!(
+        RuntimeGateArtifact::stage(&source, &non_elf_digest, std::env::consts::ARCH),
+        Err(RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary)
+    ));
+
     bytes[20..24].copy_from_slice(&0_u32.to_le_bytes());
     fs::write(&source, &bytes).expect("malformed ELF fixture should be writable");
     let malformed_digest = format!("{:x}", Sha256::digest(&bytes));
