@@ -13,7 +13,6 @@ use tempfile::TempDir;
 use thiserror::Error;
 
 const RUNTIME_GATE_FILE_NAME: &str = "qsr-runtime-gate";
-const ELF_HEADER_MINIMUM_BYTES: usize = 20;
 const ELF64_HEADER_BYTES: usize = 64;
 const ELF64_PROGRAM_HEADER_BYTES: usize = 56;
 const ELF_TYPE_EXECUTABLE: u16 = 2;
@@ -50,9 +49,7 @@ pub struct RuntimeGateArtifact {
 
 impl PartialEq for RuntimeGateArtifact {
     fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
-            && self.sha256 == other.sha256
-            && self.architecture == other.architecture
+        Arc::ptr_eq(&self._staging_directory, &other._staging_directory)
     }
 }
 
@@ -209,12 +206,8 @@ fn validate_expected_digest(expected_sha256: &str) -> Result<(), RuntimeGateArti
     Ok(())
 }
 
-/// Decode the bounded ELF machine identity used to compare the gate with the runtime host.
+/// Decode machine identity from bytes already admitted by the bounded ELF loading validator.
 fn executable_architecture(bytes: &[u8]) -> String {
-    if bytes.len() < ELF_HEADER_MINIMUM_BYTES || &bytes[..4] != b"\x7fELF" {
-        return "non-elf".to_owned();
-    }
-
     let machine = match bytes[5] {
         1 => u16::from_le_bytes([bytes[18], bytes[19]]),
         2 => u16::from_be_bytes([bytes[18], bytes[19]]),
@@ -398,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn elf_machine_identity_is_bounded_and_endian_aware() {
+    fn elf_machine_identity_is_endian_aware_after_loading_admission() {
         let mut little_x86_64 = vec![0_u8; 20];
         little_x86_64[..4].copy_from_slice(b"\x7fELF");
         little_x86_64[5] = 1;
@@ -421,7 +414,6 @@ mod tests {
             executable_architecture(&unknown_encoding),
             "elf-unknown-data-encoding"
         );
-        assert_eq!(executable_architecture(b"not-elf"), "non-elf");
     }
 
     #[test]
