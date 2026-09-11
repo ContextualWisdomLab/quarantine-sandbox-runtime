@@ -199,16 +199,16 @@ fn container_create_rejects_empty_and_whitespace_identifiers() {
 
 #[test]
 fn process_security_top_rejects_missing_short_and_duplicate_pid_one_evidence() {
-    const HEADER: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n";
+    const HEADER: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n";
     assert_process_security_top_is_rejected(
         "missing-pid-one",
-        &format!("{HEADER}2 filter - - - - - containers-default (enforce)\\n"),
+        &format!("{HEADER}2 filter - - - - - containers-default (enforce)\n"),
     );
-    assert_process_security_top_is_rejected("short-pid-one", &format!("{HEADER}1 filter -\\n"));
+    assert_process_security_top_is_rejected("short-pid-one", &format!("{HEADER}1 filter -\n"));
     assert_process_security_top_is_rejected(
         "duplicate-pid-one",
         &format!(
-            "{HEADER}1 filter - - - - - containers-default (enforce)\\n1 filter - - - - - containers-default (enforce)\\n"
+            "{HEADER}1 filter - - - - - containers-default (enforce)\n1 filter - - - - - containers-default (enforce)\n"
         ),
     );
 }
