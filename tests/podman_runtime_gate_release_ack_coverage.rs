@@ -144,10 +144,8 @@ fn assert_exact_id_cleanup(recorded: &str) {
 
 #[test]
 fn malformed_release_acknowledgement_fails_closed_after_exact_id_cleanup() {
-    let (error, recorded) = run_with_hostile_ack(
-        "runtime-gate-malformed-ack",
-        "printf 'NOT_RELEASED\\n'",
-    );
+    let (error, recorded) =
+        run_with_hostile_ack("runtime-gate-malformed-ack", "printf 'NOT_RELEASED\\n'");
 
     assert_eq!(
         error,
