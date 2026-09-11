@@ -1,7 +1,8 @@
-//! Cover fail-closed LSM evidence shapes through the public command adapter.
+//! Cover fail-closed AppArmor evidence shapes through the public command adapter.
 //!
-//! These fixtures vary only the backend LSM capability and applied AppArmor profile while
-//! preserving otherwise-positive rootless, seccomp, capability, resource, and namespace evidence.
+//! Host LSM availability is admitted before any container is created. These fixtures therefore
+//! keep AppArmor enabled and vary only effective per-container evidence while preserving otherwise
+//! positive rootless, seccomp, capability, resource, and namespace evidence.
 
 #![cfg(target_os = "linux")]
 
@@ -48,11 +49,7 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
-fn fake_podman(
-    apparmor_enabled: bool,
-    apparmor_profile: &str,
-    process_label: &str,
-) -> (TempDir, PathBuf, PathBuf) {
+fn fake_podman(apparmor_profile: &str, process_label: &str) -> (TempDir, PathBuf, PathBuf) {
     let directory = tempfile::Builder::new()
         .prefix("qsr-command-lsm-shape-coverage-")
         .tempdir()
@@ -66,9 +63,7 @@ fn fake_podman(
     let inspect = format!(
         "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"{apparmor_profile}\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges=true\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[]}}]"
     );
-    let info = format!(
-        "{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":{apparmor_enabled},\"selinuxEnabled\":false}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}"
-    );
+    let info = "{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}";
     let top = format!(
         "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 strict - - - - - {process_label}"
     );
@@ -109,9 +104,8 @@ esac
     (directory, program, calls)
 }
 
-fn assert_lsm_rejection(apparmor_enabled: bool, apparmor_profile: &str, process_label: &str) {
-    let (_directory, program, calls_path) =
-        fake_podman(apparmor_enabled, apparmor_profile, process_label);
+fn assert_lsm_rejection(apparmor_profile: &str, process_label: &str) {
+    let (_directory, program, calls_path) = fake_podman(apparmor_profile, process_label);
     let adapter = RootlessPodmanAdapter::new(program);
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_500);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls should be recorded");
@@ -137,11 +131,6 @@ fn assert_lsm_rejection(apparmor_enabled: bool, apparmor_profile: &str, process_
 }
 
 #[test]
-fn no_enabled_lsm_backend_fails_closed_even_with_a_well_formed_live_label() {
-    assert_lsm_rejection(false, "containers-default", "containers-default (enforce)");
-}
-
-#[test]
 fn empty_apparmor_inspect_profile_fails_closed() {
-    assert_lsm_rejection(true, "", "containers-default (enforce)");
+    assert_lsm_rejection("", "containers-default (enforce)");
 }
