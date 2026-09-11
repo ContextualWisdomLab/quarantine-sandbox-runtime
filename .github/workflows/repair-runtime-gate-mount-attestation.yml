@@ -113,12 +113,58 @@ jobs:
           old_line = '        "[{{\\\"Id\\\":\\\"{OWNED_CONTAINER_ID}\\\",\\\"AppArmorProfile\\\":\\\"containers-default\\\",\\\"ProcessLabel\\\":\\\"\\\",\\\"EffectiveCaps\\\":[],\\\"BoundingCaps\\\":[],\\\"Config\\\":{{\\\"User\\\":\\\"65532:65532\\\",\\\"Timeout\\\":20}},\\\"HostConfig\\\":{{\\\"ReadonlyRootfs\\\":true,\\\"Privileged\\\":false,\\\"SecurityOpt\\\":[\\\"no-new-privileges\\\"],\\\"UsernsMode\\\":\\\"auto\\\",\\\"PidMode\\\":\\\"private\\\",\\\"IpcMode\\\":\\\"none\\\",\\\"NetworkMode\\\":\\\"none\\\",\\\"UTSMode\\\":\\\"private\\\",\\\"CgroupMode\\\":\\\"private\\\",\\\"Memory\\\":268435456,\\\"NanoCpus\\\":1000000000,\\\"PidsLimit\\\":16,\\\"Tmpfs\\\":{{\\\"/tmp\\\":\\\"rw,noexec,nosuid,nodev,size=16777216\\\"}}}}}}]"\n'
           new_line = '        "[{{\\\"Id\\\":\\\"{OWNED_CONTAINER_ID}\\\",\\\"AppArmorProfile\\\":\\\"containers-default\\\",\\\"ProcessLabel\\\":\\\"\\\",\\\"EffectiveCaps\\\":[],\\\"BoundingCaps\\\":[],\\\"Config\\\":{{\\\"User\\\":\\\"65532:65532\\\",\\\"Timeout\\\":20}},\\\"HostConfig\\\":{{\\\"ReadonlyRootfs\\\":true,\\\"Privileged\\\":false,\\\"SecurityOpt\\\":[\\\"no-new-privileges\\\"],\\\"UsernsMode\\\":\\\"auto\\\",\\\"PidMode\\\":\\\"private\\\",\\\"IpcMode\\\":\\\"none\\\",\\\"NetworkMode\\\":\\\"none\\\",\\\"UTSMode\\\":\\\"private\\\",\\\"CgroupMode\\\":\\\"private\\\",\\\"Memory\\\":268435456,\\\"NanoCpus\\\":1000000000,\\\"PidsLimit\\\":16,\\\"Tmpfs\\\":{{\\\"/tmp\\\":\\\"rw,noexec,nosuid,nodev,size=16777216\\\"}}}},\\\"Mounts\\\":[{{\\\"Source\\\":\\\"{gate_path}\\\",\\\"Destination\\\":\\\"/qsr-runtime-gate\\\",\\\"Type\\\":\\\"bind\\\",\\\"Options\\\":[\\\"ro\\\"],\\\"RW\\\":false}}]}}]"\n'
           replace_once(integration, old_line, new_line)
+
+          main_path = Path("src/main.rs")
+          main_text = main_path.read_text()
+          start_marker = "        const SUCCESS_SCRIPT: &str = "
+          end_marker = "\n\n        fn write_self_contained_gate"
+          start = main_text.find(start_marker)
+          end = main_text.find(end_marker, start)
+          if start == -1 or end == -1 or main_text.find(start_marker, start + 1) != -1:
+              raise SystemExit("src/main.rs: could not locate unique SUCCESS_SCRIPT fixture")
+          success_script = r'''        const SUCCESS_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+state="${0}.runtime-gate-source"
+case "${1:-}:${2:-}" in
+  info:--format)
+    printf '%s\n' '{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/x","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}'
+    ;;
+  create:--name)
+    gate_source=''
+    for argument in "$@"; do
+      case "$argument" in
+        --volume=*:/qsr-runtime-gate:ro)
+          gate_source="${argument#--volume=}"
+          gate_source="${gate_source%:/qsr-runtime-gate:ro}"
+          ;;
+      esac
+    done
+    [ -n "$gate_source" ] || exit 92
+    printf '%s' "$gate_source" > "$state"
+    printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n'
+    ;;
+  init:*) : ;;
+  start:*) : ;;
+  container:inspect)
+    gate_source="$(cat "$state")"
+    printf '%s\n' '[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":900},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":1073741824,"NanoCpus":4000000000,"PidsLimit":256,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=268435456"}},"Mounts":[{"Source":"'"$gate_source"'","Destination":"/qsr-runtime-gate","Type":"bind","Options":["ro"],"RW":false}]}]'
+    ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n' ;;
+  attach:--sig-proxy=false) IFS= read -r token; [ -n "$token" ]; printf 'QSR_GATE_RELEASED\n'; while :; do :; done ;;
+  wait:*) printf '9\n' ;;
+  logs:*) printf 'cli stdout\n' ;;
+  rm:--force) rm -f "$state" ;;
+  *) exit 91 ;;
+esac
+"#;'''
+          main_path.write_text(main_text[:start] + success_script + main_text[end:])
           PY
           cargo fmt
       - name: Verify causal GREEN and repository health
         run: |
           set -euo pipefail
           cargo test --locked --test podman_runtime_gate_mount_attestation_red --test podman_runtime_gate_command_integration_red
+          cargo test --locked --bin quarantine-sandbox-runtime tests::fake_backend::run_mirrors_the_sandboxed_exit_code_and_prints_json_on_a_successful_call -- --exact
           cargo test --locked --workspace --all-targets --no-fail-fast
           cargo clippy --locked --workspace --all-targets -- -D warnings
           RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
@@ -134,6 +180,6 @@ jobs:
           rm .github/workflows/repair-runtime-gate-mount-attestation.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs tests/podman_runtime_gate_command_integration_red.rs tests/podman_runtime_gate_mount_attestation_red.rs .github/workflows/repair-runtime-gate-mount-attestation.yml
+          git add src/main.rs src/infrastructure/podman.rs src/infrastructure/podman_runtime_gate_binding.rs tests/podman_runtime_gate_command_integration_red.rs tests/podman_runtime_gate_mount_attestation_red.rs .github/workflows/repair-runtime-gate-mount-attestation.yml
           git commit -m 'fix(runtime): attest runtime gate mount identity'
           git push "$remote" HEAD:refs/heads/automation/command-chronology-owner-repair
