@@ -43,6 +43,7 @@ jobs:
           test "$(grep -Fxc "$replacement" "$source_file")" -eq 1
           test "$(grep -Fxc "$expected" "$source_file")" -eq 0
           rm .github/workflows/one-shot-registry-component-coverage-repair.yml
+          cargo fmt --all
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
       - name: Verify image-reference admission regressions
