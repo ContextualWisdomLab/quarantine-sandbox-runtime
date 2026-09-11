@@ -45,7 +45,7 @@ Joint Task Force. (2020). *Security and privacy controls for information systems
 
 AU-8 requires information systems to use system-generated timestamps for audit records. For this runtime, that supports keeping execution-evidence time authority inside the runtime rather than accepting unvalidated caller time as observed evidence.
 
-Kent, K., & Souppaya, M. (2006). *Guide to computer security log management* (NIST Special Publication 800-92). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-92
+Scarfone, K. A., & Souppaya, M. (2006). *Guide to computer security log management* (NIST Special Publication 800-92). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-92
 
 SP 800-92 documents the analytic harm caused by inaccurate and inconsistent timestamps. The relevant implication here is narrower than distributed clock synchronization: one receipt must not contain a chronology the runtime itself can see is impossible.
 
