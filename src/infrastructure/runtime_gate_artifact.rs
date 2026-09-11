@@ -249,24 +249,26 @@ fn validate_self_contained_elf_loading(bytes: &[u8]) -> Result<(), RuntimeGateAr
         return Err(rejected());
     }
 
-    let program_header_count = usize::from(read_u16(bytes, 56, encoding));
+    let program_header_count = read_u16(bytes, 56, encoding);
     if program_header_count == 0 {
         return Err(rejected());
     }
-    let program_header_offset =
-        usize::try_from(read_u64(bytes, 32, encoding)).map_err(|_| rejected())?;
-    if program_header_offset < ELF64_HEADER_BYTES {
+    let program_header_offset = read_u64(bytes, 32, encoding);
+    if program_header_offset < ELF64_HEADER_BYTES as u64 {
         return Err(rejected());
     }
-    let table_bytes = ELF64_PROGRAM_HEADER_BYTES
-        .checked_mul(program_header_count)
-        .ok_or_else(rejected)?;
+    // Keep untrusted ELF offsets in their wire-width domain until the complete table is proven to
+    // fit the already materialized byte slice. Only then is conversion to host indexing authority
+    // safe, so pointer width cannot become a separate acceptance branch.
+    let table_bytes = (ELF64_PROGRAM_HEADER_BYTES as u64) * u64::from(program_header_count);
     let table_end = program_header_offset
         .checked_add(table_bytes)
         .ok_or_else(rejected)?;
-    if table_end > bytes.len() {
+    if table_end > bytes.len() as u64 {
         return Err(rejected());
     }
+    let program_header_offset = program_header_offset as usize;
+    let program_header_count = usize::from(program_header_count);
 
     let mut has_loadable_segment = false;
     for index in 0..program_header_count {
