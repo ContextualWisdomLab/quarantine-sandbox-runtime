@@ -16,6 +16,12 @@ The fixture stages a real `RuntimeGateArtifact`, emits a Podman inspection recor
 
 Exact descendant `c59500f60e82de5516d2505563785d709022d3b5` independently reproduced the same causal failure in CI run `34622058959`, verify job `103338185807`: all 41 library tests and the surrounding command/runtime-gate targets passed until `podman_runtime_gate_mount_attestation_red`, which failed with the same `IsolationVerificationFailed { control_name: "command_mount_set" }`. This second execution rules out the earlier RED being an incidental runner or fixture failure.
 
+## Source-fix workflow RCA
+
+The first temporary source-fix workflow did not execute a job after exact `c6d699cf26c142491e49f099e32f2b0420abc4ec`. Actions run `34623208980` completed immediately with no generated jobs. Repository inspection showed that an embedded replacement shell script escaped the YAML `run: |` indentation, making the workflow definition invalid before runner assignment. This is a workflow-source defect rather than runner starvation and does not count as repair evidence.
+
+Exact descendant `97f3a30c6629f3883167f3f53c173b6195ec0af0` adds a corrected temporary v2 workflow with the same single-writer/exact-head guards. It keeps the production repair minimal, validates the focused causal witness plus the CLI/runtime-gate integration, then runs the full workspace tests, Clippy, rustdoc, repository validation, and `git diff --check`. On success it removes both temporary source-fix workflows in the same ordinary descendant before publishing. The invalid workflow is retained only until that validated descendant can remove it without bypassing the causal verification path.
+
 ## Repair contract
 
 The minimum repair must carry the verified staged gate path from `RuntimeGatePodmanAdapter` into both pre-start configuration verification and live process isolation verification. Effective mount admission must then require:
