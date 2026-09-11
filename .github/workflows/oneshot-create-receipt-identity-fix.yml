@@ -1,0 +1,147 @@
+name: One-shot create receipt identity repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/oneshot-create-receipt-identity-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: oneshot-create-receipt-identity-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: '1.97.1'
+          components: clippy,rustfmt
+      - name: Repair successful-create identity contradiction
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}')"
+          test "$remote_head" = "$GITHUB_SHA"
+          perl <<'PERL'
+          use strict;
+          use warnings;
+          my $path = 'src/infrastructure/podman.rs';
+          open my $in, '<', $path or die "open $path: $!";
+          local $/;
+          my $text = <$in>;
+          close $in;
+          my $old = <<'OLD';
+                  let container_id = match parse_backend_identifier(&create_output.stdout) {
+                      Some(identifier) => identifier,
+                      None => {
+                          let original = CommandExecutionError::Backend(
+                              ApplicationServiceError::MalformedIsolationInspection {
+                                  operation: "container_create",
+                              },
+                          );
+                          let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                              .map_err(CommandExecutionError::Backend)?;
+                          return match owned_container_id {
+                              Some(container_id) => {
+                                  Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                              }
+                              None => Err(original),
+                          };
+                      }
+                  };
+
+                  // Once create returns an acquired long ID, that immutable identity is
+                  // the sole lifecycle/destructive authority. The generated name remains
+                  // correlation/result metadata only; re-resolving it would reopen a
+                  // same-principal name-rebinding TOCTOU window (#36).
+          OLD
+          my $new = <<'NEW';
+                  let stdout_container_id = match parse_backend_identifier(&create_output.stdout) {
+                      Some(identifier) => identifier,
+                      None => {
+                          let original = CommandExecutionError::Backend(
+                              ApplicationServiceError::MalformedIsolationInspection {
+                                  operation: "container_create",
+                              },
+                          );
+                          let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                              .map_err(CommandExecutionError::Backend)?;
+                          return match owned_container_id {
+                              Some(container_id) => {
+                                  Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                              }
+                              None => Err(original),
+                          };
+                      }
+                  };
+                  let container_id = match read_command_create_receipt(&create_receipt_path)
+                      .map_err(CommandExecutionError::Backend)?
+                  {
+                      Some(receipt_container_id) if receipt_container_id == stdout_container_id => {
+                          receipt_container_id
+                      }
+                      Some(receipt_container_id) => {
+                          let original = CommandExecutionError::Backend(
+                              ApplicationServiceError::MalformedIsolationInspection {
+                                  operation: "container_create_receipt",
+                              },
+                          );
+                          return Err(self.cleanup_owned_command_container_or_report(
+                              &receipt_container_id,
+                              original,
+                          ));
+                      }
+                      // Compatibility for legacy/debug fake backends that do not yet emit the
+                      // runtime-owned receipt. Release-grade production still tracks mandatory
+                      // successful-create receipt admission as an explicit hardening gap.
+                      None => stdout_container_id,
+                  };
+
+                  // A present runtime-owned cidfile receipt is authoritative: contradictory
+                  // successful-create stdout is rejected and cleanup uses only the receipt ID.
+                  // The generated name remains correlation/result metadata only; re-resolving it
+                  // would reopen a same-principal name-rebinding TOCTOU window (#36).
+          NEW
+          my $count = ($text =~ s/\Q$old\E/$new/);
+          die "expected exactly one create identity block, found $count\n" unless $count == 1;
+          open my $out, '>', $path or die "write $path: $!";
+          print {$out} $text;
+          close $out;
+          PERL
+          rm .github/workflows/oneshot-create-receipt-identity-fix.yml
+      - name: Validate causal repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo test --locked --test podman_command_execution_create_receipt_mismatch_red
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+      - name: Publish ordinary descendant if source head remains exact
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}')"
+          test "$remote_head" = "$GITHUB_SHA"
+          git config user.name 'CWL Quarantine Runtime Writer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/infrastructure/podman.rs .github/workflows/oneshot-create-receipt-identity-fix.yml
+          git commit -m 'fix(runtime): bind successful create to cidfile identity'
+          remote_head="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}')"
+          test "$remote_head" = "$GITHUB_SHA"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
