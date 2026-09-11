@@ -111,9 +111,19 @@ fn security_info_json(version_json: &str) -> String {
     )
 }
 
-fn container_inspect_json(id: &str) -> String {
+fn security_info_lsm_json(apparmor_enabled: bool, selinux_enabled: bool) -> String {
     format!(
-        "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
+        "{{\"host\":{{\"security\":{{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":{apparmor_enabled},\"selinuxEnabled\":{selinux_enabled}}}}},\"version\":{{\"Version\":\"6.1.0\"}}}}"
+    )
+}
+
+fn container_inspect_json(id: &str) -> String {
+    container_inspect_lsm_json(id, "containers-default", "")
+}
+
+fn container_inspect_lsm_json(id: &str, apparmor_profile: &str, process_label: &str) -> String {
+    format!(
+        "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"{apparmor_profile}\",\"ProcessLabel\":\"{process_label}\",\
          \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
@@ -184,6 +194,41 @@ fn assert_process_security_top_is_rejected(name: &str, top_payload: &str) {
     let _ = fs::remove_file(program);
 }
 
+fn assert_lsm_evidence_is_rejected(
+    name: &str,
+    apparmor_enabled: bool,
+    selinux_enabled: bool,
+    apparmor_profile: &str,
+    process_label: &str,
+    runtime_label: &str,
+) {
+    let backend_info = security_info_lsm_json(apparmor_enabled, selinux_enabled);
+    let inspect = container_inspect_lsm_json(
+        "fake-command-container-id",
+        apparmor_profile,
+        process_label,
+    );
+    let top_payload = format!(
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - {runtime_label}\n"
+    );
+    let script = format!(
+        "#!/bin/sh\nset -eu\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{backend_info}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{inspect}' ;;\n  top:*) printf '%s' '{top_payload}' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n"
+    );
+    let program = write_executable(name, &script);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_000),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "lsm",
+            },
+        ))
+    );
+
+    let _ = fs::remove_file(program);
+}
+
 #[test]
 fn backend_security_version_rejects_each_malformed_text_class() {
     assert_version_is_rejected("empty-version", "\"\"");
@@ -210,5 +255,65 @@ fn process_security_top_rejects_missing_short_and_duplicate_pid_one_evidence() {
         &format!(
             "{HEADER}1 filter - - - - - containers-default (enforce)\n1 filter - - - - - containers-default (enforce)\n"
         ),
+    );
+}
+
+#[test]
+fn effective_lsm_rejects_untrusted_selinux_and_apparmor_evidence_shapes() {
+    assert_lsm_evidence_is_rejected(
+        "selinux-empty-inspect-label",
+        false,
+        true,
+        "",
+        "",
+        "system_u:system_r:container_t:s0:c1,c2",
+    );
+    assert_lsm_evidence_is_rejected(
+        "selinux-unconfined-inspect-label",
+        false,
+        true,
+        "",
+        "unconfined",
+        "system_u:system_r:container_t:s0:c1,c2",
+    );
+    assert_lsm_evidence_is_rejected(
+        "selinux-mismatched-runtime-label",
+        false,
+        true,
+        "",
+        "system_u:system_r:container_t:s0:c1,c2",
+        "system_u:system_r:container_t:s0:c3,c4",
+    );
+    assert_lsm_evidence_is_rejected(
+        "apparmor-missing-mode",
+        true,
+        false,
+        "containers-default",
+        "",
+        "containers-default",
+    );
+    assert_lsm_evidence_is_rejected(
+        "apparmor-unterminated-mode",
+        true,
+        false,
+        "containers-default",
+        "",
+        "containers-default (enforce",
+    );
+    assert_lsm_evidence_is_rejected(
+        "apparmor-unconfined-profile",
+        true,
+        false,
+        "unconfined",
+        "",
+        "containers-default (enforce)",
+    );
+    assert_lsm_evidence_is_rejected(
+        "no-runtime-lsm-enabled",
+        false,
+        false,
+        "",
+        "",
+        "containers-default (enforce)",
     );
 }
