@@ -495,9 +495,7 @@ fn registry_repository_is_safe(repository: &str) -> bool {
     if !registry_authority_or_name_is_safe(first_component) {
         return false;
     }
-    components.all(|component| {
-        !component.is_empty() && component != "." && component != ".." && !component.contains(':')
-    })
+    components.all(|component| component != "." && component != ".." && !component.contains(':'))
 }
 
 fn registry_authority_or_name_is_safe(component: &str) -> bool {
