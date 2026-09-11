@@ -1,0 +1,123 @@
+name: Chronology owner repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chronology-owner-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Adopt executed chronology RED and apply owner repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ContextualWisdomLab automation"
+          git config user.email "automation@users.noreply.github.com"
+          git checkout -B automation/command-chronology-owner-repair "$GITHUB_SHA"
+          git fetch origin test/command-chronology-causal-red
+          git merge --no-ff --no-edit origin/test/command-chronology-causal-red
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/infrastructure/podman.rs")
+          text = path.read_text()
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one repair anchor, found {count}: {old[:100]!r}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              """    fn run_command_with_binding_at<F>(\n        &self,\n        request: &CommandExecutionRequest,\n        policy: &IsolationPolicy,\n        started_at_epoch_seconds: u64,\n        runtime_gate_binding_args: Option<&[String]>,\n        release_gate: F,\n    ) -> Result<CommandExecutionResult, CommandExecutionError>\n    where\n        F: FnOnce(&str) -> Result<(), CommandExecutionError>,\n    {\n        request.validate(policy)?;\n""",
+              """    fn run_command_with_binding_at<F>(\n        &self,\n        request: &CommandExecutionRequest,\n        policy: &IsolationPolicy,\n        _started_at_epoch_seconds: u64,\n        runtime_gate_binding_args: Option<&[String]>,\n        release_gate: F,\n    ) -> Result<CommandExecutionResult, CommandExecutionError>\n    where\n        F: FnOnce(&str) -> Result<(), CommandExecutionError>,\n    {\n        request.validate(policy)?;\n        let observed_started_at_epoch_seconds = runtime_epoch_seconds(\"command_start_clock\")?;\n""",
+          )
+
+          replace_once(
+              """        let identity = command_sandbox_identity(\n            &request.request_id,\n            &request.image_reference,\n            &policy.policy_id,\n            started_at_epoch_seconds,\n        )?;\n""",
+              """        let identity = command_sandbox_identity(\n            &request.request_id,\n            &request.image_reference,\n            &policy.policy_id,\n            observed_started_at_epoch_seconds,\n        )?;\n""",
+          )
+
+          replace_once(
+              """        let finished_at_epoch_seconds = SystemTime::now()\n            .duration_since(UNIX_EPOCH)\n            .map_or(started_at_epoch_seconds, |duration| duration.as_secs());\n\n        Ok(CommandExecutionResult::new(\n""",
+              """        let finished_at_epoch_seconds = runtime_epoch_seconds(\"command_finish_clock\")?;\n        validate_command_chronology(\n            observed_started_at_epoch_seconds,\n            finished_at_epoch_seconds,\n        )?;\n\n        Ok(CommandExecutionResult::new(\n""",
+          )
+
+          replace_once(
+              """                started_at_epoch_seconds,\n                finished_at_epoch_seconds,\n                source_artifact_receipt: staged_source\n""",
+              """                started_at_epoch_seconds: observed_started_at_epoch_seconds,\n                finished_at_epoch_seconds,\n                source_artifact_receipt: staged_source\n""",
+          )
+
+          helper_anchor = """fn command_sandbox_identity(\n    request_id: &str,\n"""
+          helpers = """fn runtime_epoch_seconds(\n    operation: &'static str,\n) -> Result<u64, CommandExecutionError> {\n    epoch_seconds_from_system_time(SystemTime::now(), operation)\n}\n\nfn epoch_seconds_from_system_time(\n    observed: SystemTime,\n    operation: &'static str,\n) -> Result<u64, CommandExecutionError> {\n    observed\n        .duration_since(UNIX_EPOCH)\n        .map(|duration| duration.as_secs())\n        .map_err(|_| {\n            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {\n                operation,\n            })\n        })\n}\n\nfn validate_command_chronology(\n    started_at_epoch_seconds: u64,\n    finished_at_epoch_seconds: u64,\n) -> Result<(), CommandExecutionError> {\n    if finished_at_epoch_seconds < started_at_epoch_seconds {\n        return Err(CommandExecutionError::Backend(\n            ApplicationServiceError::BackendInvocationFailed {\n                operation: \"command_chronology\",\n            },\n        ));\n    }\n    Ok(())\n}\n\n"""
+          if text.count(helper_anchor) != 1:
+              raise SystemExit("command_sandbox_identity anchor is not unique")
+          text = text.replace(helper_anchor, helpers + helper_anchor, 1)
+
+          replace_once(
+              """mod tests {\n    use std::io::ErrorKind;\n\n    use super::{BoundedCommandError, classify_spawn_failure, map_bounded_command_error};\n    use crate::{ApplicationServiceError, BackendInvocationFailureKind};\n""",
+              """mod tests {\n    use std::{\n        io::ErrorKind,\n        time::{Duration, UNIX_EPOCH},\n    };\n\n    use super::{\n        BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,\n        map_bounded_command_error, validate_command_chronology,\n    };\n    use crate::{\n        ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError,\n    };\n""",
+          )
+
+          test_anchor = """    #[test]\n    fn bounded_command_errors_keep_public_failure_classes() {\n"""
+          tests = """    #[test]\n    fn command_chronology_accepts_equal_and_ordered_runtime_observations() {\n        assert_eq!(validate_command_chronology(10, 10), Ok(()));\n        assert_eq!(validate_command_chronology(10, 11), Ok(()));\n    }\n\n    #[test]\n    fn command_chronology_rejects_runtime_clock_rollback() {\n        assert_eq!(\n            validate_command_chronology(11, 10),\n            Err(CommandExecutionError::Backend(\n                ApplicationServiceError::BackendInvocationFailed {\n                    operation: \"command_chronology\",\n                },\n            ))\n        );\n    }\n\n    #[test]\n    fn epoch_seconds_fail_closed_before_unix_epoch() {\n        let before_epoch = UNIX_EPOCH - Duration::from_secs(1);\n        assert_eq!(\n            epoch_seconds_from_system_time(before_epoch, \"command_start_clock\"),\n            Err(CommandExecutionError::Backend(\n                ApplicationServiceError::BackendInvocationFailed {\n                    operation: \"command_start_clock\",\n                },\n            ))\n        );\n        assert_eq!(\n            epoch_seconds_from_system_time(UNIX_EPOCH, \"command_start_clock\"),\n            Ok(0)\n        );\n        assert_eq!(\n            epoch_seconds_from_system_time(\n                UNIX_EPOCH + Duration::from_secs(2),\n                \"command_finish_clock\",\n            ),\n            Ok(2)\n        );\n    }\n\n"""
+          if text.count(test_anchor) != 1:
+              raise SystemExit("podman unit-test anchor is not unique")
+          text = text.replace(test_anchor, tests + test_anchor, 1)
+          path.write_text(text)
+
+          trace = Path("docs/doctoring/COMMAND_RESULT_TIME_TRACEABILITY.md")
+          trace_text = trace.read_text()
+          trace_text += """\n\n## Executed causal RED and selected repair (2026-09-11)\n\nDraft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16`, CI `34565196344`, crossed exact checkout, dependency lock, repository policy, CI evidence contracts and rustfmt before the workspace Test step failed. The repaired witness first proves the same fake Podman runtime can construct a normal result, then drives the far-future caller timestamp through live isolation, wait/log collection and exact-ID cleanup before asserting chronology. Hosted negative rootless/AppArmor evidence on the same SHA is GREEN. This supersedes the earlier queued-only status and establishes the intended caller-time causal RED.\n\nThe selected minimum repair keeps the existing `*_at` parameter only as a compatibility/test seam but removes it from evidence authority. `run_command_with_binding_at` observes start and finish with `SystemTime::now()` inside the runtime boundary, uses the observed start for sandbox identity and result evidence, and fails closed when either observation predates the Unix epoch or the finish observation precedes the start observation. It does not clamp, synthesize, or reorder timestamps. Existing `Instant`/`BoundedCommandRunner` deadlines remain the monotonic authority for lease and administrative timeout enforcement.\n\nFocused deterministic unit tests cover equal/ordered observations, a wall-clock rollback, pre-epoch failure, and exact epoch conversion. The executed #111 future-input witness proves the caller value is no longer emitted unchanged. Full exact-head CI, complete owned-production coverage, review/security, real Podman #35/#43, positive effective-LSM, protected integration and immutable release evidence remain independent gates.\n"""
+          trace.write_text(trace_text)
+
+          baseline = Path("docs/product-technical-gap-baseline.md")
+          baseline_text = baseline.read_text()
+          baseline_text += """\n\n## Current authority supersession — command chronology evidence (2026-09-11)\n\nIssue #44's original chronology witness had become false-pass capable because its fake inspect evidence no longer satisfied the current command isolation contract. Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16` repaired the fixture and CI `34565196344` executed the intended RED after checkout/policy/fmt prerequisites: caller-supplied future wall-clock input still reached successful runtime lifecycle evidence and contradicted runtime-owned result chronology. The canonical repair candidate moves start/finish observation inside the Podman runtime boundary, fails closed on pre-epoch or rollback chronology, keeps elapsed-time enforcement monotonic, and leaves caller time as a non-authoritative compatibility seam. Historical #44 sections below remain causal evidence; this section is the current authority.\n"""
+          baseline.write_text(baseline_text)
+          PY
+
+          cargo fmt --all
+          python3 scripts/validate_repository.py
+          cargo test --locked --test podman_command_execution_timestamp_authority_red
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+
+          git rm .github/workflows/chronology-owner-repair.yml
+          git add src/infrastructure/podman.rs \
+            tests/podman_command_execution_timestamp_authority_red.rs \
+            docs/doctoring/COMMAND_RESULT_TIME_TRACEABILITY.md \
+            docs/product-technical-gap-baseline.md
+          git commit -m "fix(runtime): own command chronology evidence time"
+
+      - name: Push exact non-force repair descendant
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:automation/command-chronology-owner-repair
