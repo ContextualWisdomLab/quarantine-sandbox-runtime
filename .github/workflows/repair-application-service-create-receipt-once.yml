@@ -13,10 +13,9 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_PARENT: 146f93624f241ac5efc1687fdc9ac50dbb8e4ff6
+      EXPECTED_PARENT: 760a845969a57dea606d48ea63a73382b18e2b44
       WORKFLOW_FILE: .github/workflows/repair-application-service-create-receipt-once.yml
       REPAIR_SCRIPT: .github/scripts/repair_application_service_create_receipt.py
-      NEGATIVE_TEST: tests/podman_application_service_missing_create_receipt_red.rs
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -28,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
-          expected=$(printf '%s\n' "$WORKFLOW_FILE" "$REPAIR_SCRIPT" "$NEGATIVE_TEST" | sort)
+          expected=$(printf '%s\n' "$WORKFLOW_FILE" "$REPAIR_SCRIPT" | sort)
           actual=$(git diff --name-only HEAD^ HEAD | sort)
           test "$actual" = "$expected"
       - name: Install repository Rust toolchain

@@ -119,7 +119,7 @@ text = text[:cleanup_start] + text[cleanup_end:]
 helper_anchor = "fn runtime_identity() -> Result<String, ApplicationServiceError> {\n"
 if text.count(helper_anchor) != 1:
     raise SystemExit("runtime identity helper anchor not unique")
-helper = '''fn read_application_service_create_receipt(
+helper = r'''fn read_application_service_create_receipt(
     path: &Path,
 ) -> Result<Option<String>, ApplicationServiceError> {
     let bytes = match std::fs::read(path) {
