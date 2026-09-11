@@ -1,0 +1,72 @@
+name: One-shot baseline authority reconciliation
+
+on:
+  push:
+    branches: [automation/command-chronology-owner-repair]
+    paths:
+      - .github/workflows/one-shot-baseline-authority-reconciliation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify sole-writer exact head
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse "origin/$SOURCE_BRANCH")" = "$EXPECTED_HEAD_SHA"
+      - name: Reconcile current authority without deleting causal history
+        run: |
+          set -eu
+          file=docs/product-technical-gap-baseline.md
+          marker='## Current authority supersession — gated command runtime and chronology (2026-09-11)'
+          if grep -Fqx "$marker" "$file"; then
+            echo 'baseline authority marker already present; refusing duplicate append' >&2
+            exit 1
+          fi
+          sed -i 's/^Last reviewed on 2026-09-10 KST /Last reviewed on 2026-09-11 KST /' "$file"
+          cat >> "$file" <<'EOF'
+
+## Current authority supersession — gated command runtime and chronology (2026-09-11)
+
+This section supersedes older present-tense snapshots in this ledger while preserving them as causal history. Protected/default `develop` remains `60a85c7633e03b425b67159ec6822c8178cf87ea`. The live canonical #14 source ref is `aca827d7bd45f3df289456176730c781bd6d1164`; Draft #112 is the ordinary descendant owner-repair lane for #44 and related coverage-invariant cleanup. Mutable PR heads are not consumer authority.
+
+The historical statement that production `run_command_at` still launches the consumer directly as OCI PID 1 and still lacks gate integration is no longer current. Canonical #14 production now stages a digest-bound, architecture/byte-order-compatible self-contained gate; creates the container with that gate as the initial OCI program; acquires the exact container ID; checks configured isolation; starts only the gate; verifies live effective seccomp/capability/LSM evidence; performs a bounded one-time exact-ID release; requires trusted `QSR_GATE_RELEASED` acknowledgement; detaches release stdin; then executes the exact consumer argv and performs bounded wait/log collection and exact-ID cleanup. The older direct-consumer text remains below only as historical evidence of the defect that drove #25.
+
+Issue #44 has causal execution and a runtime-owned chronology repair. Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16`, CI `34565196344`, failed at the intended assertion because caller future time `1000000000000` was published as observed start evidence. Draft #112 moves start/finish observation inside `RootlessPodmanAdapter`, retains the caller time only as a compatibility/test seam, fails closed on pre-epoch or rollback chronology, and keeps `Instant`/bounded runner deadlines as monotonic timeout authority.
+
+Exact #112 predecessor `cf90c395513e404440787cb6981c84e47860d0d2`, CI `34578304083`, is executed hosted evidence: verify and hosted negative rootless/AppArmor are GREEN through repository validation, rustfmt, full workspace/all-target tests, Clippy and rustdoc. Coverage artifacts were generated and failed only the explicit repository-wide 100% admissions at lines `4691/4841 = 96.90%`, functions `435/446 = 97.53%`, regions `6304/6543 = 96.35%`, branches `656/726 = 90.36%`. Coverage artifact digest is `sha256:bcfdfa9fc0c4c60c96518b5fe802e12c0812e71c8da225367f36012b9d6e7f26`; branch artifact digest is `sha256:8576fb11a3ff3daf33bea6d9b3258973af8cd14481d4f8efd0a71f330183524f`. Dedicated positive SELinux remains unproven.
+
+That branch artifact isolated `src/application_service/mod.rs` at 100% lines/functions/regions but 61/62 branches. The only missing outcome was the redundant `!component.is_empty()` predicate inside `repository.split('/').all(...)`: earlier admission already rejects empty repository, `//`, leading `/`, and trailing `/`, so no admitted repository string can yield an empty later slash component. The repair removes only that impossible predicate, preserving `.`/`..` and colon rejection. One-shot run `34583458163` validated repository policy, the focused malformed/mutable image-reference regression, rustfmt, full workspace/all-target tests, Clippy, rustdoc and `git diff --check`, then published ordinary descendant `2fa06f752acb72e18697924102eab3f89f469832` and removed its own workflow. This is structural control-flow repair, not a coverage exclusion or denominator configuration change. The automatically-triggered PR CI for that bot-authored commit concluded `action_required` before creating jobs, so it is not exact-head CI evidence; a normal owner-authored descendant must reacquire the full exact-head gate.
+
+Release remains blocked until one unchanged integrated candidate reaches 100% owned-production line/function/region/branch and edge coverage, qualifying review/security, real rootless #35/#43 cgroup-v2/live `/tmp`/wall-time/over-lease evidence, dedicated positive effective-LSM, protected-head CI, complete successor/traceability adoption, and immutable version/package/SBOM/provenance/reproducibility/rollback publication. #18 remains source-unrestacked until the command/runtime foundation is stable; #111 and #106 remain open until their complete valid deltas are demonstrably succeeded by canonical owner ancestry.
+EOF
+          rm .github/workflows/one-shot-baseline-authority-reconciliation.yml
+          git diff --check
+          python3 scripts/validate_repository.py
+      - name: Publish ordinary descendant only if the source branch is unchanged
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          git fetch origin "$SOURCE_BRANCH"
+          test "$(git rev-parse "origin/$SOURCE_BRANCH")" = "$EXPECTED_HEAD_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/product-technical-gap-baseline.md .github/workflows/one-shot-baseline-authority-reconciliation.yml
+          git commit -m "docs: reconcile command runtime authority baseline"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${SOURCE_BRANCH}"
