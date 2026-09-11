@@ -104,3 +104,26 @@ fn rejects_source_trees_above_the_regular_file_budget() {
 
     fs::remove_dir_all(source).expect("temporary source directory cleanup");
 }
+
+#[test]
+fn rejects_source_trees_above_the_total_byte_budget_before_copying() {
+    const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+
+    let source = temporary_file_path();
+    fs::create_dir_all(&source).expect("temporary source directory");
+    let oversized = fs::File::create(source.join("oversized.bin"))
+        .expect("oversized sparse source fixture should be creatable");
+    oversized
+        .set_len(MAX_SOURCE_BYTES + 1)
+        .expect("sparse source fixture should expose its declared size");
+    let input = valid_input(source.clone());
+
+    assert!(matches!(
+        stage_pr_source_artifact(&input),
+        Err(PrSourceArtifactError::LimitExceeded {
+            limit_name: "total_bytes"
+        })
+    ));
+
+    fs::remove_dir_all(source).expect("temporary source directory cleanup");
+}
