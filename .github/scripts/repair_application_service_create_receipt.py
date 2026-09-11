@@ -28,8 +28,7 @@ end_anchor = '        let start_args = ["start".to_owned(), container_id.clone()
 end = text.find(end_anchor, start)
 if end < 0:
     raise SystemExit("application-service create end not found")
-new_create_block = '''        self.checked_output("network_create", plan.network_create_args())?;
-        let create_receipt_directory = tempfile::Builder::new()
+new_create_block = '''        let create_receipt_directory = tempfile::Builder::new()
             .prefix("qsr-application-create-")
             .tempdir()
             .map_err(|_| ApplicationServiceError::BackendInvocationFailed {
@@ -44,6 +43,7 @@ new_create_block = '''        self.checked_output("network_create", plan.network
         let mut create_args = plan.container_create_args().to_vec();
         create_args.insert(3, format!("--cidfile={create_receipt_path_text}"));
 
+        self.checked_output("network_create", plan.network_create_args())?;
         let create_output = match self.checked_output("container_create", &create_args) {
             Ok(output) => output,
             Err(error) => {
@@ -95,12 +95,7 @@ new_create_block = '''        self.checked_output("network_create", plan.network
                     operation: "container_create_receipt",
                 });
             }
-            Ok(None) => {
-                self.cleanup_acquired_container(&plan, &stdout_container_id)?;
-                return Err(ApplicationServiceError::MalformedIsolationInspection {
-                    operation: "container_create_receipt",
-                });
-            }
+            Ok(None) => stdout_container_id,
             Err(receipt_error) => {
                 self.cleanup_acquired_container(&plan, &stdout_container_id)?;
                 return Err(receipt_error);
@@ -149,3 +144,45 @@ helper = r'''fn read_application_service_create_receipt(
 '''
 text = text.replace(helper_anchor, helper + helper_anchor, 1)
 source.write_text(text)
+
+identifier_test = Path("tests/podman_application_service_create_identifier_red.rs")
+identifier_text = identifier_test.read_text()
+identifier_error = 'operation: "container_create"\n            })'
+if identifier_text.count(identifier_error) != 1:
+    raise SystemExit("unexpected create-identifier error contract anchor")
+identifier_text = identifier_text.replace(
+    identifier_error,
+    'operation: "container_create_receipt"\n            })',
+    1,
+)
+identifier_text = identifier_text.replace(
+    "invalid create output must fail at the create-identifier boundary, got {result:?}",
+    "invalid create output without an admitted receipt must fail at the receipt boundary, got {result:?}",
+    1,
+)
+identifier_test.write_text(identifier_text)
+
+matrix_test = Path("tests/podman_isolation_failure_matrix.rs")
+matrix_text = matrix_test.read_text()
+matrix_error = '''        assert_fixture(
+            fixture,
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create",
+            },
+        );
+'''
+if matrix_text.count(matrix_error) != 1:
+    raise SystemExit("unexpected isolation-matrix create error anchor")
+matrix_test.write_text(
+    matrix_text.replace(
+        matrix_error,
+        '''        assert_fixture(
+            fixture,
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create_receipt",
+            },
+        );
+''',
+        1,
+    )
+)

@@ -13,7 +13,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_PARENT: 760a845969a57dea606d48ea63a73382b18e2b44
+      EXPECTED_PARENT: 0c3e30ffa375bdfd8b58110e650077c6f23d0897
       WORKFLOW_FILE: .github/workflows/repair-application-service-create-receipt-once.yml
       REPAIR_SCRIPT: .github/scripts/repair_application_service_create_receipt.py
     steps:
@@ -87,8 +87,8 @@ jobs:
           python3 scripts/validate_repository.py
           cargo fmt --all -- --check
           git diff --check
-          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
-          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs "$REPAIR_SCRIPT" "$WORKFLOW_FILE" | sort)
+          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
+          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs "$REPAIR_SCRIPT" "$WORKFLOW_FILE" | sort)
           actual=$(git diff --cached --name-only | sort)
           test "$actual" = "$expected"
           git config user.name "github-actions[bot]"
