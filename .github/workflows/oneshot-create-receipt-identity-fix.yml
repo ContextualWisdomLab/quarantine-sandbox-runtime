@@ -127,6 +127,7 @@ jobs:
           cargo fmt
           cargo fmt --check
           cargo test --locked --test podman_command_execution_create_receipt_mismatch_red
+          cargo test --locked --test podman_command_execution_output_encoding_red
           cargo test --locked --workspace --all-targets --no-fail-fast
           cargo clippy --locked --workspace --all-targets -- -D warnings
           RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
