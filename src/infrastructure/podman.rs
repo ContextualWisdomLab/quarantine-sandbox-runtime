@@ -722,7 +722,7 @@ impl RootlessPodmanAdapter {
                 };
             }
         };
-        let container_id = match parse_backend_identifier(&create_output.stdout) {
+        let stdout_container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
                 let original = CommandExecutionError::Backend(
@@ -740,11 +740,32 @@ impl RootlessPodmanAdapter {
                 };
             }
         };
+        let container_id = match read_command_create_receipt(&create_receipt_path)
+            .map_err(CommandExecutionError::Backend)?
+        {
+            Some(receipt_container_id) if receipt_container_id == stdout_container_id => {
+                receipt_container_id
+            }
+            Some(receipt_container_id) => {
+                let original = CommandExecutionError::Backend(
+                    ApplicationServiceError::MalformedIsolationInspection {
+                        operation: "container_create_receipt",
+                    },
+                );
+                return Err(
+                    self.cleanup_owned_command_container_or_report(&receipt_container_id, original)
+                );
+            }
+            // Compatibility for legacy/debug fake backends that do not yet emit the
+            // runtime-owned receipt. Release-grade production still tracks mandatory
+            // successful-create receipt admission as an explicit hardening gap.
+            None => stdout_container_id,
+        };
 
-        // Once create returns an acquired long ID, that immutable identity is
-        // the sole lifecycle/destructive authority. The generated name remains
-        // correlation/result metadata only; re-resolving it would reopen a
-        // same-principal name-rebinding TOCTOU window (#36).
+        // A present runtime-owned cidfile receipt is authoritative: contradictory
+        // successful-create stdout is rejected and cleanup uses only the receipt ID.
+        // The generated name remains correlation/result metadata only; re-resolving it
+        // would reopen a same-principal name-rebinding TOCTOU window (#36).
         if let Err(error) =
             self.checked_output("container_init", &["init".to_owned(), container_id.clone()])
         {
