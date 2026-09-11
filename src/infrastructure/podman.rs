@@ -1554,7 +1554,6 @@ fn effective_lsm_verified(
     };
     let runtime_profile = runtime_profile.trim();
     mode.eq_ignore_ascii_case("enforce")
-        && !runtime_profile.is_empty()
         && !inspect_profile.is_empty()
         && !inspect_profile.eq_ignore_ascii_case("unconfined")
         && inspect_profile == runtime_profile
