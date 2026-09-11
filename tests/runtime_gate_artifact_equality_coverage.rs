@@ -11,6 +11,32 @@ use quarantine_sandbox_runtime::{RuntimeGateArtifact, RuntimeGateArtifactError};
 use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
 
+fn big_endian_gate_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
+    let machine = match std::env::consts::ARCH {
+        "x86_64" => 62_u16,
+        "aarch64" => 183_u16,
+        other => panic!("runtime-gate test fixture does not support architecture {other}"),
+    };
+    let file_bytes = bytes.len() as u64;
+
+    bytes[5] = 2;
+    bytes[16..18].copy_from_slice(&2_u16.to_be_bytes());
+    bytes[18..20].copy_from_slice(&machine.to_be_bytes());
+    bytes[20..24].copy_from_slice(&1_u32.to_be_bytes());
+    bytes[24..32].copy_from_slice(&0x400100_u64.to_be_bytes());
+    bytes[32..40].copy_from_slice(&64_u64.to_be_bytes());
+    bytes[52..54].copy_from_slice(&64_u16.to_be_bytes());
+    bytes[54..56].copy_from_slice(&56_u16.to_be_bytes());
+    bytes[56..58].copy_from_slice(&1_u16.to_be_bytes());
+    bytes[64..68].copy_from_slice(&1_u32.to_be_bytes());
+    bytes[68..72].copy_from_slice(&5_u32.to_be_bytes());
+    bytes[80..88].copy_from_slice(&0x400000_u64.to_be_bytes());
+    bytes[96..104].copy_from_slice(&file_bytes.to_be_bytes());
+    bytes[104..112].copy_from_slice(&file_bytes.to_be_bytes());
+    bytes[112..120].copy_from_slice(&4096_u64.to_be_bytes());
+    bytes
+}
+
 #[test]
 fn cloned_runtime_gate_artifact_preserves_verified_authority_identity() {
     let directory = tempfile::tempdir().expect("fixture directory should exist");
@@ -97,5 +123,19 @@ fn staging_classifies_digest_matching_loading_and_machine_mismatches_fail_closed
     assert!(matches!(
         RuntimeGateArtifact::stage(&source, &machine_digest, std::env::consts::ARCH),
         Err(RuntimeGateArtifactError::ArchitectureMismatch { .. })
+    ));
+}
+
+#[test]
+fn staging_rejects_digest_matching_gate_with_host_incompatible_elf_data_encoding() {
+    let directory = tempfile::tempdir().expect("fixture directory should exist");
+    let (source, bytes) = write_self_contained_gate(directory.path());
+    let big_endian_bytes = big_endian_gate_bytes(bytes);
+    fs::write(&source, &big_endian_bytes).expect("big-endian ELF fixture should be writable");
+    let expected_sha256 = format!("{:x}", Sha256::digest(&big_endian_bytes));
+
+    assert!(matches!(
+        RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH),
+        Err(RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary)
     ));
 }
