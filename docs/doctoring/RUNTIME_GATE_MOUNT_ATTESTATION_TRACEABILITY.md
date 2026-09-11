@@ -14,6 +14,8 @@ PR #112 exact `3c5f9947fa2ca748171791eea2343537cff3bd12`, CI run `34621056681`, 
 
 The fixture stages a real `RuntimeGateArtifact`, emits a Podman inspection record with one exact read-only bind from that staged artifact to `/qsr-runtime-gate`, and otherwise supplies positive rootless/AppArmor/seccomp/capability/resource evidence. This proves the failure is caused by the verifier omitting the runtime-owned gate mount from its expected effective mount set.
 
+Exact descendant `c59500f60e82de5516d2505563785d709022d3b5` independently reproduced the same causal failure in CI run `34622058959`, verify job `103338185807`: all 41 library tests and the surrounding command/runtime-gate targets passed until `podman_runtime_gate_mount_attestation_red`, which failed with the same `IsolationVerificationFailed { control_name: "command_mount_set" }`. This second execution rules out the earlier RED being an incidental runner or fixture failure.
+
 ## Repair contract
 
 The minimum repair must carry the verified staged gate path from `RuntimeGatePodmanAdapter` into both pre-start configuration verification and live process isolation verification. Effective mount admission must then require:
