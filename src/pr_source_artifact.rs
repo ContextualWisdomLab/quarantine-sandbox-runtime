@@ -157,6 +157,34 @@ fn valid_lower_hex(value: &str, lengths: &[usize]) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn validate_canonical_root_identity(
+    canonical_is_directory: bool,
+    source_device: u64,
+    source_inode: u64,
+    canonical_device: u64,
+    canonical_inode: u64,
+) -> Result<(), PrSourceArtifactError> {
+    if !canonical_is_directory
+        || source_device != canonical_device
+        || source_inode != canonical_inode
+    {
+        return Err(PrSourceArtifactError::InvalidInput {
+            field_name: "host_path",
+        });
+    }
+    Ok(())
+}
+
+fn validate_declared_file_length(
+    observed_bytes: usize,
+    declared_bytes: u64,
+) -> Result<(), PrSourceArtifactError> {
+    if observed_bytes as u64 != declared_bytes {
+        return Err(PrSourceArtifactError::DigestMismatch);
+    }
+    Ok(())
+}
+
 fn collect_regular_files(
     root: &Path,
     directory: &Path,
@@ -214,14 +242,13 @@ pub fn stage_pr_source_artifact(
     }
     let source = fs::canonicalize(&input.host_path).map_err(PrSourceArtifactError::Io)?;
     let canonical_root = fs::metadata(&source).map_err(PrSourceArtifactError::Io)?;
-    if !canonical_root.is_dir()
-        || source_root.dev() != canonical_root.dev()
-        || source_root.ino() != canonical_root.ino()
-    {
-        return Err(PrSourceArtifactError::InvalidInput {
-            field_name: "host_path",
-        });
-    }
+    validate_canonical_root_identity(
+        canonical_root.is_dir(),
+        source_root.dev(),
+        source_root.ino(),
+        canonical_root.dev(),
+        canonical_root.ino(),
+    )?;
     let mut files = Vec::new();
     collect_regular_files(&source, &source, &mut files)?;
     files.sort_by(|left, right| {
@@ -267,9 +294,7 @@ pub fn stage_pr_source_artifact(
             .take(MAX_SOURCE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(PrSourceArtifactError::Io)?;
-        if bytes.len() as u64 != *declared_len {
-            return Err(PrSourceArtifactError::DigestMismatch);
-        }
+        validate_declared_file_length(bytes.len(), *declared_len)?;
         let relative_bytes = relative.as_os_str().as_bytes();
         hasher.update((relative_bytes.len() as u64).to_be_bytes());
         hasher.update(relative_bytes);
@@ -316,4 +341,41 @@ pub fn stage_pr_source_artifact(
             mounted_noexec: true,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_root_identity_guard_rejects_each_observed_contradiction() {
+        assert!(validate_canonical_root_identity(true, 7, 11, 7, 11).is_ok());
+        assert!(matches!(
+            validate_canonical_root_identity(false, 7, 11, 7, 11),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+        assert!(matches!(
+            validate_canonical_root_identity(true, 7, 11, 8, 11),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+        assert!(matches!(
+            validate_canonical_root_identity(true, 7, 11, 7, 12),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+    }
+
+    #[test]
+    fn declared_file_length_guard_rejects_observed_mutation() {
+        assert!(validate_declared_file_length(17, 17).is_ok());
+        assert!(matches!(
+            validate_declared_file_length(16, 17),
+            Err(PrSourceArtifactError::DigestMismatch)
+        ));
+    }
 }
