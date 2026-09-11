@@ -166,17 +166,16 @@ fn collect_regular_files(
     for entry in entries {
         let entry = entry.map_err(PrSourceArtifactError::Io)?;
         let path = entry.path();
+        // `read_dir` yields children of `directory`; because every recursive
+        // directory is itself beneath `root`, a successful strip always has a
+        // non-empty child-relative path. Do not manufacture an unreachable
+        // security branch for an invariant already established by traversal.
         let relative = path
             .strip_prefix(root)
             .map_err(|_| PrSourceArtifactError::InvalidInput {
                 field_name: "host_path",
             })?
             .to_path_buf();
-        if relative.as_os_str().as_bytes().is_empty() {
-            return Err(PrSourceArtifactError::InvalidInput {
-                field_name: "host_path",
-            });
-        }
         let metadata = fs::symlink_metadata(&path).map_err(PrSourceArtifactError::Io)?;
         if metadata.is_dir() {
             collect_regular_files(root, &path, files)?;
@@ -256,9 +255,12 @@ pub fn stage_pr_source_artifact(
     let mut stripped = 0_u64;
     for (relative, source_path, was_executable, declared_len) in &files {
         let destination = directory.path().join(relative);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(PrSourceArtifactError::Io)?;
-        }
+        // `destination` is the staging root joined with one non-empty relative
+        // file path gathered above. Popping the file name therefore always
+        // leaves its staging parent, including the root for a top-level file.
+        let mut destination_parent = destination.clone();
+        let _ = destination_parent.pop();
+        fs::create_dir_all(&destination_parent).map_err(PrSourceArtifactError::Io)?;
         let source_file = File::open(source_path).map_err(PrSourceArtifactError::Io)?;
         let mut bytes = Vec::new();
         source_file
@@ -282,18 +284,15 @@ pub fn stage_pr_source_artifact(
         stripped += u64::from(*was_executable);
     }
     for entry in files.iter().rev() {
-        let mut parent = directory
-            .path()
-            .join(&entry.0)
-            .parent()
-            .map(Path::to_path_buf);
-        while let Some(path) = parent {
-            if path == directory.path() {
-                break;
-            }
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        // The staged file path is guaranteed to be beneath `directory`; walk
+        // upward by mutation and stop at that known root instead of carrying an
+        // unreachable `Option::None` branch before the root can be reached.
+        let mut parent = directory.path().join(&entry.0);
+        let _ = parent.pop();
+        while parent != directory.path() {
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o755))
                 .map_err(PrSourceArtifactError::Io)?;
-            parent = path.parent().map(Path::to_path_buf);
+            let _ = parent.pop();
         }
     }
     // The staging root is host-side security state. Nested directories remain
