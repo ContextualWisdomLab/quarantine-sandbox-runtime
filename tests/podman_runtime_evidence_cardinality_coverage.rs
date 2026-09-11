@@ -122,9 +122,7 @@ fn container_inspection_requires_exactly_one_runtime_record() {
 #[test]
 fn process_security_top_requires_one_complete_pid_one_record() {
     let header = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL";
-    let non_pid_one = format!(
-        "{header}\n2 filter - - - - - containers-default (enforce)"
-    );
+    let non_pid_one = format!("{header}\n2 filter - - - - - containers-default (enforce)");
     assert_eq!(
         execute_with_evidence("missing-pid-one", CONTAINER_INSPECTION, &non_pid_one),
         Err(malformed("process_security_top"))
