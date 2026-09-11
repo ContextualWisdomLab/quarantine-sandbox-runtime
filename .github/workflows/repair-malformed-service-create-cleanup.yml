@@ -40,14 +40,22 @@ jobs:
 
           source = Path("src/infrastructure/podman.rs")
           text = source.read_text()
+          anchor = "let container_id = match parse_backend_identifier(&create_output.stdout) {"
+          following = 'let start_args = ["start".to_owned(), plan.sandbox_name().to_owned()];'
+          start = text.index(anchor)
+          end = text.index(following, start)
+          segment = text[start:end]
           old = "self.cleanup_created_container(&plan)?;"
+          if segment.count(old) != 1:
+              raise SystemExit(
+                  f"expected one malformed-create generated-name cleanup call, found {segment.count(old)}"
+              )
           replacement = '''// Successful create plus malformed stdout does not prove ownership of the
                   // generated correlation name. Only the invocation-owned network is safe to
                   // remove until an exact backend container identity has been admitted.
                   self.cleanup_network(&plan)?;'''
-          if text.count(old) != 1:
-              raise SystemExit(f"expected one generated-name cleanup call, found {text.count(old)}")
-          source.write_text(text.replace(old, replacement, 1))
+          repaired = segment.replace(old, replacement, 1)
+          source.write_text(text[:start] + repaired + text[end:])
           PY
           cargo fmt --all
 
