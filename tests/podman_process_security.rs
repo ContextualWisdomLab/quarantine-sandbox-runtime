@@ -64,14 +64,14 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("process-security-podman");
     let log = temporary_path("process-security-log");
     let top_row = match mode {
-        "seccomp_disabled" => "1 disabled - - - - - containers-default",
-        "permitted_capability" => "1 filter - - - CAP_SYS_ADMIN - containers-default",
-        "ambient_capability" => "1 filter - - - - CAP_NET_RAW containers-default",
+        "seccomp_disabled" => "1 disabled - - - - - containers-default (enforce)",
+        "permitted_capability" => "1 filter - - - CAP_SYS_ADMIN - containers-default (enforce)",
+        "ambient_capability" => "1 filter - - - - CAP_NET_RAW containers-default (enforce)",
         "lsm_unconfined" => "1 filter - - - - - unconfined",
-        _ => "1 filter - - - - - containers-default",
+        _ => "1 filter - - - - - containers-default (enforce)",
     };
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.8.4"}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default (enforce)","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n%s\\n' '{}' ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",

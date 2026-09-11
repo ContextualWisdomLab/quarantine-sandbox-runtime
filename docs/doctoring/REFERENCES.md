@@ -6,11 +6,17 @@ AppArmor Project. (2026). *Verify AppArmor coverage and audit profiles.* https:/
 
 Containers/Image Authors. (2026). *containers-transports — description of supported transports for copying and storing container images*. GitHub. https://github.com/containers/image/blob/main/docs/containers-transports.5.md
 
+Davis, K., Peabody, B., & Leach, P. (2024). *Universally unique IDentifiers (UUIDs) (RFC 9562).* RFC Editor. https://doi.org/10.17487/RFC9562
+
 Dürst, M. J. (2025). *Guidelines for the definition of new top-level media types (RFC 9694).* RFC Editor. https://doi.org/10.17487/RFC9694
 
 Firecracker MicroVM. (2026). *Firecracker design*. GitHub. https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md
 
 Freed, N., Klensin, J., & Hansen, T. (2013). *Media type specifications and registration procedures (RFC 6838).* RFC Editor. https://doi.org/10.17487/RFC6838
+
+Git Project. (n.d.). *git-config documentation*. https://git-scm.com/docs/git-config
+
+Git Project. (n.d.). *git-show documentation*. https://git-scm.com/docs/git-show
 
 gVisor Authors. (2026). *What is gVisor?* https://gvisor.dev/docs/
 
@@ -25,6 +31,18 @@ Klyne, G., & Newman, C. (2002). *Date and time on the Internet: Timestamps (RFC 
 Linux Kernel Documentation. (2026). *Linux Security Modules*. https://www.kernel.org/doc/html/latest/userspace-api/lsm.html
 
 Linux Kernel Documentation. (2026). *AppArmor*. https://www.kernel.org/doc/html/next/admin-guide/LSM/apparmor.html
+
+Linux man-pages project. (2026). *cgroup_namespaces(7)—Overview of Linux cgroup namespaces*. https://man7.org/linux/man-pages/man7/cgroup_namespaces.7.html
+
+Linux man-pages project. (2026). *chmod(2)—Change permissions of a file*. https://man7.org/linux/man-pages/man2/chmod.2.html
+
+Linux man-pages project. (2026). *namespaces(7)—Overview of Linux namespaces*. https://man7.org/linux/man-pages/man7/namespaces.7.html
+
+Linux man-pages project. (2026). *path_resolution(7)—How a pathname is resolved to a file*. https://man7.org/linux/man-pages/man7/path_resolution.7.html
+
+Linux man-pages project. (2026). *pathname(7)—How pathnames are encoded and interpreted*. https://man7.org/linux/man-pages/man7/pathname.7.html
+
+Linux man-pages project. (2026). *uts_namespaces(7)—Overview of Linux UTS namespaces*. https://man7.org/linux/man-pages/man7/uts_namespaces.7.html
 
 MITRE. (2025). *Virtualization/sandbox evasion: T1497*. MITRE ATT&CK. https://attack.mitre.org/techniques/T1497/
 
@@ -42,11 +60,23 @@ Open Source Security Foundation. (2025). *SLSA specification, version 1.2*. http
 
 Podman Authors. (2026). *podman-create — Create a new container*. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
+Podman Authors. (2026). *podman-container-inspect — Display a container’s configuration*. https://docs.podman.io/en/latest/markdown/podman-container-inspect.1.html
+
+Podman Authors. (2026). *podman-kill — Kill the main process in one or more containers*. https://docs.podman.io/en/latest/markdown/podman-kill.1.html
+
+Podman Authors. (2026). *podman-start — Start one or more containers*. https://docs.podman.io/en/stable/markdown/podman-start.1.html
+
+Podman Authors. (2026). *podman-wait — Wait on one or more containers to stop and print their exit codes*. https://docs.podman.io/en/latest/markdown/podman-wait.1.html
+
+Podman Authors. (2026). *podman-run — Run a command in a new container*. https://docs.podman.io/en/stable/markdown/podman-run.1.html
+
 Podman Authors. (2026). *podman-network-create — Create a network*. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
 
 Podman Authors. (2026). *podman-port — List port mappings or a specific mapping for the container*. https://docs.podman.io/en/latest/markdown/podman-port.1.html
 
 Podman Authors. (2026). *Rootless Podman*. https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md
+
+Rust Project. (2026). *String in std::string (Rust 1.98.0): `String::from_utf8` and UTF-8 invariants*. https://doc.rust-lang.org/stable/std/string/struct.String.html
 
 Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
 

@@ -22,15 +22,17 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Verify exact protected-main release source
+      - name: Verify exact protected default-branch release source
         env:
           EXPECTED_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git fetch --no-tags --depth=1 origin main
-          test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_SHA"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.protected')" = "true"
+          default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.default_branch')"
+          test -n "$default_branch"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/${default_branch}" --jq '.protected')" = "true"
+          git fetch --no-tags --depth=1 origin "$default_branch"
+          test "$(git rev-parse "refs/remotes/origin/${default_branch}")" = "$EXPECTED_SHA"
       - name: Verify tag, Cargo version, and dated changelog identity
         env:
           RELEASE_TAG: ${{ github.ref_name }}

@@ -138,3 +138,23 @@ A release rollback is permitted only if the prior runtime version supports every
 ## Service-level objectives
 
 No production SLO is claimed yet. Establish SLOs only after real backend load/soak measurements. Initial acceptance measurements should cover launch-to-ready, cleanup latency, successful cleanup ratio, resource enforcement, orphan count, and availability under bounded concurrent load.
+
+## Command namespace fixture failures
+
+A positive fake-backend scenario can become invalid when required evidence is strengthened. Read the exact-head Test log before calling this an infrastructure failure or weakening a predicate. On `902377456036f19277ffe42fb24ce564d7dacaaf`, CI `34430833274`, verify job `102725806620`, the CLI success test expected workload exit 9 but received CLI error exit 2 with `isolated_uts_namespace`. The production guard was correctly rejecting an incomplete positive inspection fixture.
+
+Check `src/main.rs::tests::fake_backend::SUCCESS_SCRIPT`, both inspection builders in `tests/podman_command_execution.rs`, and `COMMAND_CONTAINER` in `tests/fixtures/fake_podman.sh`. Each positive command inspection must explicitly include private `UTSMode` and `CgroupMode`. Never fill missing fields automatically in the generic scenario dispatcher: that would silently repair the deliberately hostile inputs under test. Keep `COMMAND_CONTAINER_HOST_UTS`, `COMMAND_CONTAINER_HOST_CGROUP`, readonly-root failure data, and the missing-namespace regression file unchanged unless a separately verified finding requires a dedicated repair.
+
+From a credential-free Linux test checkout using the repository-pinned Rust toolchain, run:
+
+```sh
+cargo test --locked --bin quarantine-sandbox-runtime
+cargo test --locked --test podman_command_execution
+cargo test --locked --test podman_command_execution_cleanup_red
+cargo test --locked --test podman_command_execution_configuration_missing_namespace_red
+cargo test --locked --workspace --all-targets --no-fail-fast
+```
+
+The first four commands isolate the repaired fixtures and the security counterexamples. The final command inventories every test target while preserving a failing exit status when any target fails; it is not permission to accept a partially passing head. Reacquire fmt, Clippy, rustdoc, complete coverage, reviews and required security checks on the final unchanged head. Shell/JSON fixture checks and matching receipt fields do not prove a real kernel enforced isolation.
+
+The command-path hold/attest/release defect in issue #25 remains separately owned by PR #14. Do not close that issue, promote an immutable release, or let a consumer use an unprotected PR head merely because fixture tests pass. See [command namespace fixture traceability](doctoring/COMMAND_NAMESPACE_FIXTURE_TRACEABILITY.md) for the original failure, exact blob identities and the preserved boundaries.

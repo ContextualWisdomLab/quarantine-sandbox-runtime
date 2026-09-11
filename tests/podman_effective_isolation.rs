@@ -7,6 +7,10 @@ use std::{
     net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
+    sync::{
+        Mutex, MutexGuard,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,6 +18,15 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
+static FIXTURE_SERIALIZER: Mutex<()> = Mutex::new(());
+
+fn fixture_guard() -> MutexGuard<'static, ()> {
+    FIXTURE_SERIALIZER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "d".repeat(64))
@@ -58,8 +71,9 @@ fn temporary_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after the Unix epoch")
         .as_nanos();
+    let unique_id = NEXT_PATH_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
+        "quarantine-sandbox-runtime-{name}-{}-{nanos}-{unique_id}",
         std::process::id()
     ))
 }
@@ -122,6 +136,7 @@ fn remove_fixture(program: PathBuf, log: PathBuf) {
 
 #[test]
 fn lease_attests_only_effective_controls_verified_after_start() {
+    let _fixture_guard = fixture_guard();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -159,6 +174,7 @@ fn lease_attests_only_effective_controls_verified_after_start() {
 
 #[test]
 fn missing_host_seccomp_or_lsm_fails_before_resources_are_created() {
+    let _fixture_guard = fixture_guard();
     for (mode, control_name) in [("seccomp_disabled", "seccomp"), ("lsm_disabled", "lsm")] {
         let (program, log) = write_fake_podman(mode, 49_152);
         let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -174,6 +190,7 @@ fn missing_host_seccomp_or_lsm_fails_before_resources_are_created() {
 
 #[test]
 fn unconfined_lsm_profile_fails_closed_and_cleanup() {
+    let _fixture_guard = fixture_guard();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -199,6 +216,7 @@ fn unconfined_lsm_profile_fails_closed_and_cleanup() {
 
 #[test]
 fn contradictory_lsm_evidence_fails_closed_and_cleanup() {
+    let _fixture_guard = fixture_guard();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -224,6 +242,7 @@ fn contradictory_lsm_evidence_fails_closed_and_cleanup() {
 
 #[test]
 fn bounding_capabilities_fail_closed_and_cleanup() {
+    let _fixture_guard = fixture_guard();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -249,6 +268,7 @@ fn bounding_capabilities_fail_closed_and_cleanup() {
 
 #[test]
 fn weaker_effective_container_or_network_state_fails_and_cleans_up() {
+    let _fixture_guard = fixture_guard();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()

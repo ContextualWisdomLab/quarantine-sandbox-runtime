@@ -55,3 +55,7 @@ There is currently no durable database. If persistence is introduced, add an ADR
 ## Consumer integration
 
 Use immutable published artifacts/contracts. Do not modify Wardnet or contextual-orchestrator source from this repository's dedicated writer when those repositories have their own writer/owner path. Route consumer work through their existing issue/PR/task path and continue local runtime work.
+
+## Command fixture triage
+
+When stricter isolation admission breaks a positive fake backend, repair its explicit inspection data, not the production guard or hostile counterexamples. Follow `docs/OPERABILITY.md` section "Command namespace fixture failures"; all scenario normalization, ignored-test shortcuts, and fixture-derived containment claims remain forbidden.

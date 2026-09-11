@@ -11,14 +11,15 @@
 mod application_service;
 mod artifact_analysis;
 mod infrastructure;
+mod pr_source_artifact;
 mod sandbox_execution;
 
 pub use application_service::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
-    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
-    CommandExecutionResult, ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId,
-    ServiceEndpoint, ServiceProtocol, execute_command,
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
+    BackendInvocationFailureKind, CleanupReceipt, CommandExecutionBackend, CommandExecutionError,
+    CommandExecutionRequest, CommandExecutionResult, ExpiredLeaseCleanupResult,
+    IsolationAttestation, LeaseOwnerId, ServiceEndpoint, ServiceProtocol, execute_command,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
@@ -28,6 +29,15 @@ pub use artifact_analysis::{
     RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
+#[cfg(unix)]
+pub use infrastructure::{
+    RuntimeGateArtifact, RuntimeGateArtifactError, RuntimeGateCommandBindingPlan,
+    RuntimeGatePodmanAdapter,
+};
+pub use pr_source_artifact::{
+    PrSourceArtifactError, PrSourceArtifactInput, PrSourceArtifactReceipt, StagedPrSourceArtifact,
+    stage_pr_source_artifact,
+};
 pub use sandbox_execution::{
     IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
     VerifiedIsolationState,
