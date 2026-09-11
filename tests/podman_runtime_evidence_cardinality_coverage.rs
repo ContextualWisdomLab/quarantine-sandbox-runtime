@@ -111,6 +111,12 @@ fn malformed(operation: &'static str) -> CommandExecutionError {
     })
 }
 
+fn isolation_failure(control_name: &'static str) -> CommandExecutionError {
+    CommandExecutionError::Backend(ApplicationServiceError::IsolationVerificationFailed {
+        control_name,
+    })
+}
+
 #[test]
 fn container_inspection_requires_exactly_one_runtime_record() {
     assert_eq!(
@@ -127,6 +133,32 @@ fn container_inspection_must_match_the_acquired_runtime_identity() {
         execute_with_evidence("foreign-inspection-id", &foreign_identity, "unused"),
         Err(malformed("container_inspect")),
         "inspection evidence for a foreign container must not attest the acquired runtime identity"
+    );
+}
+
+#[test]
+fn configured_effective_capabilities_fail_closed() {
+    let nonempty_effective =
+        CONTAINER_INSPECTION.replace("\"EffectiveCaps\":null", "\"EffectiveCaps\":[\"CAP_NET_ADMIN\"]");
+    let process_top =
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
+    assert_eq!(
+        execute_with_evidence("configured-effective-cap", &nonempty_effective, process_top),
+        Err(isolation_failure("all_capabilities_dropped")),
+        "configured effective capabilities must not be treated as fully dropped"
+    );
+}
+
+#[test]
+fn configured_bounding_capabilities_fail_closed() {
+    let nonempty_bounding =
+        CONTAINER_INSPECTION.replace("\"BoundingCaps\":null", "\"BoundingCaps\":[\"CAP_NET_ADMIN\"]");
+    let process_top =
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
+    assert_eq!(
+        execute_with_evidence("configured-bounding-cap", &nonempty_bounding, process_top),
+        Err(isolation_failure("all_capabilities_dropped")),
+        "configured bounding capabilities must not be treated as fully dropped"
     );
 }
 
