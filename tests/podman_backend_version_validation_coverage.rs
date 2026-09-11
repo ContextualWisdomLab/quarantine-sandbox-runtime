@@ -203,11 +203,8 @@ fn assert_lsm_evidence_is_rejected(
     runtime_label: &str,
 ) {
     let backend_info = security_info_lsm_json(apparmor_enabled, selinux_enabled);
-    let inspect = container_inspect_lsm_json(
-        "fake-command-container-id",
-        apparmor_profile,
-        process_label,
-    );
+    let inspect =
+        container_inspect_lsm_json("fake-command-container-id", apparmor_profile, process_label);
     let top_payload = format!(
         "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - {runtime_label}\n"
     );
