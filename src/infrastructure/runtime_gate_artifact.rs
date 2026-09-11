@@ -20,6 +20,10 @@ const ELF_TYPE_EXECUTABLE: u16 = 2;
 const ELF_TYPE_SHARED_OBJECT: u16 = 3;
 const ELF_PROGRAM_TYPE_LOAD: u32 = 1;
 const ELF_PROGRAM_TYPE_INTERPRETER: u32 = 3;
+#[cfg(target_endian = "little")]
+const HOST_ELF_DATA_ENCODING: u8 = 1;
+#[cfg(target_endian = "big")]
+const HOST_ELF_DATA_ENCODING: u8 = 2;
 
 /// Byte order declared by the ELF `EI_DATA` identification field.
 #[derive(Clone, Copy)]
@@ -58,17 +62,18 @@ impl RuntimeGateArtifact {
     /// Verify and stage a runtime gate from a trusted host release path.
     ///
     /// `expected_sha256` must be a canonical lowercase SHA-256 digest. The expected architecture
-    /// must equal the current host architecture and the executable's ELF machine identity. The ELF
-    /// must be a self-contained ELF64 executable or static PIE with a bounded program-header table,
-    /// at least one loadable segment, and no `PT_INTERP` dependency on workload-image code. Symlink
-    /// and non-regular-file sources fail closed before bytes are staged.
+    /// must equal the current host architecture and the executable's ELF machine identity, while
+    /// the ELF `EI_DATA` encoding must match the compile-time target endianness. The ELF must be a
+    /// self-contained ELF64 executable or static PIE with a bounded program-header table, at least
+    /// one loadable segment, and no `PT_INTERP` dependency on workload-image code. Symlink and
+    /// non-regular-file sources fail closed before bytes are staged.
     ///
     /// # Errors
     ///
     /// Returns [`RuntimeGateArtifactError`] when the expected identity is malformed, the source is
     /// not a regular file, the bytes do not match the expected digest or architecture, the ELF
-    /// loading boundary is malformed or delegates to an external interpreter, or private read-only
-    /// staging cannot be completed.
+    /// loading boundary is malformed, host-byte-order incompatible, or delegates to an external
+    /// interpreter, or private read-only staging cannot be completed.
     pub fn stage(
         source: &Path,
         expected_sha256: &str,
@@ -101,6 +106,12 @@ impl RuntimeGateArtifact {
         // classified as a loading-boundary failure rather than as an architecture
         // mismatch derived from fields that are not yet safe to interpret.
         validate_self_contained_elf_loading(&bytes)?;
+        // EI_DATA is part of executable compatibility, not just a parsing hint. The
+        // bounded validator can decode either defined byte order, but trusted runtime
+        // authority must use the byte order of the target that compiled this adapter.
+        if bytes[5] != HOST_ELF_DATA_ENCODING {
+            return Err(RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary);
+        }
         let actual_architecture = executable_architecture(&bytes);
         if actual_architecture != expected_architecture {
             return Err(RuntimeGateArtifactError::ArchitectureMismatch {
@@ -178,7 +189,7 @@ pub enum RuntimeGateArtifactError {
         /// Observed architecture.
         actual: String,
     },
-    /// The executable cannot prove a self-contained, bounded ELF loading boundary.
+    /// The executable cannot prove a host-compatible, self-contained, bounded ELF loading boundary.
     #[error("runtime gate ELF loading boundary is malformed or uses an external interpreter")]
     UnsafeExecutableLoadingBoundary,
     /// The verified bytes could not be materialized into a private read-only executable staging area.

@@ -114,8 +114,12 @@ mod linux {
     }
 
     #[test]
-    fn big_endian_self_contained_executable_remains_admissible() {
-        assert!(admits(&big_endian_elf_fixture()));
+    #[cfg(target_endian = "little")]
+    fn host_incompatible_big_endian_executable_is_rejected() {
+        assert!(matches!(
+            stage(&big_endian_elf_fixture()),
+            Err(RuntimeGateArtifactError::UnsafeExecutableLoadingBoundary)
+        ));
     }
 
     #[test]
