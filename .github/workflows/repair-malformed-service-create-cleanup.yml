@@ -44,24 +44,14 @@ jobs:
 
           source = Path("src/infrastructure/podman.rs")
           text = source.read_text()
-          old = '''            None => {
-              self.cleanup_created_container(&plan)?;
-              return Err(ApplicationServiceError::MalformedIsolationInspection {
-                  operation: "container_create",
-              });
-          }'''
-          new = '''            None => {
-              // Successful create plus malformed stdout does not prove ownership of the
-              // generated correlation name. Only the invocation-owned network is safe to
-              // remove until an exact backend container identity has been admitted.
-              self.cleanup_network(&plan)?;
-              return Err(ApplicationServiceError::MalformedIsolationInspection {
-                  operation: "container_create",
-              });
-          }'''
+          old = "self.cleanup_created_container(&plan)?;"
+          replacement = '''// Successful create plus malformed stdout does not prove ownership of the
+                  // generated correlation name. Only the invocation-owned network is safe to
+                  // remove until an exact backend container identity has been admitted.
+                  self.cleanup_network(&plan)?;'''
           if text.count(old) != 1:
-              raise SystemExit("expected exactly one malformed service-create cleanup block")
-          source.write_text(text.replace(old, new, 1))
+              raise SystemExit(f"expected one generated-name cleanup call, found {text.count(old)}")
+          source.write_text(text.replace(old, replacement, 1))
           PY
           cargo fmt --all
 
