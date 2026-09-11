@@ -145,6 +145,8 @@ helper = r'''fn read_application_service_create_receipt(
 text = text.replace(helper_anchor, helper + helper_anchor, 1)
 source.write_text(text)
 
+exact_id = "0123456789abcdef" * 4
+
 identifier_test = Path("tests/podman_application_service_create_identifier_red.rs")
 identifier_text = identifier_test.read_text()
 identifier_error = 'operation: "container_create"\n            })'
@@ -164,6 +166,8 @@ identifier_test.write_text(identifier_text)
 
 matrix_test = Path("tests/podman_isolation_failure_matrix.rs")
 matrix_text = matrix_test.read_text()
+matrix_text = matrix_text.replace('"Id": "fake-container-id"', f'"Id": "{exact_id}"', 1)
+matrix_text = matrix_text.replace('create_identifier: "fake-container-id\\n".to_owned()', f'create_identifier: "{exact_id}\\n".to_owned()', 1)
 matrix_error = '''        assert_fixture(
             fixture,
             ApplicationServiceError::MalformedIsolationInspection {
@@ -186,3 +190,60 @@ matrix_test.write_text(
         1,
     )
 )
+
+for fixture_path, expected_count in [
+    ("tests/podman_effective_attestation_red.rs", 1),
+    ("tests/podman_launch_error_propagation.rs", 2),
+    ("tests/podman_started_cleanup_remove_failure.rs", 2),
+    ("tests/root_coverage_reachable_edges.rs", 2),
+]:
+    path = Path(fixture_path)
+    fixture_text = path.read_text()
+    if fixture_text.count("fake-container-id") != expected_count:
+        raise SystemExit(f"unexpected fake container identity count in {fixture_path}")
+    path.write_text(fixture_text.replace("fake-container-id", exact_id))
+
+coverage_edges = Path("tests/root_coverage_edges.rs")
+coverage_text = coverage_edges.read_text()
+if coverage_text.count("fake-container-id") != 4:
+    raise SystemExit("unexpected root coverage fake identity count")
+coverage_text = coverage_text.replace("fake-container-id", exact_id)
+non_utf8_error = '''            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create",
+            },
+'''
+if coverage_text.count(non_utf8_error) != 1:
+    raise SystemExit("unexpected root coverage non-UTF8 identifier error anchor")
+coverage_text = coverage_text.replace(
+    non_utf8_error,
+    '''            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create_receipt",
+            },
+''',
+    1,
+)
+coverage_text = coverage_text.replace(
+    '"malformed_identifier_cleanup_failure"',
+    '"malformed_identifier_without_receipt"',
+)
+coverage_text = coverage_text.replace(
+    '''        (
+            "malformed_identifier_without_receipt",
+            ApplicationServiceError::CleanupFailed,
+        ),
+''',
+    '''        (
+            "malformed_identifier_without_receipt",
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create_receipt",
+            },
+        ),
+''',
+    1,
+)
+coverage_text = coverage_text.replace(
+    '  rm:*) if [ "$failure" = malformed_identifier_without_receipt ]; then exit 17; else :; fi ;;',
+    '  rm:*) : ;;',
+    1,
+)
+coverage_edges.write_text(coverage_text)
