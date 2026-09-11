@@ -17,11 +17,14 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    ResourceRequest, RootlessPodmanAdapter,
 };
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
 const OWNED_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const MISMATCHED_CONTAINER_ID: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -76,9 +79,9 @@ fn request() -> CommandExecutionRequest {
     }
 }
 
-fn container_inspect_json() -> String {
+fn container_inspect_json_for(container_id: &str) -> String {
     format!(
-        "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
+        "[{{\"Id\":\"{container_id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
          \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
@@ -87,6 +90,10 @@ fn container_inspect_json() -> String {
          \"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\
          \"Mounts\":[]}}]"
     )
+}
+
+fn container_inspect_json() -> String {
+    container_inspect_json_for(OWNED_CONTAINER_ID)
 }
 
 #[test]
@@ -150,6 +157,76 @@ fn successful_create_binds_every_lifecycle_operation_to_the_acquired_container_i
             .any(|line| { line.starts_with("rm --force ") && line.ends_with(OWNED_CONTAINER_ID) }),
         "destructive removal must target the acquired container ID: {calls}"
     );
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(config);
+    let _ = fs::remove_file(call_log);
+    let _ = fs::remove_file(owned_marker);
+    let _ = fs::remove_file(foreign_marker);
+}
+
+#[test]
+fn inspect_identity_mismatch_fails_closed_and_cleans_only_the_acquired_container() {
+    let call_log = temporary_path("mismatched-inspect-call-log");
+    let owned_marker = temporary_path("mismatched-inspect-owned-marker");
+    let foreign_marker = temporary_path("mismatched-inspect-foreign-marker");
+    fs::write(&foreign_marker, b"foreign-container-untouched")
+        .expect("foreign resource marker should be writable");
+
+    let program = temporary_path("mismatched-inspect-fake-podman");
+    symlink(fixture_executable(), &program).expect("fake Podman symlink should be creatable");
+    let config = config_path(&program);
+    fs::write(
+        &config,
+        format!(
+            "MODE='command_owned_lifecycle'\nLOG='{}'\nOWNED_CONTAINER_ID='{OWNED_CONTAINER_ID}'\nOWNED_MARKER='{}'\nFOREIGN_MARKER='{}'\nOWNED_CONTAINER_INSPECT='{}'\n",
+            call_log.display(),
+            owned_marker.display(),
+            foreign_marker.display(),
+            container_inspect_json_for(MISMATCHED_CONTAINER_ID),
+        ),
+    )
+    .expect("fake Podman data config should be writable");
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    assert_eq!(
+        adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_037),
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_inspect",
+            }
+        )),
+        "inspect evidence for any identity other than the create receipt must fail closed"
+    );
+    assert_eq!(
+        fs::read(&foreign_marker).expect("foreign marker should remain readable"),
+        b"foreign-container-untouched",
+        "identity contradiction must never redirect cleanup to a foreign container"
+    );
+    assert!(
+        !owned_marker.exists(),
+        "the acquired container must still be cleaned after contradictory inspect evidence"
+    );
+
+    let calls = fs::read_to_string(&call_log).expect("fake Podman calls should be recorded");
+    assert!(
+        calls.lines().any(|line| {
+            line.starts_with("container inspect ") && line.ends_with(OWNED_CONTAINER_ID)
+        }),
+        "inspection itself must address only the acquired container ID: {calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
+        "cleanup after contradictory inspect evidence must target only the acquired ID: {calls}"
+    );
+    for operation in ["top ", "wait ", "logs "] {
+        assert!(
+            !calls.lines().any(|line| line.starts_with(operation)),
+            "no workload evidence may be trusted after inspect identity contradiction: {calls}"
+        );
+    }
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(config);
