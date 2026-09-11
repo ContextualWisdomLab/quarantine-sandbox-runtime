@@ -58,10 +58,9 @@ fn config_path(program: &Path) -> PathBuf {
     PathBuf::from(format!("{}.config", program.display()))
 }
 
-#[test]
-fn oversized_wait_stdout_fails_closed_before_exit_code_acceptance() {
+fn assert_oversized_wait_stream_fails_closed(fixture_prefix: &str, wait_script: &str) {
     let directory = tempfile::Builder::new()
-        .prefix("qsr-command-wait-output-budget-")
+        .prefix(fixture_prefix)
         .tempdir()
         .expect("isolated fake-Podman directory");
     let program = directory.path().join("wait-output-budget-podman");
@@ -82,7 +81,7 @@ case "${{1:-}}:${{2:-}}" in
   container:inspect) printf '%s\n' '{CONTAINER_INSPECTION}' ;;
   start:*) : ;;
   top:*) printf '%s\n' '{PROCESS_TOP}' ;;
-  wait:*) head -c 4096 /dev/zero | tr '\000' '7'; printf '\n' ;;
+  wait:*) {wait_script} ;;
   rm:--force) : ;;
   *) exit 91 ;;
 esac
@@ -126,5 +125,21 @@ esac
             .lines()
             .any(|line| line == "rm --force --ignore fake-command-container-id"),
         "output-budget failure must still clean up only the acquired container ID"
+    );
+}
+
+#[test]
+fn oversized_wait_stdout_fails_closed_before_exit_code_acceptance() {
+    assert_oversized_wait_stream_fails_closed(
+        "qsr-command-wait-stdout-budget-",
+        "head -c 4096 /dev/zero | tr '\\000' '7'; printf '\\n'",
+    );
+}
+
+#[test]
+fn oversized_wait_stderr_fails_closed_before_exit_code_acceptance() {
+    assert_oversized_wait_stream_fails_closed(
+        "qsr-command-wait-stderr-budget-",
+        "head -c 4096 /dev/zero | tr '\\000' '7' >&2; printf '\\n' >&2",
     );
 }
