@@ -137,8 +137,7 @@ fn assert_exact_cleanup_without_wait(calls: &str) {
 
 #[test]
 fn explicit_no_new_privileges_true_and_strict_seccomp_are_accepted() {
-    let (_directory, program, calls_path) =
-        fake_podman(false, "-", "containers-default (enforce)");
+    let (_directory, program, calls_path) = fake_podman(false, "-", "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program);
 
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_300);
@@ -158,8 +157,7 @@ fn explicit_no_new_privileges_true_and_strict_seccomp_are_accepted() {
 
 #[test]
 fn seccomp_unconfined_option_overrides_strict_process_evidence() {
-    let (_directory, program, calls_path) =
-        fake_podman(true, "-", "containers-default (enforce)");
+    let (_directory, program, calls_path) = fake_podman(true, "-", "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program);
 
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_300);
