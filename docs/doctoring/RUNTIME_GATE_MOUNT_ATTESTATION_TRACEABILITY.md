@@ -20,22 +20,26 @@ Exact descendant `c59500f60e82de5516d2505563785d709022d3b5` independently reprod
 
 The first temporary source-fix workflow did not execute a job after exact `c6d699cf26c142491e49f099e32f2b0420abc4ec`. Actions run `34623208980` completed immediately with no generated jobs. Repository inspection showed that an embedded replacement shell script escaped the YAML `run: |` indentation, making the workflow definition invalid before runner assignment. This is a workflow-source defect rather than runner starvation and does not count as repair evidence.
 
-Exact descendant `97f3a30c6629f3883167f3f53c173b6195ec0af0` adds a corrected temporary v2 workflow with the same single-writer/exact-head guards. It keeps the production repair minimal, validates the focused causal witness plus the CLI/runtime-gate integration, then runs the full workspace tests, Clippy, rustdoc, repository validation, and `git diff --check`. On success it removes both temporary source-fix workflows in the same ordinary descendant before publishing. The invalid workflow is retained only until that validated descendant can remove it without bypassing the causal verification path.
+The repaired source-fix lane then exposed one separate test-fixture mismatch: the production gate binding uses the normal two-argument Podman form `--volume`, `<host>:/qsr-runtime-gate:ro`, while the CLI fake accepted only an invented one-token `--volume=...` spelling. That fake exited before `container create` evidence could be produced. The fixture was repaired to consume the exact two-token argv rather than changing production composition.
 
-## Repair contract
+Run `34624104262`, job `103344906635`, executed the corrected exact-head source-fix path successfully. It passed the mount-attestation regression, runtime-gate integration, CLI success path, full `cargo test --locked --workspace --all-targets --no-fail-fast`, Clippy with `-D warnings`, rustdoc with `-D warnings`, repository validation, and `git diff --check`. It then published ordinary descendant `2a82ff32eab6cffa0b9ad41f9074d92ba72a022b` and removed both temporary source-fix workflows and both repair scripts in that same validated lineage.
 
-The minimum repair must carry the verified staged gate path from `RuntimeGatePodmanAdapter` into both pre-start configuration verification and live process isolation verification. Effective mount admission must then require:
+The normal pull-request CI generated for the bot-authored repair commit did not execute any job: run `34624229479` terminated as `action_required`. It therefore is not exact-head GREEN evidence. This documentation descendant is intentionally user-authored so ordinary PR CI can materialize on a fresh exact head without no-op source churn; its result must be evaluated independently before merge or release.
 
-- mount cardinality equal to the optional source-artifact bind plus the runtime-owned gate bind;
-- `/qsr-runtime-gate` present exactly within that bounded set;
-- bind type `bind`;
+## Implemented repair contract
+
+`RuntimeGatePodmanAdapter` now passes the already verified staged gate artifact path into the canonical Podman command lifecycle. Both pre-start configuration verification and post-start/live isolation verification receive that path. Effective mount admission requires:
+
+- mount cardinality equal to the optional source-artifact bind plus the optional runtime-owned gate bind;
+- `/qsr-runtime-gate` present exactly within that bounded set when the gated path is used;
+- gate mount type `bind`;
 - exact host source path equal to the already verified staged `RuntimeGateArtifact` path;
-- read-only effective mount state;
+- gate effective state read-only;
 - existing `/workspace` source-artifact source/read-only/noexec/nosuid/nodev checks unchanged;
-- all unexpected additional mounts rejected.
+- all unexpected additional mounts rejected by cardinality before consumer release.
 
-Configured `--volume` arguments alone are not sufficient evidence because this boundary is explicitly attesting effective runtime state. The fake integration fixture must model the same gate mount exposed by real Podman rather than omitting it.
+Configured `--volume` arguments alone are not accepted as evidence. The verifier checks the effective `container inspect` mount record, while the integration and CLI fakes now model the same mandatory gate bind that production creates.
 
 ## Release impact
 
-This defect is release-blocking for the command runtime. A fake-runtime integration that omits a mandatory production bind can be GREEN while the real effective-state verifier rejects the production composition. The repair is not merge or release authority until the causal RED turns GREEN on an exact descendant and ordinary verify, coverage, effective-LSM, real-runtime acceptance, review/security, and immutable release gates are satisfied.
+The causal `command_mount_set` RED has a validated source-fix GREEN lineage, but this remains a Draft repair rather than release authority. The fresh ordinary PR head must independently pass repository/fmt/tests/Clippy/rustdoc, complete owned-production coverage, review/security, dedicated positive effective-LSM, real #35/#43 runtime acceptance, protected-head verification, and immutable release/SBOM/provenance/reproducibility/rollback gates. No descendant evidence is transferred to canonical #14 until ordinary integration.
