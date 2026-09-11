@@ -124,7 +124,10 @@ fn explicit_no_new_privileges_true_and_strict_seccomp_are_accepted() {
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_300);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
-    assert!(result.is_ok(), "supported security variants must be accepted: {result:?}");
+    assert!(
+        result.is_ok(),
+        "supported security variants must be accepted: {result:?}"
+    );
     assert!(
         calls
             .lines()
