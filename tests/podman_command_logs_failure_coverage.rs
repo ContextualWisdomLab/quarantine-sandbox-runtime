@@ -121,8 +121,7 @@ fn assert_exact_log_and_cleanup_calls(calls_path: &Path) {
 
 #[test]
 fn nonzero_logs_backend_status_fails_closed_and_cleans_up() {
-    let (_directory, program, calls) =
-        fake_podman("printf 'log backend failed\\n' >&2; exit 42");
+    let (_directory, program, calls) = fake_podman("printf 'log backend failed\\n' >&2; exit 42");
 
     let result = RootlessPodmanAdapter::new(program).run_legacy_command_at_for_test(
         &request(),
