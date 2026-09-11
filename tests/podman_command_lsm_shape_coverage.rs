@@ -134,3 +134,8 @@ fn assert_lsm_rejection(apparmor_profile: &str, process_label: &str) {
 fn empty_apparmor_inspect_profile_fails_closed() {
     assert_lsm_rejection("", "containers-default (enforce)");
 }
+
+#[test]
+fn empty_live_apparmor_profile_name_fails_closed() {
+    assert_lsm_rejection("containers-default", " (enforce)");
+}
