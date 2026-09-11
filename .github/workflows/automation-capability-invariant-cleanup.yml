@@ -1,0 +1,75 @@
+name: One-shot capability invariant cleanup
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capability-invariant-cleanup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'ci: stage one-shot capability invariant cleanup'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact staging head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Remove unreachable empty capability-token branch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/infrastructure/podman.rs')
+          text = path.read_text()
+          old = '''    if normalized.is_empty()
+              || normalized == "-"
+          '''
+          new = '''    if normalized == "-"
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one capability empty-token branch')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify causal invariant and repository quality
+        run: |
+          python3 scripts/validate_repository.py
+          cargo fmt --check
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+          ! grep -A8 'fn capability_set_is_empty' src/infrastructure/podman.rs | grep -q 'normalized.is_empty()'
+
+      - name: Publish ordinary descendant and remove one-shot workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          remote_sha="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | cut -f1)"
+          test "$remote_sha" = "$EXPECTED_SHA"
+          rm .github/workflows/automation-capability-invariant-cleanup.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/infrastructure/podman.rs .github/workflows/automation-capability-invariant-cleanup.yml
+          git commit -m 'refactor(runtime): remove unreachable empty capability branch'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
