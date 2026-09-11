@@ -143,10 +143,10 @@ fn nonzero_logs_backend_status_fails_closed_and_cleans_up() {
 
 #[test]
 fn timed_out_logs_backend_fails_closed_and_cleans_up() {
-    let (_directory, program, calls) = fake_podman("exec sleep 1");
+    let (_directory, program, calls) = fake_podman("exec sleep 2");
 
     let result = RootlessPodmanAdapter::new(program)
-        .with_command_timeout(Duration::from_millis(40))
+        .with_command_timeout(Duration::from_millis(250))
         .run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_700);
 
     assert_eq!(
