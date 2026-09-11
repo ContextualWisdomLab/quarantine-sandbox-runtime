@@ -52,3 +52,11 @@ SP 800-92 documents the analytic harm caused by inaccurate and inconsistent time
 ## Release evidence
 
 A future GREEN is not release evidence by source inspection alone. The #44 RED must first execute for the intended caller-time cause. The repaired exact head must then reacquire full repository CI/coverage/security/review and real rootless-Podman/positive-LSM evidence together with the existing #25–#43 gates.
+
+## Executed causal RED and selected repair (2026-09-11)
+
+Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16`, CI `34565196344`, crossed exact checkout, dependency lock, repository policy, CI evidence contracts and rustfmt before the workspace Test step failed. The repaired witness first proves the same fake Podman runtime can construct a normal result, then drives the far-future caller timestamp through live isolation, wait/log collection and exact-ID cleanup before asserting chronology. Hosted negative rootless/AppArmor evidence on the same SHA is GREEN. This supersedes the earlier queued-only status and establishes the intended caller-time causal RED.
+
+The selected minimum repair keeps the existing `*_at` parameter only as a compatibility/test seam but removes it from evidence authority. `run_command_with_binding_at` observes start and finish with `SystemTime::now()` inside the runtime boundary, uses the observed start for sandbox identity and result evidence, and fails closed when either observation predates the Unix epoch or the finish observation precedes the start observation. It does not clamp, synthesize, or reorder timestamps. Existing `Instant`/`BoundedCommandRunner` deadlines remain the monotonic authority for lease and administrative timeout enforcement.
+
+Focused deterministic unit tests cover equal/ordered observations, a wall-clock rollback, pre-epoch failure, and exact epoch conversion. The executed #111 future-input witness proves the caller value is no longer emitted unchanged. Full exact-head CI, complete owned-production coverage, review/security, real Podman #35/#43, positive effective-LSM, protected integration and immutable release evidence remain independent gates.

@@ -572,7 +572,7 @@ impl RootlessPodmanAdapter {
         &self,
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
-        started_at_epoch_seconds: u64,
+        _started_at_epoch_seconds: u64,
         runtime_gate_binding_args: Option<&[String]>,
         release_gate: F,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
@@ -580,6 +580,7 @@ impl RootlessPodmanAdapter {
         F: FnOnce(&str) -> Result<(), CommandExecutionError>,
     {
         request.validate(policy)?;
+        let observed_started_at_epoch_seconds = runtime_epoch_seconds("command_start_clock")?;
         let staged_source = request
             .source_artifact
             .as_ref()
@@ -596,7 +597,7 @@ impl RootlessPodmanAdapter {
             &request.request_id,
             &request.image_reference,
             &policy.policy_id,
-            started_at_epoch_seconds,
+            observed_started_at_epoch_seconds,
         )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
         let create_receipt_directory = tempfile::Builder::new()
@@ -837,9 +838,8 @@ impl RootlessPodmanAdapter {
             .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stdout" })?;
         let stderr = String::from_utf8(logs_outcome.stderr)
             .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stderr" })?;
-        let finished_at_epoch_seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
+        let finished_at_epoch_seconds = runtime_epoch_seconds("command_finish_clock")?;
+        validate_command_chronology(observed_started_at_epoch_seconds, finished_at_epoch_seconds)?;
 
         Ok(CommandExecutionResult::new(
             request,
@@ -853,7 +853,7 @@ impl RootlessPodmanAdapter {
                 stdout_truncated: logs_outcome.stdout_truncated,
                 stderr,
                 stderr_truncated: logs_outcome.stderr_truncated,
-                started_at_epoch_seconds,
+                started_at_epoch_seconds: observed_started_at_epoch_seconds,
                 finished_at_epoch_seconds,
                 source_artifact_receipt: staged_source
                     .as_ref()
@@ -1708,6 +1708,38 @@ fn sandbox_identity(
     digest[..16].to_owned()
 }
 
+fn runtime_epoch_seconds(operation: &'static str) -> Result<u64, CommandExecutionError> {
+    epoch_seconds_from_system_time(SystemTime::now(), operation)
+}
+
+fn epoch_seconds_from_system_time(
+    observed: SystemTime,
+    operation: &'static str,
+) -> Result<u64, CommandExecutionError> {
+    observed
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| {
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation,
+            })
+        })
+}
+
+fn validate_command_chronology(
+    started_at_epoch_seconds: u64,
+    finished_at_epoch_seconds: u64,
+) -> Result<(), CommandExecutionError> {
+    if finished_at_epoch_seconds < started_at_epoch_seconds {
+        return Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "command_chronology",
+            },
+        ));
+    }
+    Ok(())
+}
+
 fn command_sandbox_identity(
     request_id: &str,
     image_reference: &str,
@@ -1787,10 +1819,58 @@ fn wait_for_readiness(
 
 #[cfg(test)]
 mod tests {
-    use std::io::ErrorKind;
+    use std::{
+        io::ErrorKind,
+        time::{Duration, UNIX_EPOCH},
+    };
 
-    use super::{BoundedCommandError, classify_spawn_failure, map_bounded_command_error};
-    use crate::{ApplicationServiceError, BackendInvocationFailureKind};
+    use super::{
+        BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
+        map_bounded_command_error, validate_command_chronology,
+    };
+    use crate::{ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError};
+
+    #[test]
+    fn command_chronology_accepts_equal_and_ordered_runtime_observations() {
+        assert_eq!(validate_command_chronology(10, 10), Ok(()));
+        assert_eq!(validate_command_chronology(10, 11), Ok(()));
+    }
+
+    #[test]
+    fn command_chronology_rejects_runtime_clock_rollback() {
+        assert_eq!(
+            validate_command_chronology(11, 10),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_chronology",
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn epoch_seconds_fail_closed_before_unix_epoch() {
+        let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
+        assert_eq!(
+            epoch_seconds_from_system_time(before_epoch, "command_start_clock"),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_start_clock",
+                },
+            ))
+        );
+        assert_eq!(
+            epoch_seconds_from_system_time(UNIX_EPOCH, "command_start_clock"),
+            Ok(0)
+        );
+        assert_eq!(
+            epoch_seconds_from_system_time(
+                UNIX_EPOCH + Duration::from_secs(2),
+                "command_finish_clock",
+            ),
+            Ok(2)
+        );
+    }
 
     #[test]
     fn bounded_command_errors_keep_public_failure_classes() {
