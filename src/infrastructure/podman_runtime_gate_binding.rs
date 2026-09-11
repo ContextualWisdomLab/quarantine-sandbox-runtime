@@ -110,6 +110,7 @@ impl RuntimeGatePodmanAdapter {
             request,
             policy,
             started_at_epoch_seconds,
+            self.runtime_gate_artifact.path(),
             &binding_args,
             |container_id| self.release_command_gate(container_id, plan),
         )

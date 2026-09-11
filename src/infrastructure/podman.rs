@@ -539,6 +539,7 @@ impl RootlessPodmanAdapter {
             policy,
             started_at_epoch_seconds,
             None,
+            None,
             |_| Ok(()),
         )
     }
@@ -553,6 +554,7 @@ impl RootlessPodmanAdapter {
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
+        runtime_gate_artifact_path: &Path,
         runtime_gate_binding_args: &[String],
         release_gate: F,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
@@ -563,6 +565,7 @@ impl RootlessPodmanAdapter {
             request,
             policy,
             started_at_epoch_seconds,
+            Some(runtime_gate_artifact_path),
             Some(runtime_gate_binding_args),
             release_gate,
         )
@@ -573,6 +576,7 @@ impl RootlessPodmanAdapter {
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
         _started_at_epoch_seconds: u64,
+        runtime_gate_artifact_path: Option<&Path>,
         runtime_gate_binding_args: Option<&[String]>,
         release_gate: F,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
@@ -752,6 +756,7 @@ impl RootlessPodmanAdapter {
             policy,
             &container_id,
             staged_source.as_ref().map(|staged| staged.path()),
+            runtime_gate_artifact_path,
         ) {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
@@ -769,6 +774,7 @@ impl RootlessPodmanAdapter {
             &info,
             &container_id,
             staged_source.as_ref().map(|staged| staged.path()),
+            runtime_gate_artifact_path,
         ) {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
@@ -949,9 +955,16 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         container_id: &str,
         staged_source_path: Option<&Path>,
+        runtime_gate_artifact_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container = self.inspect_command_container(container_id)?;
-        verify_command_container_configuration(request, policy, &container, staged_source_path)
+        verify_command_container_configuration(
+            request,
+            policy,
+            &container,
+            staged_source_path,
+            runtime_gate_artifact_path,
+        )
     }
 
     fn inspect_command_container(
@@ -995,9 +1008,16 @@ impl RootlessPodmanAdapter {
         info: &PodmanInfo,
         container_id: &str,
         staged_source_path: Option<&Path>,
+        runtime_gate_artifact_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container = self.inspect_command_container(container_id)?;
-        verify_command_container_configuration(request, policy, &container, staged_source_path)?;
+        verify_command_container_configuration(
+            request,
+            policy,
+            &container,
+            staged_source_path,
+            runtime_gate_artifact_path,
+        )?;
         let security_options = container
             .host_config
             .security_opt
@@ -1304,6 +1324,7 @@ fn verify_command_container_configuration(
     policy: &IsolationPolicy,
     container: &ContainerInspection,
     staged_source_path: Option<&Path>,
+    runtime_gate_artifact_path: Option<&Path>,
 ) -> Result<(), ApplicationServiceError> {
     if let Some(applied_image_digest) = container.image_digest.as_deref() {
         let requested_image_digest = request
@@ -1370,8 +1391,26 @@ fn verify_command_container_configuration(
     )?;
     require_control(
         "command_mount_set",
-        container.mounts.len() == usize::from(request.source_artifact.is_some()),
+        container.mounts.len()
+            == usize::from(request.source_artifact.is_some())
+                + usize::from(runtime_gate_artifact_path.is_some()),
     )?;
+    if let Some(expected_gate_path) = runtime_gate_artifact_path {
+        let runtime_gate_mount = container
+            .mounts
+            .iter()
+            .find(|mount| mount.destination == "/qsr-runtime-gate");
+        require_control(
+            "runtime_gate_read_only",
+            runtime_gate_mount.is_some_and(|mount| !mount.read_write),
+        )?;
+        require_control(
+            "runtime_gate_bind_source",
+            runtime_gate_mount.is_some_and(|mount| {
+                mount.mount_type == "bind" && mount.source == expected_gate_path
+            }),
+        )?;
+    }
     if request.source_artifact.is_some() {
         let source_mount = container
             .mounts

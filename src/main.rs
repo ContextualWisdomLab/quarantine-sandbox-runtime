@@ -571,18 +571,46 @@ mod tests {
             program
         }
 
-        const SUCCESS_SCRIPT: &str = "#!/bin/sh\nset -eu\ncase \"${1:-}:${2:-}\" in\n  \
-             info:--format) printf '%s\\n' '{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/x\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}' ;;\n  \
-             create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  \
-             init:*) : ;;\n  \
-             start:*) : ;;\n  \
-             container:inspect) printf '%s\\n' '[{\"Id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\",\"Timeout\":900},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":1073741824,\"NanoCpus\":4000000000,\"PidsLimit\":256,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=268435456\"}}}]' ;;\n  \
-             top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  \
-             attach:--sig-proxy=false) IFS= read -r token; [ -n \"$token\" ]; printf 'QSR_GATE_RELEASED\\n'; while :; do :; done ;;\n  \
-             wait:*) printf '9\\n' ;;\n  \
-             logs:*) printf 'cli stdout\\n' ;;\n  \
-             rm:--force) : ;;\n  \
-             *) exit 91 ;;\nesac\n";
+        const SUCCESS_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+state="${0}.runtime-gate-source"
+case "${1:-}:${2:-}" in
+  info:--format)
+    printf '%s\n' '{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/x","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}'
+    ;;
+  create:--name)
+    gate_source=''
+    expect_volume_value=0
+    for argument in "$@"; do
+      if [ "$expect_volume_value" -eq 1 ]; then
+        case "$argument" in
+          *:/qsr-runtime-gate:ro)
+            gate_source="${argument%:/qsr-runtime-gate:ro}"
+            ;;
+        esac
+        expect_volume_value=0
+      elif [ "$argument" = "--volume" ]; then
+        expect_volume_value=1
+      fi
+    done
+    [ -n "$gate_source" ] || exit 92
+    printf '%s' "$gate_source" > "$state"
+    printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n'
+    ;;
+  init:*) : ;;
+  start:*) : ;;
+  container:inspect)
+    gate_source="$(cat "$state")"
+    printf '%s\n' '[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":900},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":1073741824,"NanoCpus":4000000000,"PidsLimit":256,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=268435456"}},"Mounts":[{"Source":"'"$gate_source"'","Destination":"/qsr-runtime-gate","Type":"bind","Options":["ro"],"RW":false}]}]'
+    ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n' ;;
+  attach:--sig-proxy=false) IFS= read -r token; [ -n "$token" ]; printf 'QSR_GATE_RELEASED\n'; while :; do :; done ;;
+  wait:*) printf '9\n' ;;
+  logs:*) printf 'cli stdout\n' ;;
+  rm:--force) rm -f "$state" ;;
+  *) exit 91 ;;
+esac
+"#;
 
         fn write_self_contained_gate(name: &str) -> (PathBuf, String) {
             const ELF_HEADER_BYTES: usize = 64;
