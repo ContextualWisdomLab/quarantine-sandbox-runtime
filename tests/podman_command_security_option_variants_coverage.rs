@@ -1,4 +1,4 @@
-//! Exercise supported Podman security-option spellings through the public command adapter.
+//! Exercise supported and malformed Podman security evidence through the public command adapter.
 
 #![cfg(target_os = "linux")]
 
@@ -57,7 +57,11 @@ fn config_path(program: &Path) -> PathBuf {
     PathBuf::from(format!("{}.config", program.display()))
 }
 
-fn fake_podman(seccomp_unconfined: bool) -> (TempDir, PathBuf, PathBuf) {
+fn fake_podman(
+    seccomp_unconfined: bool,
+    process_caps: &str,
+    process_label: &str,
+) -> (TempDir, PathBuf, PathBuf) {
     let directory = tempfile::Builder::new()
         .prefix("qsr-command-security-option-variants-")
         .tempdir()
@@ -76,7 +80,9 @@ fn fake_podman(seccomp_unconfined: bool) -> (TempDir, PathBuf, PathBuf) {
         "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":{security_options},\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[]}}]"
     );
     let info = "{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}";
-    let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 strict - - - - - containers-default (enforce)";
+    let top = format!(
+        "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 strict {process_caps} {process_caps} {process_caps} {process_caps} {process_caps} {process_label}"
+    );
 
     fs::write(
         &scenario,
@@ -91,7 +97,7 @@ case "${{1:-}}:${{2:-}}" in
   init:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97 ;;
   start:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97 ;;
   container:inspect) [ "${{5:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97; printf '%s\n' "$COMMAND_INSPECT" ;;
-  top:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97; printf '%s\n' "$COMMAND_TOP" ;;
+  top:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97; printf '%b\n' "$COMMAND_TOP" ;;
   wait:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97; printf '0\n' ;;
   logs:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97; printf 'consumer-output\n' ;;
   kill:*) [ "${{2:-}}" = "$OWNED_CONTAINER_ID" ] || exit 97 ;;
@@ -116,9 +122,23 @@ esac
     (directory, program, calls)
 }
 
+fn assert_exact_cleanup_without_wait(calls: &str) {
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
+        "failed live attestation must clean up only the acquired container ID: {calls}"
+    );
+    assert!(
+        !calls.lines().any(|line| line.starts_with("wait ")),
+        "failed live attestation must not proceed to workload completion evidence: {calls}"
+    );
+}
+
 #[test]
 fn explicit_no_new_privileges_true_and_strict_seccomp_are_accepted() {
-    let (_directory, program, calls_path) = fake_podman(false);
+    let (_directory, program, calls_path) =
+        fake_podman(false, "-", "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program);
 
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_300);
@@ -138,7 +158,8 @@ fn explicit_no_new_privileges_true_and_strict_seccomp_are_accepted() {
 
 #[test]
 fn seccomp_unconfined_option_overrides_strict_process_evidence() {
-    let (_directory, program, calls_path) = fake_podman(true);
+    let (_directory, program, calls_path) =
+        fake_podman(true, "-", "containers-default (enforce)");
     let adapter = RootlessPodmanAdapter::new(program);
 
     let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_300);
@@ -153,14 +174,46 @@ fn seccomp_unconfined_option_overrides_strict_process_evidence() {
         )),
         "explicit unconfined seccomp must fail closed even when live process evidence says strict"
     );
-    assert!(
-        calls
-            .lines()
-            .any(|line| line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
-        "failed live attestation must clean up only the acquired container ID: {calls}"
+    assert_exact_cleanup_without_wait(&calls);
+}
+
+#[test]
+fn bare_hexadecimal_capability_prefix_fails_closed() {
+    let (_directory, program, calls_path) =
+        fake_podman(false, "0x", "containers-default (enforce)");
+    let adapter = RootlessPodmanAdapter::new(program);
+
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_301);
+    let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "all_capabilities_dropped",
+            },
+        )),
+        "a bare hexadecimal prefix is not evidence of an empty capability set"
     );
-    assert!(
-        !calls.lines().any(|line| line.starts_with("wait ")),
-        "failed live attestation must not proceed to workload completion evidence: {calls}"
+    assert_exact_cleanup_without_wait(&calls);
+}
+
+#[test]
+fn nul_only_live_lsm_label_fails_closed() {
+    let (_directory, program, calls_path) = fake_podman(false, "-", "\\000");
+    let adapter = RootlessPodmanAdapter::new(program);
+
+    let result = adapter.run_legacy_command_at_for_test(&request(), &policy(), 1_780_000_302);
+    let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
+
+    assert_eq!(
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "lsm",
+            },
+        )),
+        "a live LSM field reduced to empty after NUL stripping must fail closed"
     );
+    assert_exact_cleanup_without_wait(&calls);
 }
