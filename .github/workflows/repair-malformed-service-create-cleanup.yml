@@ -44,27 +44,21 @@ jobs:
 
           source = Path("src/infrastructure/podman.rs")
           text = source.read_text()
-          old = '''        let container_id = match parse_backend_identifier(&create_output.stdout) {
-              Some(identifier) => identifier,
-              None => {
-                  self.cleanup_created_container(&plan)?;
-                  return Err(ApplicationServiceError::MalformedIsolationInspection {
-                      operation: "container_create",
-                  });
-              }
-          };'''
-          new = '''        let container_id = match parse_backend_identifier(&create_output.stdout) {
-              Some(identifier) => identifier,
-              None => {
-                  // A successful create with malformed stdout does not prove ownership of the
-                  // generated correlation name. Remove only the invocation-owned network here;
-                  // destructive container cleanup requires an admitted backend identity.
-                  self.cleanup_network(&plan)?;
-                  return Err(ApplicationServiceError::MalformedIsolationInspection {
-                      operation: "container_create",
-                  });
-              }
-          };'''
+          old = '''            None => {
+                self.cleanup_created_container(&plan)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "container_create",
+                });
+            }'''
+          new = '''            None => {
+                // Successful create plus malformed stdout does not prove ownership of the
+                // generated correlation name. Only the invocation-owned network is safe to
+                // remove until an exact backend container identity has been admitted.
+                self.cleanup_network(&plan)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "container_create",
+                });
+            }'''
           if text.count(old) != 1:
               raise SystemExit("expected exactly one malformed service-create cleanup block")
           source.write_text(text.replace(old, new, 1))
@@ -180,7 +174,6 @@ esac
 }
 ''')
           PY
-
           cargo fmt --all
 
       - name: Validate exact repaired tree
