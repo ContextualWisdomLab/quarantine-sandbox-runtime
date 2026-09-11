@@ -43,7 +43,7 @@ case "$MODE" in
       *) exit 91 ;;
     esac
     ;;
-  command_nonzero_logs|command_start_cleanup_fail|command_logs_cleanup_fail|command_logs_timeout_cleanup_fail|command_isolation_cleanup_fail|command_host_uts|command_host_cgroup)
+  command_nonzero_logs|command_logs_timeout|command_start_cleanup_fail|command_logs_cleanup_fail|command_logs_timeout_cleanup_fail|command_isolation_cleanup_fail|command_host_uts|command_host_cgroup)
     case "${1:-}:${2:-}" in
       info:--format) printf '%s\n' "$COMMAND_INFO" ;;
       create:--name) printf 'fake-command-container-id\n' ;;
@@ -62,7 +62,7 @@ case "$MODE" in
       top:*) printf '%s\n' "$COMMAND_TOP" ;;
       wait:*) printf '0\n' ;;
       logs:*)
-        if [ "$MODE" = command_logs_timeout_cleanup_fail ]; then sleep 3; exit 0; fi
+        if [ "$MODE" = command_logs_timeout ] || [ "$MODE" = command_logs_timeout_cleanup_fail ]; then sleep 3; exit 0; fi
         printf 'podman logs backend failure\n' >&2
         exit 42
         ;;
