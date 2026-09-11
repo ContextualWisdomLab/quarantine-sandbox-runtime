@@ -1538,26 +1538,26 @@ fn effective_lsm_verified(
             && inspect_label == runtime_label;
     }
 
-    if info.host.security.apparmor_enabled {
-        let inspect_profile = container.apparmor_profile.trim();
-        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
-        // context as `<profile> (<mode>)`. A bare profile name is not positive
-        // enforcement evidence, and complain mode audits without enforcing.
-        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
-            return false;
-        };
-        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
-            return false;
-        };
-        let runtime_profile = runtime_profile.trim();
-        return mode.eq_ignore_ascii_case("enforce")
-            && !runtime_profile.is_empty()
-            && !inspect_profile.is_empty()
-            && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_profile;
-    }
-
-    false
+    // `validate_backend_security` admits this same backend evidence before any
+    // container is created. After the SELinux branch above is false, that
+    // invariant means AppArmor is enabled; retaining an AppArmor-disabled
+    // fallback here would describe a state the public adapter cannot reach.
+    let inspect_profile = container.apparmor_profile.trim();
+    // `/proc/<pid>/attr/current` exposes the current task's AppArmor
+    // context as `<profile> (<mode>)`. A bare profile name is not positive
+    // enforcement evidence, and complain mode audits without enforcing.
+    let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
+        return false;
+    };
+    let Some(mode) = mode_with_suffix.strip_suffix(')') else {
+        return false;
+    };
+    let runtime_profile = runtime_profile.trim();
+    mode.eq_ignore_ascii_case("enforce")
+        && !runtime_profile.is_empty()
+        && !inspect_profile.is_empty()
+        && !inspect_profile.eq_ignore_ascii_case("unconfined")
+        && inspect_profile == runtime_profile
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
