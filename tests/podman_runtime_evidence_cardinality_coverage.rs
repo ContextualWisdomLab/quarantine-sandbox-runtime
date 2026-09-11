@@ -121,10 +121,8 @@ fn container_inspection_requires_exactly_one_runtime_record() {
 
 #[test]
 fn container_inspection_must_match_the_acquired_runtime_identity() {
-    let foreign_identity = CONTAINER_INSPECTION.replace(
-        "fake-command-container-id",
-        "foreign-command-container-id",
-    );
+    let foreign_identity =
+        CONTAINER_INSPECTION.replace("fake-command-container-id", "foreign-command-container-id");
     assert_eq!(
         execute_with_evidence("foreign-inspection-id", &foreign_identity, "unused"),
         Err(malformed("container_inspect")),
