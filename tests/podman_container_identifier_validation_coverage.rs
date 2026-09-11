@@ -100,11 +100,13 @@ esac
 }
 
 #[test]
-fn create_identifier_rejects_overlong_and_non_whitespace_control_payloads() {
+fn create_identifier_rejects_overlong_control_whitespace_and_non_utf8_payloads() {
     let overlong = "x".repeat(129);
     assert_identifier_is_rejected(
         "overlong-create-id",
         &format!("printf '%s\\n' '{overlong}'"),
     );
     assert_identifier_is_rejected("control-create-id", "printf '\\001bad\\n'");
+    assert_identifier_is_rejected("whitespace-create-id", "printf '%s\\n' 'bad id'");
+    assert_identifier_is_rejected("non-utf8-create-id", "printf '\\377bad\\n'");
 }
