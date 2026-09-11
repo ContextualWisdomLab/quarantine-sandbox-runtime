@@ -1,11 +1,10 @@
-//! RED: caller-supplied wall-clock input must not become authoritative execution evidence.
+//! Causal #44 regression: caller-supplied wall-clock input must not become authoritative evidence.
 //!
-//! `run_command_at` currently copies `started_at_epoch_seconds` into the public
-//! result while recording completion from the runtime host clock. An otherwise
-//! successful invocation can therefore emit an impossible chronology when the
-//! supplied start lies in the future. Runtime evidence must either fail closed
-//! or replace the supplied value with a runtime-observed start time; it must not
-//! publish the caller's contradictory timestamp as observed execution evidence.
+//! The executed RED copied `started_at_epoch_seconds` into the public result while recording
+//! completion from the runtime host clock, allowing an otherwise-successful invocation to emit an
+//! impossible chronology when the supplied start lay in the future. The repaired runtime may fail
+//! closed on contradictory clock evidence or replace the supplied value with a runtime-observed
+//! start, but it must never publish the caller's timestamp as observed execution evidence.
 
 #![cfg(target_os = "linux")]
 
@@ -85,7 +84,7 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
 
     // Prove that the fake runtime is a complete positive isolation/success fixture before using
     // the same path for the contradictory timestamp. This prevents an unrelated configured-state
-    // rejection from turning the chronology RED into a false GREEN.
+    // rejection from turning the chronology regression into a false pass.
     let baseline = adapter
         .run_legacy_command_at_for_test(&request(), &policy(), BASELINE_START)
         .expect("baseline fake Podman execution must reach successful result construction");
@@ -99,8 +98,8 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
     assert!(
         calls
             .lines()
-            .any(|line| line.starts_with("logs fake-command-container-id")),
-        "chronology RED must pass configured/live isolation, workload wait, and log collection before evidence construction: {calls}"
+            .any(|line| line == "logs fake-command-container-id"),
+        "chronology regression must pass configured/live isolation, workload wait, and exact-ID log collection before evidence construction: {calls}"
     );
     assert!(
         calls
@@ -109,9 +108,9 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
         "the chronology path must preserve exact-ID cleanup ownership: {calls}"
     );
 
-    // Both acceptable repairs remain possible: fail closed after observing contradictory evidence,
-    // or publish a runtime-observed start time. Current production returns Ok with the caller's
-    // future value unchanged, so this checked-in witness must be RED for the intended cause.
+    // The fixed runtime may either fail closed after observing contradictory clock evidence or
+    // return success with runtime-owned chronology. Either outcome must reject caller time as
+    // authoritative evidence while preserving nondecreasing successful receipts.
     if let Ok(result) = result {
         assert_ne!(
             result.started_at_epoch_seconds(),
