@@ -3,15 +3,16 @@
 //! The executed RED copied `started_at_epoch_seconds` into the public result while recording
 //! completion from the runtime host clock, allowing an otherwise-successful invocation to emit an
 //! impossible chronology when the supplied start lay in the future. The repaired runtime may fail
-//! closed on contradictory clock evidence or replace the supplied value with a runtime-observed
-//! start, but it must never publish the caller's timestamp as observed execution evidence.
+//! closed on runtime clock evidence or replace the supplied value with a runtime-observed start,
+//! but it must never publish the caller's timestamp as observed execution evidence.
 
 #![cfg(target_os = "linux")]
 
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    ResourceRequest, RootlessPodmanAdapter,
 };
 use tempfile::TempDir;
 
@@ -108,20 +109,30 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
         "the chronology path must preserve exact-ID cleanup ownership: {calls}"
     );
 
-    // The fixed runtime may either fail closed after observing contradictory clock evidence or
-    // return success with runtime-owned chronology. Either outcome must reject caller time as
-    // authoritative evidence while preserving nondecreasing successful receipts.
-    if let Ok(result) = result {
-        assert_ne!(
-            result.started_at_epoch_seconds(),
-            CALLER_SUPPLIED_FUTURE_START,
-            "consumer/test-seam wall-clock input must not be emitted unchanged as runtime-observed start evidence"
-        );
-        assert!(
-            result.finished_at_epoch_seconds() >= result.started_at_epoch_seconds(),
-            "successful execution evidence must have a nondecreasing chronology: started={}, finished={}",
-            result.started_at_epoch_seconds(),
-            result.finished_at_epoch_seconds()
-        );
+    match result {
+        Ok(result) => {
+            assert_ne!(
+                result.started_at_epoch_seconds(),
+                CALLER_SUPPLIED_FUTURE_START,
+                "consumer/test-seam wall-clock input must not be emitted unchanged as runtime-observed start evidence"
+            );
+            assert!(
+                result.finished_at_epoch_seconds() >= result.started_at_epoch_seconds(),
+                "successful execution evidence must have a nondecreasing chronology: started={}, finished={}",
+                result.started_at_epoch_seconds(),
+                result.finished_at_epoch_seconds()
+            );
+        }
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation:
+                    "command_start_clock" | "command_finish_clock" | "command_chronology",
+            },
+        )) => {
+            // Runtime-owned wall-clock acquisition or chronology validation may fail closed.
+        }
+        Err(other) => panic!(
+            "otherwise-positive fake Podman execution must not false-pass chronology authority through an unrelated error: {other:?}"
+        ),
     }
 }
