@@ -13,7 +13,10 @@ use std::{
     net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -23,6 +26,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(0);
+static SUBPROCESS_FIXTURE_MUTEX: Mutex<()> = Mutex::new(());
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -116,8 +120,18 @@ fn remove_fixture(program: PathBuf, log: PathBuf) {
     let _ = fs::remove_file(log);
 }
 
+fn serialize_subprocess_fixture() -> std::sync::MutexGuard<'static, ()> {
+    // Branch instrumentation materially increases process-heavy test runtime.
+    // Keep these fake-backend witnesses from competing for host process-spawn
+    // capacity; concurrency semantics are exercised by dedicated coordinator tests.
+    SUBPROCESS_FIXTURE_MUTEX
+        .lock()
+        .expect("subprocess fixture mutex should not be poisoned")
+}
+
 #[test]
 fn alternate_secure_spellings_are_admitted_only_with_empty_live_capabilities() {
+    let _fixture_guard = serialize_subprocess_fixture();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -147,6 +161,7 @@ fn alternate_secure_spellings_are_admitted_only_with_empty_live_capabilities() {
 
 #[test]
 fn each_capability_source_can_independently_fail_closed() {
+    let _fixture_guard = serialize_subprocess_fixture();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
@@ -185,6 +200,7 @@ fn each_capability_source_can_independently_fail_closed() {
 
 #[test]
 fn missing_no_new_privileges_or_explicit_unconfined_seccomp_fails_closed() {
+    let _fixture_guard = serialize_subprocess_fixture();
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
     let ready_port = listener
         .local_addr()
