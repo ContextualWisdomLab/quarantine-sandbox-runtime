@@ -13,8 +13,10 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_PARENT: bfb5acda569d6b79276eedd79d7141cdca0cc343
+      EXPECTED_PARENT: 146f93624f241ac5efc1687fdc9ac50dbb8e4ff6
       WORKFLOW_FILE: .github/workflows/repair-application-service-create-receipt-once.yml
+      REPAIR_SCRIPT: .github/scripts/repair_application_service_create_receipt.py
+      NEGATIVE_TEST: tests/podman_application_service_missing_create_receipt_red.rs
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -26,28 +28,37 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
-          test "$(git diff --name-only HEAD^ HEAD)" = "$WORKFLOW_FILE"
-      - name: Install pinned Rust toolchain
+          expected=$(printf '%s\n' "$WORKFLOW_FILE" "$REPAIR_SCRIPT" "$NEGATIVE_TEST" | sort)
+          actual=$(git diff --name-only HEAD^ HEAD | sort)
+          test "$actual" = "$expected"
+      - name: Install repository Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
           components: rustfmt,clippy
-      - name: Prove causal create-receipt RED
+      - name: Prove causal receipt and missing-receipt REDs
         shell: bash
         run: |
           set -euo pipefail
           set +e
-          cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture > /tmp/qsr-113-red.log 2>&1
-          status=$?
+          cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture > /tmp/qsr-113-receipt-red.log 2>&1
+          receipt_status=$?
+          cargo test --locked --test podman_application_service_missing_create_receipt_red -- --nocapture > /tmp/qsr-113-missing-red.log 2>&1
+          missing_status=$?
           set -e
-          cat /tmp/qsr-113-red.log
-          test "$status" -ne 0
-          grep -F "service create must provision a runtime-owned exact identity receipt" /tmp/qsr-113-red.log
+          cat /tmp/qsr-113-receipt-red.log
+          cat /tmp/qsr-113-missing-red.log
+          test "$receipt_status" -ne 0
+          test "$missing_status" -ne 0
+          grep -F "successful exact-ID cleanup must preserve the original malformed-create error" /tmp/qsr-113-receipt-red.log
+          grep -F "left: Err(CleanupFailed)" /tmp/qsr-113-receipt-red.log
+          grep -F "missing trustworthy create receipt must remain an explicit unreconciled-identity error" /tmp/qsr-113-missing-red.log
+          grep -F "left: Err(CleanupFailed)" /tmp/qsr-113-missing-red.log
       - name: Apply minimum exact-ID receipt repair
         shell: bash
         run: |
           set -euo pipefail
-          python3 -c 'import base64; exec(base64.b64decode("ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpjYXJnbyA9IFBhdGgoIkNhcmdvLnRvbWwiKQpjYXJnb190ZXh0ID0gY2FyZ28ucmVhZF90ZXh0KCkKb2xkID0gJ3NoYTIgPSAiMC4xMCJcbnRoaXNlcnJvciA9ICIyLjAiJwpuZXcgPSAnc2hhMiA9ICIwLjEwIlxudGVtcGZpbGUgPSAiPTMuMjcuMCJcbnRoaXNlcnJvciA9ICIyLjAiJwppZiBjYXJnb190ZXh0LmNvdW50KG9sZCkgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoInVuZXhwZWN0ZWQgQ2FyZ28gZGVwZW5kZW5jeSBhbmNob3IiKQpjYXJnby53cml0ZV90ZXh0KGNhcmdvX3RleHQucmVwbGFjZShvbGQsIG5ldywgMSkpCgpzb3VyY2UgPSBQYXRoKCJzcmMvaW5mcmFzdHJ1Y3R1cmUvcG9kbWFuLnJzIikKdGV4dCA9IHNvdXJjZS5yZWFkX3RleHQoKQppbXBvcnRfb2xkID0gIiAgICBwYXRoOjpQYXRoQnVmLFxuIgppbXBvcnRfbmV3ID0gIiAgICBwYXRoOjp7UGF0aCwgUGF0aEJ1Zn0sXG4iCmlmIHRleHQuY291bnQoaW1wb3J0X29sZCkgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoInVuZXhwZWN0ZWQgcGF0aCBpbXBvcnQgYW5jaG9yIikKdGV4dCA9IHRleHQucmVwbGFjZShpbXBvcnRfb2xkLCBpbXBvcnRfbmV3LCAxKQoKb2xkX2Jsb2NrID0gJycnICAgICAgICBzZWxmLmNoZWNrZWRfb3V0cHV0KCJuZXR3b3JrX2NyZWF0ZSIsIHBsYW4ubmV0d29ya19jcmVhdGVfYXJncygpKT87CiAgICAgICAgbGV0IGNyZWF0ZV9vdXRwdXQgPQogICAgICAgICAgICBtYXRjaCBzZWxmLmNoZWNrZWRfb3V0cHV0KCJjb250YWluZXJfY3JlYXRlIiwgcGxhbi5jb250YWluZXJfY3JlYXRlX2FyZ3MoKSkgewogICAgICAgICAgICAgICAgT2sob3V0cHV0KSA9PiBvdXRwdXQsCiAgICAgICAgICAgICAgICBFcnIoZXJyb3IpID0+IHsKICAgICAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfbmV0d29yaygmcGxhbik/OwogICAgICAgICAgICAgICAgICAgIHJldHVybiBFcnIoZXJyb3IpOwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9OwogICAgICAgIGxldCBjb250YWluZXJfaWQgPSBtYXRjaCBwYXJzZV9iYWNrZW5kX2lkZW50aWZpZXIoJmNyZWF0ZV9vdXRwdXQuc3Rkb3V0KSB7CiAgICAgICAgICAgIFNvbWUoaWRlbnRpZmllcikgPT4gaWRlbnRpZmllciwKICAgICAgICAgICAgTm9uZSA9PiB7CiAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfY3JlYXRlZF9jb250YWluZXIoJnBsYW4pPzsKICAgICAgICAgICAgICAgIHJldHVybiBFcnIoQXBwbGljYXRpb25TZXJ2aWNlRXJyb3I6Ok1hbGZvcm1lZElzb2xhdGlvbkluc3BlY3Rpb24gewogICAgICAgICAgICAgICAgICAgIG9wZXJhdGlvbjogImNvbnRhaW5lcl9jcmVhdGUiLAogICAgICAgICAgICAgICAgfSk7CiAgICAgICAgICAgIH0KICAgICAgICB9OwonJycKbmV3X2Jsb2NrID0gJycnICAgICAgICBzZWxmLmNoZWNrZWRfb3V0cHV0KCJuZXR3b3JrX2NyZWF0ZSIsIHBsYW4ubmV0d29ya19jcmVhdGVfYXJncygpKT87CiAgICAgICAgbGV0IGNyZWF0ZV9yZWNlaXB0X2RpcmVjdG9yeSA9IHRlbXBmaWxlOjpCdWlsZGVyOjpuZXcoKQogICAgICAgICAgICAucHJlZml4KCJxc3ItYXBwbGljYXRpb24tY3JlYXRlLSIpCiAgICAgICAgICAgIC50ZW1wZGlyKCkKICAgICAgICAgICAgLm1hcF9lcnIofF98IEFwcGxpY2F0aW9uU2VydmljZUVycm9yOjpCYWNrZW5kSW52b2NhdGlvbkZhaWxlZCB7CiAgICAgICAgICAgICAgICBvcGVyYXRpb246ICJjb250YWluZXJfY3JlYXRlX3JlY2VpcHQiLAogICAgICAgICAgICB9KT87CiAgICAgICAgbGV0IGNyZWF0ZV9yZWNlaXB0X3BhdGggPSBjcmVhdGVfcmVjZWlwdF9kaXJlY3RvcnkucGF0aCgpLmpvaW4oImNvbnRhaW5lci1pZCIpOwogICAgICAgIGxldCBjcmVhdGVfcmVjZWlwdF9wYXRoX3RleHQgPSBjcmVhdGVfcmVjZWlwdF9wYXRoLnRvX3N0cigpLm9rX29yKAogICAgICAgICAgICBBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6QmFja2VuZEludm9jYXRpb25GYWlsZWQgewogICAgICAgICAgICAgICAgb3BlcmF0aW9uOiAiY29udGFpbmVyX2NyZWF0ZV9yZWNlaXB0IiwKICAgICAgICAgICAgfSwKICAgICAgICApPzsKICAgICAgICBsZXQgbXV0IGNyZWF0ZV9hcmdzID0gcGxhbi5jb250YWluZXJfY3JlYXRlX2FyZ3MoKS50b192ZWMoKTsKICAgICAgICBjcmVhdGVfYXJncy5pbnNlcnQoMywgZm9ybWF0ISgiLS1jaWRmaWxlPXtjcmVhdGVfcmVjZWlwdF9wYXRoX3RleHR9IikpOwoKICAgICAgICBsZXQgY3JlYXRlX291dHB1dCA9IG1hdGNoIHNlbGYuY2hlY2tlZF9vdXRwdXQoImNvbnRhaW5lcl9jcmVhdGUiLCAmY3JlYXRlX2FyZ3MpIHsKICAgICAgICAgICAgT2sob3V0cHV0KSA9PiBvdXRwdXQsCiAgICAgICAgICAgIEVycihlcnJvcikgPT4gewogICAgICAgICAgICAgICAgbGV0IHJlY2VpcHQgPSBtYXRjaCByZWFkX2FwcGxpY2F0aW9uX3NlcnZpY2VfY3JlYXRlX3JlY2VpcHQoJmNyZWF0ZV9yZWNlaXB0X3BhdGgpIHsKICAgICAgICAgICAgICAgICAgICBPayhyZWNlaXB0KSA9PiByZWNlaXB0LAogICAgICAgICAgICAgICAgICAgIEVycihyZWNlaXB0X2Vycm9yKSA9PiB7CiAgICAgICAgICAgICAgICAgICAgICAgIHNlbGYuY2xlYW51cF9uZXR3b3JrKCZwbGFuKT87CiAgICAgICAgICAgICAgICAgICAgICAgIHJldHVybiBFcnIocmVjZWlwdF9lcnJvcik7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgfTsKICAgICAgICAgICAgICAgIGlmIGxldCBTb21lKGNvbnRhaW5lcl9pZCkgPSByZWNlaXB0IHsKICAgICAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfYWNxdWlyZWRfY29udGFpbmVyKCZwbGFuLCAmY29udGFpbmVyX2lkKT87CiAgICAgICAgICAgICAgICB9IGVsc2UgewogICAgICAgICAgICAgICAgICAgIHNlbGYuY2xlYW51cF9uZXR3b3JrKCZwbGFuKT87CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICByZXR1cm4gRXJyKGVycm9yKTsKICAgICAgICAgICAgfQogICAgICAgIH07CiAgICAgICAgbGV0IHN0ZG91dF9jb250YWluZXJfaWQgPSBtYXRjaCBwYXJzZV9iYWNrZW5kX2lkZW50aWZpZXIoJmNyZWF0ZV9vdXRwdXQuc3Rkb3V0KSB7CiAgICAgICAgICAgIFNvbWUoaWRlbnRpZmllcikgPT4gaWRlbnRpZmllciwKICAgICAgICAgICAgTm9uZSA9PiB7CiAgICAgICAgICAgICAgICBsZXQgb3JpZ2luYWwgPSBBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6TWFsZm9ybWVkSXNvbGF0aW9uSW5zcGVjdGlvbiB7CiAgICAgICAgICAgICAgICAgICAgb3BlcmF0aW9uOiAiY29udGFpbmVyX2NyZWF0ZSIsCiAgICAgICAgICAgICAgICB9OwogICAgICAgICAgICAgICAgbGV0IHJlY2VpcHQgPSBtYXRjaCByZWFkX2FwcGxpY2F0aW9uX3NlcnZpY2VfY3JlYXRlX3JlY2VpcHQoJmNyZWF0ZV9yZWNlaXB0X3BhdGgpIHsKICAgICAgICAgICAgICAgICAgICBPayhyZWNlaXB0KSA9PiByZWNlaXB0LAogICAgICAgICAgICAgICAgICAgIEVycihyZWNlaXB0X2Vycm9yKSA9PiB7CiAgICAgICAgICAgICAgICAgICAgICAgIHNlbGYuY2xlYW51cF9uZXR3b3JrKCZwbGFuKT87CiAgICAgICAgICAgICAgICAgICAgICAgIHJldHVybiBFcnIocmVjZWlwdF9lcnJvcik7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgfTsKICAgICAgICAgICAgICAgIGlmIGxldCBTb21lKGNvbnRhaW5lcl9pZCkgPSByZWNlaXB0IHsKICAgICAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfYWNxdWlyZWRfY29udGFpbmVyKCZwbGFuLCAmY29udGFpbmVyX2lkKT87CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIEVycihvcmlnaW5hbCk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfbmV0d29yaygmcGxhbik/OwogICAgICAgICAgICAgICAgcmV0dXJuIEVycihBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6TWFsZm9ybWVkSXNvbGF0aW9uSW5zcGVjdGlvbiB7CiAgICAgICAgICAgICAgICAgICAgb3BlcmF0aW9uOiAiY29udGFpbmVyX2NyZWF0ZV9yZWNlaXB0IiwKICAgICAgICAgICAgICAgIH0pOwogICAgICAgICAgICB9CiAgICAgICAgfTsKICAgICAgICBsZXQgY29udGFpbmVyX2lkID0gbWF0Y2ggcmVhZF9hcHBsaWNhdGlvbl9zZXJ2aWNlX2NyZWF0ZV9yZWNlaXB0KCZjcmVhdGVfcmVjZWlwdF9wYXRoKT8gewogICAgICAgICAgICBTb21lKHJlY2VpcHRfY29udGFpbmVyX2lkKSBpZiByZWNlaXB0X2NvbnRhaW5lcl9pZCA9PSBzdGRvdXRfY29udGFpbmVyX2lkID0+IHsKICAgICAgICAgICAgICAgIHJlY2VpcHRfY29udGFpbmVyX2lkCiAgICAgICAgICAgIH0KICAgICAgICAgICAgU29tZShyZWNlaXB0X2NvbnRhaW5lcl9pZCkgPT4gewogICAgICAgICAgICAgICAgc2VsZi5jbGVhbnVwX2FjcXVpcmVkX2NvbnRhaW5lcigmcGxhbiwgJnJlY2VpcHRfY29udGFpbmVyX2lkKT87CiAgICAgICAgICAgICAgICByZXR1cm4gRXJyKEFwcGxpY2F0aW9uU2VydmljZUVycm9yOjpNYWxmb3JtZWRJc29sYXRpb25JbnNwZWN0aW9uIHsKICAgICAgICAgICAgICAgICAgICBvcGVyYXRpb246ICJjb250YWluZXJfY3JlYXRlX3JlY2VpcHQiLAogICAgICAgICAgICAgICAgfSk7CiAgICAgICAgICAgIH0KICAgICAgICAgICAgTm9uZSA9PiBzdGRvdXRfY29udGFpbmVyX2lkLAogICAgICAgIH07CicnJwppZiB0ZXh0LmNvdW50KG9sZF9ibG9jaykgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoInVuZXhwZWN0ZWQgYXBwbGljYXRpb24tc2VydmljZSBjcmVhdGUgYmxvY2siKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKG9sZF9ibG9jaywgbmV3X2Jsb2NrLCAxKQoKbWFya2VyID0gJycnZm4gcnVudGltZV9pZGVudGl0eSgpIC0+IFJlc3VsdDxTdHJpbmcsIEFwcGxpY2F0aW9uU2VydmljZUVycm9yPiB7CicnJwpoZWxwZXIgPSAnJydmbiByZWFkX2FwcGxpY2F0aW9uX3NlcnZpY2VfY3JlYXRlX3JlY2VpcHQoCiAgICBwYXRoOiAmUGF0aCwKKSAtPiBSZXN1bHQ8T3B0aW9uPFN0cmluZz4sIEFwcGxpY2F0aW9uU2VydmljZUVycm9yPiB7CiAgICBsZXQgYnl0ZXMgPSBtYXRjaCBzdGQ6OmZzOjpyZWFkKHBhdGgpIHsKICAgICAgICBPayhieXRlcykgPT4gYnl0ZXMsCiAgICAgICAgRXJyKGVycm9yKSBpZiBlcnJvci5raW5kKCkgPT0gc3RkOjppbzo6RXJyb3JLaW5kOjpOb3RGb3VuZCA9PiByZXR1cm4gT2soTm9uZSksCiAgICAgICAgRXJyKF8pID0+IHsKICAgICAgICAgICAgcmV0dXJuIEVycihBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6QmFja2VuZEludm9jYXRpb25GYWlsZWQgewogICAgICAgICAgICAgICAgb3BlcmF0aW9uOiAiY29udGFpbmVyX2NyZWF0ZV9yZWNlaXB0IiwKICAgICAgICAgICAgfSk7CiAgICAgICAgfQogICAgfTsKICAgIGxldCB0ZXh0ID0gc3RkOjpzdHI6OmZyb21fdXRmOCgmYnl0ZXMpLm9rKCk7CiAgICBsZXQgaWRlbnRpZmllciA9IHRleHQuYW5kX3RoZW4ofHRleHR8IHRleHQuc3RyaXBfc3VmZml4KCdcXG4nKS5vcihTb21lKHRleHQpKSk7CiAgICBPayhpZGVudGlmaWVyCiAgICAgICAgLmZpbHRlcih8aWRlbnRpZmllcnwgewogICAgICAgICAgICBpZGVudGlmaWVyLmxlbigpID09IDY0CiAgICAgICAgICAgICAgICAmJiBpZGVudGlmaWVyCiAgICAgICAgICAgICAgICAgICAgLmJ5dGVzKCkKICAgICAgICAgICAgICAgICAgICAuYWxsKHxieXRlfCBieXRlLmlzX2FzY2lpX2RpZ2l0KCkgfHwgKGInYScuLj1iJ2YnKS5jb250YWlucygmYnl0ZSkpCiAgICAgICAgfSkKICAgICAgICAubWFwKHN0cjo6dG9fb3duZWQpKQp9CgonJycKaWYgdGV4dC5jb3VudChtYXJrZXIpICE9IDE6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJ1bmV4cGVjdGVkIHJlY2VpcHQgaGVscGVyIGFuY2hvciIpCnRleHQgPSB0ZXh0LnJlcGxhY2UobWFya2VyLCBoZWxwZXIgKyBtYXJrZXIsIDEpCnNvdXJjZS53cml0ZV90ZXh0KHRleHQpCg=="))'
+          python3 "$REPAIR_SCRIPT"
           cargo check --workspace --all-targets
           cargo fmt --all
           cargo fmt --all -- --check
@@ -57,6 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture
+          cargo test --locked --test podman_application_service_missing_create_receipt_red -- --nocapture
       - name: Validate exact repair broadly
         shell: bash
         run: |
@@ -66,18 +78,18 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
           git diff --check
-      - name: Publish ordinary repaired descendant and remove temporary workflow
+      - name: Publish ordinary repaired descendant and remove temporary source-fix tooling
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm "$WORKFLOW_FILE"
+          rm "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
           python3 scripts/validate_repository.py
           cargo fmt --all -- --check
           git diff --check
-          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs "$WORKFLOW_FILE"
-          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs "$WORKFLOW_FILE" | sort)
+          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
+          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs "$REPAIR_SCRIPT" "$WORKFLOW_FILE" | sort)
           actual=$(git diff --cached --name-only | sort)
           test "$actual" = "$expected"
           git config user.name "github-actions[bot]"
