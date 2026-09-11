@@ -14,7 +14,20 @@ One-shot repair run `34626358364` replaced only that redundant `pop().ok_or(...)
 
 The first bot-authored repair descendant produced an `action_required` pull-request workflow with zero jobs, so that run is not treated as exact-head GREEN. Connector-authored exact `2d5bab57e7d8bd2d9c0ee733171a8ac19a355d51` then reacquired native CI: verify `103353148163` and hosted negative rootless/AppArmor `103353148280` are GREEN, while coverage artifacts fail only the explicit repository-wide 100% admissions. Its exact evidence is 4787/4905 lines (97.59%), 442/453 functions (97.57%), 6388/6602 regions (96.76%), and 694/720 branches (96.39%); coverage digest `sha256:f7bb47288868a7413e71a147606b2d11f6d0eb7a8d21f2522fa9d0d0c8ad64de`, branch digest `sha256:620ddfc6a748b309c2e62979c5d456f38de886ba8eba0b46ef10f2b39cf2be83`.
 
-The same authority has been prepended to `docs/product-technical-gap-baseline.md` without deleting prior causal history. That baseline update was performed by a purpose-limited workflow that removed itself after verifying the inserted exact SHA, evidence digests, and a clean diff. Because that workflow's publication commit is bot-authored, this traceability update intentionally creates a normal descendant that must reacquire native exact-head CI rather than transferring predecessor GREEN.
+The same authority has been prepended to `docs/product-technical-gap-baseline.md` without deleting prior causal history. That baseline update was performed by a purpose-limited workflow that removed itself after verifying the inserted exact SHA, evidence digests, and a clean diff. Because that workflow's publication commit is bot-authored, a normal connector-authored descendant must reacquire native exact-head CI rather than transferring predecessor GREEN.
+
+## Standards and research check
+
+The current external authority remains OCI Runtime Specification v1.3.0, released on 2025-11-04. OCI defines the runtime configuration interface but does not turn an engine-reported configuration into proof that Linux isolation is effective at runtime. The #112 design therefore continues to keep configured inspection evidence distinct from live PID-1 seccomp/capability/LSM and kernel resource evidence.
+
+That distinction is also consistent with current peer-reviewed work. Wruck, Peisl, and Weiß evaluate container isolation at the kernel user-space API level specifically because engine-level configuration semantics alone are insufficient to establish the effective isolation characteristics. Jarkas et al. survey real container exploits and defenses and likewise treat the shared-kernel attack surface as requiring layered enforcement rather than declarative configuration alone. Neither source changes the exactly-one JSON cardinality contract; they reinforce the repository's broader configured-state-versus-effective-state evidence boundary.
+
+APA 7 references:
+
+- Jarkas, O., Ko, R., Dong, N., & Mahmud, R. (2025). A container security survey: Exploits, attacks, and defenses. *ACM Computing Surveys, 57*(7), Article 170, 1–36. https://doi.org/10.1145/3715001
+- Open Container Initiative. (2025, November 4). *OCI runtime-spec v1.3.0 release notice*. https://opencontainers.org/release-notices/v1-3-0-runtime-spec/
+- Open Container Initiative. (2025). *Open Container Initiative runtime specification: Configuration (v1.3.0).* https://specs.opencontainers.org/runtime-spec/config/
+- Wruck, F., Peisl, M. E., & Weiß, M. (2025). Engine-agnostic evaluation of container isolation characteristics. In *2025 IEEE 24th International Conference on Trust, Security and Privacy in Computing and Communications (TrustCom)* (pp. 2894–2903). IEEE. https://doi.org/10.1109/Trustcom66490.2025.00343
 
 ## Security semantics retained
 
