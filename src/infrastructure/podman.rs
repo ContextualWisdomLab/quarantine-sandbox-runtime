@@ -416,7 +416,10 @@ impl RootlessPodmanAdapter {
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
-                self.cleanup_created_container(&plan)?;
+                // Successful create plus malformed stdout does not prove ownership of the
+                // generated correlation name. Only the invocation-owned network is safe to
+                // remove until an exact backend container identity has been admitted.
+                self.cleanup_network(&plan)?;
                 return Err(ApplicationServiceError::MalformedIsolationInspection {
                     operation: "container_create",
                 });
