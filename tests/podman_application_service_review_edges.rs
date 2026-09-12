@@ -13,8 +13,7 @@ use quarantine_sandbox_runtime::{
     RootlessPodmanAdapter, ServiceProtocol,
 };
 
-const CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const BACKEND_INFO: &str = "{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}}}";
 const CONTAINER_INSPECTION: &str = "[{\"Id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\"},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":32}}]";
 const SECURE_NETWORK_INSPECTION: &str = "[{\"internal\":true,\"dns_enabled\":false}]";
@@ -112,7 +111,8 @@ esac
     )
     .expect("fake Podman config should be writable");
 
-    let result = RootlessPodmanAdapter::new(program).launch_at(&request(), &policy(), 1_780_001_000);
+    let result =
+        RootlessPodmanAdapter::new(program).launch_at(&request(), &policy(), 1_780_001_000);
     let calls = fs::read_to_string(calls).expect("fake Podman calls should be recorded");
     (result, calls)
 }
@@ -159,7 +159,9 @@ fn duplicate_network_inspection_fails_closed_and_cleans_exact_container() {
     );
     assert!(calls.contains(&format!("rm --force {CONTAINER_ID}")));
     assert!(
-        !calls.lines().any(|line| line.starts_with("rm --force qsr-app-")),
+        !calls
+            .lines()
+            .any(|line| line.starts_with("rm --force qsr-app-")),
         "generated application-service names must not become destructive authority: {calls}"
     );
     assert!(
