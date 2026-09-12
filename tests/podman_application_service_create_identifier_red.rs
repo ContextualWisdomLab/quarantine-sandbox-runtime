@@ -2,8 +2,8 @@
 //!
 //! Podman names and short IDs are valid human-facing selectors, but they are mutable or
 //! ambiguous compared with the full container ID returned by a successful create. The
-//! application-service adapter must reject name-like, short, non-hex, and padded create
-//! output before any post-create lifecycle operation can treat it as destructive authority.
+//! application-service adapter must reject name-like, short, non-hex, uppercase-hex, and padded
+//! create output before any post-create lifecycle operation can treat it as destructive authority.
 
 #![cfg(target_os = "linux")]
 
@@ -138,6 +138,11 @@ fn service_create_rejects_short_container_id_before_lifecycle_use() {
 #[test]
 fn service_create_rejects_non_hex_long_identifier_before_lifecycle_use() {
     assert_create_identifier_rejected("non_hex_long", &"g".repeat(64));
+}
+
+#[test]
+fn service_create_rejects_uppercase_hex_long_identifier_before_lifecycle_use() {
+    assert_create_identifier_rejected("uppercase_hex_long", &"A".repeat(64));
 }
 
 #[test]
