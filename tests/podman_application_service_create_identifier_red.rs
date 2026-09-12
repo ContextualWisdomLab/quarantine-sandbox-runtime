@@ -99,10 +99,10 @@ fn assert_create_identifier_rejected(case_name: &str, create_identifier: &str) {
         matches!(
             result,
             Err(ApplicationServiceError::MalformedIsolationInspection {
-                operation: "container_create"
+                operation: "container_create_receipt"
             })
         ),
-        "invalid create output must fail at the create-identifier boundary, got {result:?}"
+        "invalid create output without an admitted receipt must fail at the receipt boundary, got {result:?}"
     );
 
     assert_eq!(

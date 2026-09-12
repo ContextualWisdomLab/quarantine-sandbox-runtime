@@ -82,10 +82,10 @@ fn make_executable(program: &PathBuf, script: String) {
 fn fake_podman(process_top_command: &str, port_output: &str) -> PathBuf {
     let program = temporary_path("root-coverage-edge-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let container = r#"[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) {} ;;\n  port:*) printf '%s\\n' '{}' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  start:*) : ;;\n  top:*) {} ;;\n  port:*) printf '%s\\n' '{}' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         info, network, container, process_top_command, port_output,
     );
     make_executable(&program, script);
@@ -95,11 +95,11 @@ fn fake_podman(process_top_command: &str, port_output: &str) -> PathBuf {
 fn fake_podman_failure(failure_operation: &str) -> PathBuf {
     let program = temporary_path("root-coverage-failure-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let container = r#"[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let good_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n";
     let script = format!(
-        "#!/bin/sh\nset -eu\nfailure='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then\n    if [ \"$failure\" = backend_security_info ]; then exit 17; fi\n    printf '%s\\n' '{}'\n  else\n    printf 'true\\n'\n  fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) if [ \"$failure\" = network_inspect ]; then exit 17; else printf '%s\\n' '{}'; fi ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name)\n    if [ \"$failure\" = non_utf8_identifier ]; then printf '\\377\\n';\n    elif [ \"$failure\" = malformed_identifier_cleanup_failure ]; then printf 'bad id\\n';\n    else printf 'fake-container-id\\n'; fi ;;\n  start:*) : ;;\n  top:*) if [ \"$failure\" = process_security_top ]; then exit 17; else printf '{}'; fi ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) if [ \"$failure\" = malformed_identifier_cleanup_failure ]; then exit 17; else :; fi ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nfailure='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then\n    if [ \"$failure\" = backend_security_info ]; then exit 17; fi\n    printf '%s\\n' '{}'\n  else\n    printf 'true\\n'\n  fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) if [ \"$failure\" = network_inspect ]; then exit 17; else printf '%s\\n' '{}'; fi ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name)\n    if [ \"$failure\" = non_utf8_identifier ]; then printf '\\377\\n';\n    elif [ \"$failure\" = malformed_identifier_without_receipt ]; then printf 'bad id\\n';\n    else printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n'; fi ;;\n  start:*) : ;;\n  top:*) if [ \"$failure\" = process_security_top ]; then exit 17; else printf '{}'; fi ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) if [ \"$failure\" = malformed_identifier_without_receipt ]; then exit 17; else :; fi ;;\n  *) exit 91 ;;\nesac\n",
         failure_operation, info, network, container, good_top,
     );
     make_executable(&program, script);
@@ -196,12 +196,14 @@ fn backend_failures_and_identifier_bytes_remain_typed() {
         (
             "non_utf8_identifier",
             ApplicationServiceError::MalformedIsolationInspection {
-                operation: "container_create",
+                operation: "container_create_receipt",
             },
         ),
         (
-            "malformed_identifier_cleanup_failure",
-            ApplicationServiceError::CleanupFailed,
+            "malformed_identifier_without_receipt",
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_create_receipt",
+            },
         ),
     ] {
         assert_eq!(

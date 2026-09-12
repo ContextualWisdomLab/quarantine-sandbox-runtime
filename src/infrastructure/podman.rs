@@ -2,7 +2,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Output,
     thread,
     time::{Duration, Instant},
@@ -333,22 +333,77 @@ impl RootlessPodmanAdapter {
         let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
         validate_backend_security(&info)?;
 
+        let create_receipt_directory = tempfile::Builder::new()
+            .prefix("qsr-application-create-")
+            .tempdir()
+            .map_err(|_| ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            })?;
+        let create_receipt_path = create_receipt_directory.path().join("container-id");
+        let create_receipt_path_text = create_receipt_path.to_str().ok_or(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            },
+        )?;
+        let mut create_args = plan.container_create_args().to_vec();
+        create_args.insert(3, format!("--cidfile={create_receipt_path_text}"));
+
         self.checked_output("network_create", plan.network_create_args())?;
-        let create_output =
-            match self.checked_output("container_create", plan.container_create_args()) {
-                Ok(output) => output,
-                Err(error) => {
+        let create_output = match self.checked_output("container_create", &create_args) {
+            Ok(output) => output,
+            Err(error) => {
+                let receipt = match read_application_service_create_receipt(&create_receipt_path) {
+                    Ok(receipt) => receipt,
+                    Err(receipt_error) => {
+                        self.cleanup_network(&plan)?;
+                        return Err(receipt_error);
+                    }
+                };
+                if let Some(container_id) = receipt {
+                    self.cleanup_acquired_container(&plan, &container_id)?;
+                } else {
                     self.cleanup_network(&plan)?;
-                    return Err(error);
                 }
-            };
-        let container_id = match parse_backend_identifier(&create_output.stdout) {
+                return Err(error);
+            }
+        };
+        let stdout_container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
-                self.cleanup_created_container(&plan)?;
-                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                let original = ApplicationServiceError::MalformedIsolationInspection {
                     operation: "container_create",
+                };
+                let receipt = match read_application_service_create_receipt(&create_receipt_path) {
+                    Ok(receipt) => receipt,
+                    Err(receipt_error) => {
+                        self.cleanup_network(&plan)?;
+                        return Err(receipt_error);
+                    }
+                };
+                if let Some(container_id) = receipt {
+                    self.cleanup_acquired_container(&plan, &container_id)?;
+                    return Err(original);
+                }
+                self.cleanup_network(&plan)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "container_create_receipt",
                 });
+            }
+        };
+        let container_id = match read_application_service_create_receipt(&create_receipt_path) {
+            Ok(Some(receipt_container_id)) if receipt_container_id == stdout_container_id => {
+                receipt_container_id
+            }
+            Ok(Some(receipt_container_id)) => {
+                self.cleanup_acquired_container(&plan, &receipt_container_id)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "container_create_receipt",
+                });
+            }
+            Ok(None) => stdout_container_id,
+            Err(receipt_error) => {
+                self.cleanup_acquired_container(&plan, &stdout_container_id)?;
+                return Err(receipt_error);
             }
         };
 
@@ -607,24 +662,6 @@ impl RootlessPodmanAdapter {
         }
     }
 
-    fn cleanup_created_container(
-        &self,
-        plan: &PodmanLaunchPlan,
-    ) -> Result<(), ApplicationServiceError> {
-        let remove_args = [
-            "rm".to_owned(),
-            "--force".to_owned(),
-            plan.sandbox_name().to_owned(),
-        ];
-        let container_removed = self.command_succeeded(&remove_args);
-        let network_removed = self.cleanup_network(plan).is_ok();
-        if container_removed && network_removed {
-            Ok(())
-        } else {
-            Err(ApplicationServiceError::CleanupFailed)
-        }
-    }
-
     fn cleanup_acquired_container(
         &self,
         plan: &PodmanLaunchPlan,
@@ -844,6 +881,33 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     let identifier = text.strip_suffix('\n').unwrap_or(text);
     (identifier.len() == 64 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .then(|| identifier.to_owned())
+}
+
+fn read_application_service_create_receipt(
+    path: &Path,
+) -> Result<Option<String>, ApplicationServiceError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            });
+        }
+    };
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(None),
+    };
+    let identifier = text.strip_suffix('\n').unwrap_or(text);
+    if identifier.len() != 64
+        || !identifier
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(None);
+    }
+    Ok(Some(identifier.to_owned()))
 }
 
 fn runtime_identity() -> Result<String, ApplicationServiceError> {

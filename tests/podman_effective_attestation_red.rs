@@ -76,7 +76,7 @@ fn configured_flags_without_effective_runtime_evidence_fail_closed() {
     let log = fixture_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) exit 91 ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  *) exit 92 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  start:*) : ;;\n  container:inspect) exit 91 ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  *) exit 92 ;;\nesac\n",
         log.display(),
         info,
     );
