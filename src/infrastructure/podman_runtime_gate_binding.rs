@@ -440,6 +440,12 @@ mod tests {
     const ELF_HEADER_BYTES: usize = 64;
     const PROGRAM_HEADER_BYTES: usize = 56;
     const FILE_BYTES: usize = 512;
+    #[cfg(target_arch = "aarch64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 183;
+    #[cfg(target_arch = "x86_64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 62;
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    compile_error!("runtime-gate test fixture supports only aarch64 and x86_64 hosts");
 
     struct ScriptedReleaseClient {
         try_wait_results: VecDeque<io::Result<Option<ExitStatus>>>,
@@ -569,11 +575,7 @@ mod tests {
     }
 
     fn self_contained_gate_bytes() -> Vec<u8> {
-        let machine = match std::env::consts::ARCH {
-            "x86_64" => 62_u16,
-            "aarch64" => 183_u16,
-            other => panic!("runtime-gate test fixture does not support architecture {other}"),
-        };
+        let machine = HOST_TEST_ELF_MACHINE;
         let mut bytes = vec![0_u8; FILE_BYTES];
         bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
         bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
