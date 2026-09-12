@@ -232,6 +232,10 @@ impl RootlessPodmanAdapter {
         )
     }
 
+    /// Build a launch plan using an injected runtime-identity source.
+    ///
+    /// The seam exists so entropy failure can be verified deterministically without weakening
+    /// the production identity contract or substituting a predictable fallback.
     fn plan_at_with_identity_source<F>(
         request: &ApplicationServiceRequest,
         policy: &IsolationPolicy,
@@ -510,6 +514,7 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
+    /// Verify configured and live process isolation against the exact acquired container ID.
     fn verify_effective_isolation(
         &self,
         plan: &PodmanLaunchPlan,
@@ -628,10 +633,12 @@ impl RootlessPodmanAdapter {
         parse_loopback_port(&port_output.stdout).ok_or(ApplicationServiceError::InvalidPortMapping)
     }
 
+    /// Build the bounded process runner shared by every Podman CLI invocation.
     fn command_runner(&self) -> BoundedCommandRunner {
         BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes)
     }
 
+    /// Execute one Podman operation and map bounded process failures into the service taxonomy.
     fn checked_output(
         &self,
         operation: &'static str,
@@ -659,12 +666,14 @@ impl RootlessPodmanAdapter {
         Ok(output)
     }
 
+    /// Return whether a cleanup command completed successfully within the adapter bounds.
     fn command_succeeded(&self, args: &[String]) -> bool {
         self.command_runner()
             .run(&self.program, args)
             .is_ok_and(|output| output.status.success())
     }
 
+    /// Remove the runtime-owned network and fail closed when removal cannot be proven.
     fn cleanup_network(&self, plan: &PodmanLaunchPlan) -> Result<(), ApplicationServiceError> {
         let args = [
             "network".to_owned(),
@@ -679,6 +688,7 @@ impl RootlessPodmanAdapter {
         }
     }
 
+    /// Remove the exact acquired container and its runtime-owned network after partial creation.
     fn cleanup_acquired_container(
         &self,
         plan: &PodmanLaunchPlan,
@@ -698,6 +708,7 @@ impl RootlessPodmanAdapter {
         }
     }
 
+    /// Stop and remove the exact acquired container, then remove its runtime-owned network.
     fn cleanup_started_container(
         &self,
         plan: &PodmanLaunchPlan,
@@ -732,6 +743,7 @@ impl Default for RootlessPodmanAdapter {
     }
 }
 
+/// Validate the backend-wide rootless, seccomp, and LSM prerequisites before launch.
 fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationServiceError> {
     if !info.host.security.rootless {
         return Err(ApplicationServiceError::BackendNotRootless);
@@ -746,6 +758,7 @@ fn validate_backend_security(info: &PodmanInfo) -> Result<(), ApplicationService
     )
 }
 
+/// Compare live effective SELinux or AppArmor evidence with the admitted container configuration.
 fn effective_lsm_verified(
     info: &PodmanInfo,
     container: &ContainerInspection,
@@ -773,6 +786,7 @@ fn effective_lsm_verified(
         && inspect_profile == runtime_profile
 }
 
+/// Extract an AppArmor profile only when the live label reports enforcing mode.
 fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
     let normalized = runtime_label.trim();
     if normalized.eq_ignore_ascii_case("unconfined") {
@@ -785,6 +799,7 @@ fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
     mode.eq_ignore_ascii_case("enforce").then_some(profile)
 }
 
+/// Require every effective Linux capability set reported for PID 1 to be empty.
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
     [
         process.effective_caps.as_str(),
@@ -797,6 +812,7 @@ fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
     .all(capability_set_is_empty)
 }
 
+/// Recognize the bounded textual representations Podman uses for an empty capability set.
 fn capability_set_is_empty(value: &str) -> bool {
     let normalized = value.trim();
     if normalized == "-"
@@ -810,6 +826,7 @@ fn capability_set_is_empty(value: &str) -> bool {
     !hexadecimal.is_empty() && hexadecimal.chars().all(|character| character == '0')
 }
 
+/// Parse exactly one live PID 1 security row from `podman top` output.
 fn parse_process_security_top(
     bytes: &[u8],
 ) -> Result<ProcessSecurityEvidence, ApplicationServiceError> {
@@ -844,6 +861,7 @@ fn parse_process_security_top(
     })
 }
 
+/// Compare effective memory, CPU, and PID ceilings with the requested resource envelope.
 fn resource_limits_match(
     effective: &ContainerHostConfig,
     request: &ApplicationServiceRequest,
@@ -858,6 +876,7 @@ fn resource_limits_match(
             .is_ok_and(|value| value <= u64::from(request.resources.maximum_processes))
 }
 
+/// Convert a failed isolation predicate into the bounded control-name error taxonomy.
 fn require_control(
     control_name: &'static str,
     verified: bool,
@@ -869,6 +888,7 @@ fn require_control(
     }
 }
 
+/// Deserialize one bounded Podman JSON response with operation-specific failure attribution.
 fn parse_json<T>(operation: &'static str, bytes: &[u8]) -> Result<T, ApplicationServiceError>
 where
     T: for<'de> Deserialize<'de>,
@@ -877,6 +897,7 @@ where
         .map_err(|_| ApplicationServiceError::MalformedIsolationInspection { operation })
 }
 
+/// Deserialize exactly one inspection record and reject missing or duplicate records.
 fn parse_single_inspection<T>(
     operation: &'static str,
     bytes: &[u8],
@@ -893,6 +914,7 @@ where
         .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
 }
 
+/// Parse a canonical lowercase 64-hex container identifier from Podman stdout.
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
     let identifier = text.strip_suffix('\n').unwrap_or(text);
@@ -903,6 +925,7 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     .then(|| identifier.to_owned())
 }
 
+/// Read the runtime-owned cidfile without converting missing or malformed data into authority.
 fn read_application_service_create_receipt(
     path: &Path,
 ) -> Result<Option<String>, ApplicationServiceError> {
@@ -930,10 +953,12 @@ fn read_application_service_create_receipt(
     Ok(Some(identifier.to_owned()))
 }
 
+/// Obtain a fresh unpredictable runtime identity from operating-system entropy.
 fn runtime_identity() -> Result<String, ApplicationServiceError> {
     runtime_identity_with(|entropy| getrandom::fill(entropy))
 }
 
+/// Encode injected entropy as a fixed-width lowercase runtime identity or fail closed.
 fn runtime_identity_with<E>(
     fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,
 ) -> Result<String, ApplicationServiceError> {
@@ -948,16 +973,19 @@ fn runtime_identity_with<E>(
     Ok(identity)
 }
 
+/// Render millicores as the decimal CPU quantity accepted by Podman.
 fn cpu_limit(cpu_millicores: u32) -> String {
     format!("{}.{:03}", cpu_millicores / 1_000, cpu_millicores % 1_000)
 }
 
+/// Parse a nonzero loopback host port from Podman's published-port response.
 fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
     let text = std::str::from_utf8(stdout).ok()?.trim();
     let port = text.strip_prefix("127.0.0.1:")?.parse::<u16>().ok()?;
     (port != 0).then_some(port)
 }
 
+/// Poll the loopback endpoint until it accepts a connection or the policy deadline expires.
 fn wait_for_readiness(
     host_port: u16,
     policy: &IsolationPolicy,
