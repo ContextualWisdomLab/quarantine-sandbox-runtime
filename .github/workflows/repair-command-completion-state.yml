@@ -19,215 +19,13 @@ jobs:
         with:
           ref: automation/command-chronology-owner-repair
           fetch-depth: 2
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Patch typed completion state
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          expected_parent = "b0da4c2f2aa5fcc9bb97d230573dc2691725048a"
-          actual_parent = subprocess.check_output(["git", "rev-parse", "HEAD^"], text=True).strip()
-          if actual_parent != expected_parent:
-              raise SystemExit(f"repair parent drifted: expected {expected_parent}, got {actual_parent}")
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              target = Path(path)
-              text = target.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one exact repair anchor, found {count}")
-              target.write_text(text.replace(old, new, 1))
-
-          replace_once(
-              "src/infrastructure/bounded_command.rs",
-              '''/// Terminal facts for a command run to completion under bounded wall-clock and
-/// output budgets, where exceeding either budget is an expected, reportable
-/// outcome rather than a hard error.
-///
-/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
-/// (inspect a JSON payload, create a resource) treat any overflow as an
-/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
-/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
-/// hostile backend. A workload's own stdout/stderr has no such ceiling on
-/// legitimate size, and a workload exceeding its wall-clock lease is routine,
-/// so this variant reports both as facts on a successful outcome instead of
-/// discarding the partial evidence collected before termination.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BoundedRunOutcome {
-    /// The process's own exit status, or `None` when it was killed before
-    /// reporting one (wall-clock timeout or output-budget enforcement).
-    pub(crate) status: Option<ExitStatus>,
-    /// Whether the process was killed for exceeding its wall-clock budget.
-    pub(crate) timed_out: bool,
-''',
-              '''/// Typed terminal state for one bounded command execution.
-///
-/// An exited process always carries an [`ExitStatus`]. Timeout and output-budget
-/// termination cannot carry one because the supervised CLI was killed before it
-/// reported a status. Encoding these states as an enum prevents consumers from
-/// constructing or handling contradictory combinations such as `status=None`
-/// without either terminal cause.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BoundedCompletion {
-    /// The supervised CLI exited and reported its own status.
-    Exited(ExitStatus),
-    /// The supervised CLI exceeded its wall-clock budget.
-    TimedOut,
-    /// The supervised CLI was terminated for exceeding retained output budget.
-    OutputLimit,
-}
-
-/// Terminal facts for a command run to completion under bounded wall-clock and
-/// output budgets, where exceeding either budget is an expected, reportable
-/// outcome rather than a hard error.
-///
-/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
-/// (inspect a JSON payload, create a resource) treat any overflow as an
-/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
-/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
-/// hostile backend. A workload's own stdout/stderr has no such ceiling on
-/// legitimate size, and a workload exceeding its wall-clock lease is routine,
-/// so this variant reports both as facts on a successful outcome instead of
-/// discarding the partial evidence collected before termination.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BoundedRunOutcome {
-    /// Mutually exclusive terminal state reported by the bounded supervisor.
-    pub(crate) completion: BoundedCompletion,
-''',
-          )
-
-          replace_once(
-              "src/infrastructure/bounded_command.rs",
-              '''    let stdout = stdout_result?;
-    let stderr = stderr_result?;
-    let (status, timed_out) = classify_completion_status(status_result)?;
-    Ok(BoundedRunOutcome {
-        status,
-        timed_out,
-        stdout,
-''',
-              '''    let stdout = stdout_result?;
-    let stderr = stderr_result?;
-    let completion = classify_completion_status(status_result)?;
-    Ok(BoundedRunOutcome {
-        completion,
-        stdout,
-''',
-          )
-
-          replace_once(
-              "src/infrastructure/bounded_command.rs",
-              '''/// A wall-clock timeout or output-budget overflow become terminal facts
-/// (`None` status, `timed_out` set only for the former); any other
-/// supervision failure (an inability to observe or reap the child) remains a
-/// hard error, since that indicates the supervisor itself malfunctioned, not
-/// a fact about the supervised workload.
-fn classify_completion_status(
-    status_result: Result<ExitStatus, BoundedCommandError>,
-) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
-    match status_result {
-        Ok(status) => Ok((Some(status), false)),
-        Err(BoundedCommandError::Timeout) => Ok((None, true)),
-        Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
-        Err(other) => Err(other),
-    }
-}
-''',
-              '''/// A wall-clock timeout or output-budget overflow become distinct terminal
-/// states; any other supervision failure (an inability to observe or reap the
-/// child) remains a hard error, since that indicates the supervisor itself
-/// malfunctioned, not a fact about the supervised workload.
-fn classify_completion_status(
-    status_result: Result<ExitStatus, BoundedCommandError>,
-) -> Result<BoundedCompletion, BoundedCommandError> {
-    match status_result {
-        Ok(status) => Ok(BoundedCompletion::Exited(status)),
-        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
-        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
-        Err(other) => Err(other),
-    }
-}
-''',
-          )
-
-          replace_once(
-              "src/infrastructure/podman.rs",
-              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};',
-              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};',
-          )
-
-          replace_once(
-              "src/infrastructure/podman.rs",
-              '''        if !wait_outcome.timed_out {
-            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
-                return Err(CommandExecutionError::Backend(
-                    ApplicationServiceError::BackendOutputLimitExceeded {
-                        operation: "command_wait",
-                    },
-                ));
-            }
-            match wait_outcome.status {
-                Some(status) if status.success() => {
-                    return Ok((
-                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
-                        false,
-                    ));
-                }
-                Some(_) => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendCommandFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-                None => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendInvocationFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-            }
-        }
-
-''',
-              '''        match wait_outcome.completion {
-            BoundedCompletion::Exited(status) => {
-                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendOutputLimitExceeded {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-                if status.success() {
-                    return Ok((
-                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
-                        false,
-                    ));
-                }
-                return Err(CommandExecutionError::Backend(
-                    ApplicationServiceError::BackendCommandFailed {
-                        operation: "command_wait",
-                    },
-                ));
-            }
-            BoundedCompletion::OutputLimit => {
-                return Err(CommandExecutionError::Backend(
-                    ApplicationServiceError::BackendOutputLimitExceeded {
-                        operation: "command_wait",
-                    },
-                ));
-            }
-            BoundedCompletion::TimedOut => {}
-        }
-
-''',
-          )
-          PY
+          printf '%s' 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBzdWJwcm9jZXNzCgpleHBlY3RlZF9wYXJlbnQgPSAiNjQ1NmM4MzAxZmI2YjNiMDZlNWRhMTM5MjA5OGViZmJhZDYxMDViMiIKYWN0dWFsX3BhcmVudCA9IHN1YnByb2Nlc3MuY2hlY2tfb3V0cHV0KFsiZ2l0IiwgInJldi1wYXJzZSIsICJIRUFEXiJdLCB0ZXh0PVRydWUpLnN0cmlwKCkKaWYgYWN0dWFsX3BhcmVudCAhPSBleHBlY3RlZF9wYXJlbnQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KGYicmVwYWlyIHBhcmVudCBkcmlmdGVkOiBleHBlY3RlZCB7ZXhwZWN0ZWRfcGFyZW50fSwgZ290IHthY3R1YWxfcGFyZW50fSIpCgpkZWYgcmVwbGFjZV9vbmNlKHBhdGg6IHN0ciwgb2xkOiBzdHIsIG5ldzogc3RyKSAtPiBOb25lOgogICAgdGFyZ2V0ID0gUGF0aChwYXRoKQogICAgdGV4dCA9IHRhcmdldC5yZWFkX3RleHQoKQogICAgY291bnQgPSB0ZXh0LmNvdW50KG9sZCkKICAgIGlmIGNvdW50ICE9IDE6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdChmIntwYXRofTogZXhwZWN0ZWQgb25lIGV4YWN0IHJlcGFpciBhbmNob3IsIGZvdW5kIHtjb3VudH0iKQogICAgdGFyZ2V0LndyaXRlX3RleHQodGV4dC5yZXBsYWNlKG9sZCwgbmV3LCAxKSkKCnJlcGxhY2Vfb25jZSgKICAgICJzcmMvaW5mcmFzdHJ1Y3R1cmUvYm91bmRlZF9jb21tYW5kLnJzIiwKICAgICIiIi8vLyBUZXJtaW5hbCBmYWN0cyBmb3IgYSBjb21tYW5kIHJ1biB0byBjb21wbGV0aW9uIHVuZGVyIGJvdW5kZWQgd2FsbC1jbG9jayBhbmQKLy8vIG91dHB1dCBidWRnZXRzLCB3aGVyZSBleGNlZWRpbmcgZWl0aGVyIGJ1ZGdldCBpcyBhbiBleHBlY3RlZCwgcmVwb3J0YWJsZQovLy8gb3V0Y29tZSByYXRoZXIgdGhhbiBhIGhhcmQgZXJyb3IuCi8vLwovLy8gQ29udHJhc3Qgd2l0aCBbYEJvdW5kZWRDb21tYW5kUnVubmVyOjpydW5gXSwgd2hvc2UgYWRtaW5pc3RyYXRpdmUgQ0xJIGNhbGxzCi8vLyAoaW5zcGVjdCBhIEpTT04gcGF5bG9hZCwgY3JlYXRlIGEgcmVzb3VyY2UpIHRyZWF0IGFueSBvdmVyZmxvdyBhcyBhbgovLy8gYW5vbWFseTogYSB3ZWxsLWJlaGF2ZWQgUG9kbWFuIENMSSBuZXZlciBsZWdpdGltYXRlbHkgcHJvZHVjZXMgbW9yZSB0aGFuIGEKLy8vIGZldyBraWxvYnl0ZXMgb2YgSlNPTiwgc28gb3ZlcmZsb3cgdGhlcmUgaW5kaWNhdGVzIGEgbWFsZnVuY3Rpb25pbmcgb3IKLy8vIGhvc3RpbGUgYmFja2VuZC4gQSB3b3JrbG9hZCdzIG93biBzdGRvdXQvc3RkZXJyIGhhcyBubyBzdWNoIGNlaWxpbmcgb24KLy8vIGxlZ2l0aW1hdGUgc2l6ZSwgYW5kIGEgd29ya2xvYWQgZXhjZWVkaW5nIGl0cyB3YWxsLWNsb2NrIGxlYXNlIGlzIHJvdXRpbmUsCi8vLyBzbyB0aGlzIHZhcmlhbnQgcmVwb3J0cyBib3RoIGFzIGZhY3RzIG9uIGEgc3VjY2Vzc2Z1bCBvdXRjb21lIGluc3RlYWQgb2YKLy8vIGRpc2NhcmRpbmcgdGhlIHBhcnRpYWwgZXZpZGVuY2UgY29sbGVjdGVkIGJlZm9yZSB0ZXJtaW5hdGlvbi4KI1tkZXJpdmUoQ2xvbmUsIERlYnVnLCBQYXJ0aWFsRXEsIEVxKV0KcHViKGNyYXRlKSBzdHJ1Y3QgQm91bmRlZFJ1bk91dGNvbWUgewogICAgLy8vIFRoZSBwcm9jZXNzJ3Mgb3duIGV4aXQgc3RhdHVzLCBvciBgTm9uZWAgd2hlbiBpdCB3YXMga2lsbGVkIGJlZm9yZQogICAgLy8vIHJlcG9ydGluZyBvbmUgKHdhbGwtY2xvY2sgdGltZW91dCBvciBvdXRwdXQtYnVkZ2V0IGVuZm9yY2VtZW50KS4KICAgIHB1YihjcmF0ZSkgc3RhdHVzOiBPcHRpb248RXhpdFN0YXR1cz4sCiAgICAvLy8gV2hldGhlciB0aGUgcHJvY2VzcyB3YXMga2lsbGVkIGZvciBleGNlZWRpbmcgaXRzIHdhbGwtY2xvY2sgYnVkZ2V0LgogICAgcHViKGNyYXRlKSB0aW1lZF9vdXQ6IGJvb2wsCiIiIiwKICAgICIiIi8vLyBUeXBlZCB0ZXJtaW5hbCBzdGF0ZSBmb3Igb25lIGJvdW5kZWQgY29tbWFuZCBleGVjdXRpb24uCi8vLwovLy8gQW4gZXhpdGVkIHByb2Nlc3MgYWx3YXlzIGNhcnJpZXMgYW4gW2BFeGl0U3RhdHVzYF0uIFRpbWVvdXQgYW5kIG91dHB1dC1idWRnZXQKLy8vIHRlcm1pbmF0aW9uIGNhbm5vdCBjYXJyeSBvbmUgYmVjYXVzZSB0aGUgc3VwZXJ2aXNlZCBDTEkgd2FzIGtpbGxlZCBiZWZvcmUgaXQKLy8vIHJlcG9ydGVkIGEgc3RhdHVzLiBFbmNvZGluZyB0aGVzZSBzdGF0ZXMgYXMgYW4gZW51bSBwcmV2ZW50cyBjb25zdW1lcnMgZnJvbQovLy8gY29uc3RydWN0aW5nIG9yIGhhbmRsaW5nIGNvbnRyYWRpY3RvcnkgY29tYmluYXRpb25zIHN1Y2ggYXMgYHN0YXR1cz1Ob25lYAovLy8gd2l0aG91dCBlaXRoZXIgdGVybWluYWwgY2F1c2UuCiNbZGVyaXZlKENsb25lLCBEZWJ1ZywgUGFydGlhbEVxLCBFcSldCnB1YihjcmF0ZSkgZW51bSBCb3VuZGVkQ29tcGxldGlvbiB7CiAgICAvLy8gVGhlIHN1cGVydmlzZWQgQ0xJIGV4aXRlZCBhbmQgcmVwb3J0ZWQgaXRzIG93biBzdGF0dXMuCiAgICBFeGl0ZWQoRXhpdFN0YXR1cyksCiAgICAvLy8gVGhlIHN1cGVydmlzZWQgQ0xJIGV4Y2VlZGVkIGl0cyB3YWxsLWNsb2NrIGJ1ZGdldC4KICAgIFRpbWVkT3V0LAogICAgLy8vIFRoZSBzdXBlcnZpc2VkIENMSSB3YXMgdGVybWluYXRlZCBmb3IgZXhjZWVkaW5nIHJldGFpbmVkIG91dHB1dCBidWRnZXQuCiAgICBPdXRwdXRMaW1pdCwKfQoKLy8vIFRlcm1pbmFsIGZhY3RzIGZvciBhIGNvbW1hbmQgcnVuIHRvIGNvbXBsZXRpb24gdW5kZXIgYm91bmRlZCB3YWxsLWNsb2NrIGFuZAovLy8gb3V0cHV0IGJ1ZGdldHMsIHdoZXJlIGV4Y2VlZGluZyBlaXRoZXIgYnVkZ2V0IGlzIGFuIGV4cGVjdGVkLCByZXBvcnRhYmxlCi8vLyBvdXRjb21lIHJhdGhlciB0aGFuIGEgaGFyZCBlcnJvci4KLy8vCi8vLyBDb250cmFzdCB3aXRoIFtgQm91bmRlZENvbW1hbmRSdW5uZXI6OnJ1bmBdLCB3aG9zZSBhZG1pbmlzdHJhdGl2ZSBDTEkgY2FsbHMKLy8vIChpbnNwZWN0IGEgSlNPTiBwYXlsb2FkLCBjcmVhdGUgYSByZXNvdXJjZSkgdHJlYXQgYW55IG92ZXJmbG93IGFzIGFuCi8vLyBhbm9tYWx5OiBhIHdlbGwtYmVoYXZlZCBQb2RtYW4gQ0xJIG5ldmVyIGxlZ2l0aW1hdGVseSBwcm9kdWNlcyBtb3JlIHRoYW4gYQovLy8gZmV3IGtpbG9ieXRlcyBvZiBKU09OLCBzbyBvdmVyZmxvdyB0aGVyZSBpbmRpY2F0ZXMgYSBtYWxmdW5jdGlvbmluZyBvcgovLy8gaG9zdGlsZSBiYWNrZW5kLiBBIHdvcmtsb2FkJ3Mgb3duIHN0ZG91dC9zdGRlcnIgaGFzIG5vIHN1Y2ggY2VpbGluZyBvbgovLy8gbGVnaXRpbWF0ZSBzaXplLCBhbmQgYSB3b3JrbG9hZCBleGNlZWRpbmcgaXRzIHdhbGwtY2xvY2sgbGVhc2UgaXMgcm91dGluZSwKLy8vIHNvIHRoaXMgdmFyaWFudCByZXBvcnRzIGJvdGggYXMgZmFjdHMgb24gYSBzdWNjZXNzZnVsIG91dGNvbWUgaW5zdGVhZCBvZgovLy8gZGlzY2FyZGluZyB0aGUgcGFydGlhbCBldmlkZW5jZSBjb2xsZWN0ZWQgYmVmb3JlIHRlcm1pbmF0aW9uLgojW2Rlcml2ZShDbG9uZSwgRGVidWcsIFBhcnRpYWxFcSwgRXEpXQpwdWIoY3JhdGUpIHN0cnVjdCBCb3VuZGVkUnVuT3V0Y29tZSB7CiAgICAvLy8gTXV0dWFsbHkgZXhjbHVzaXZlIHRlcm1pbmFsIHN0YXRlIHJlcG9ydGVkIGJ5IHRoZSBib3VuZGVkIHN1cGVydmlzb3IuCiAgICBwdWIoY3JhdGUpIGNvbXBsZXRpb246IEJvdW5kZWRDb21wbGV0aW9uLAoiIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgICJzcmMvaW5mcmFzdHJ1Y3R1cmUvYm91bmRlZF9jb21tYW5kLnJzIiwKICAgICIiIiAgICBsZXQgc3Rkb3V0ID0gc3Rkb3V0X3Jlc3VsdD87CiAgICBsZXQgc3RkZXJyID0gc3RkZXJyX3Jlc3VsdD87CiAgICBsZXQgKHN0YXR1cywgdGltZWRfb3V0KSA9IGNsYXNzaWZ5X2NvbXBsZXRpb25fc3RhdHVzKHN0YXR1c19yZXN1bHQpPzsKICAgIE9rKEJvdW5kZWRSdW5PdXRjb21lIHsKICAgICAgICBzdGF0dXMsCiAgICAgICAgdGltZWRfb3V0LAogICAgICAgIHN0ZG91dCwKIiIiLAogICAgIiIiICAgIGxldCBzdGRvdXQgPSBzdGRvdXRfcmVzdWx0PzsKICAgIGxldCBzdGRlcnIgPSBzdGRlcnJfcmVzdWx0PzsKICAgIGxldCBjb21wbGV0aW9uID0gY2xhc3NpZnlfY29tcGxldGlvbl9zdGF0dXMoc3RhdHVzX3Jlc3VsdCk/OwogICAgT2soQm91bmRlZFJ1bk91dGNvbWUgewogICAgICAgIGNvbXBsZXRpb24sCiAgICAgICAgc3Rkb3V0LAoiIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgICJzcmMvaW5mcmFzdHJ1Y3R1cmUvYm91bmRlZF9jb21tYW5kLnJzIiwKICAgICIiIi8vLyBBIHdhbGwtY2xvY2sgdGltZW91dCBvciBvdXRwdXQtYnVkZ2V0IG92ZXJmbG93IGJlY29tZSB0ZXJtaW5hbCBmYWN0cwovLy8gKGBOb25lYCBzdGF0dXMsIGB0aW1lZF9vdXRgIHNldCBvbmx5IGZvciB0aGUgZm9ybWVyKTsgYW55IG90aGVyCi8vLyBzdXBlcnZpc2lvbiBmYWlsdXJlIChhbiBpbmFiaWxpdHkgdG8gb2JzZXJ2ZSBvciByZWFwIHRoZSBjaGlsZCkgcmVtYWlucyBhCi8vLyBoYXJkIGVycm9yLCBzaW5jZSB0aGF0IGluZGljYXRlcyB0aGUgc3VwZXJ2aXNvciBpdHNlbGYgbWFsZnVuY3Rpb25lZCwgbm90Ci8vLyBhIGZhY3QgYWJvdXQgdGhlIHN1cGVydmlzZWQgd29ya2xvYWQuCmZuIGNsYXNzaWZ5X2NvbXBsZXRpb25fc3RhdHVzKAogICAgc3RhdHVzX3Jlc3VsdDogUmVzdWx0PEV4aXRTdGF0dXMsIEJvdW5kZWRDb21tYW5kRXJyb3I+LAopIC0+IFJlc3VsdDwoT3B0aW9uPEV4aXRTdGF0dXM+LCBib29sKSwgQm91bmRlZENvbW1hbmRFcnJvcj4gewogICAgbWF0Y2ggc3RhdHVzX3Jlc3VsdCB7CiAgICAgICAgT2soc3RhdHVzKSA9PiBPaygoU29tZShzdGF0dXMpLCBmYWxzZSkpLAogICAgICAgIEVycihCb3VuZGVkQ29tbWFuZEVycm9yOjpUaW1lb3V0KSA9PiBPaygoTm9uZSwgdHJ1ZSkpLAogICAgICAgIEVycihCb3VuZGVkQ29tbWFuZEVycm9yOjpPdXRwdXRMaW1pdCkgPT4gT2soKE5vbmUsIGZhbHNlKSksCiAgICAgICAgRXJyKG90aGVyKSA9PiBFcnIob3RoZXIpLAogICAgfQp9CiIiIiwKICAgICIiIi8vLyBBIHdhbGwtY2xvY2sgdGltZW91dCBvciBvdXRwdXQtYnVkZ2V0IG92ZXJmbG93IGJlY29tZSBkaXN0aW5jdCB0ZXJtaW5hbAovLy8gc3RhdGVzOyBhbnkgb3RoZXIgc3VwZXJ2aXNpb24gZmFpbHVyZSAoYW4gaW5hYmlsaXR5IHRvIG9ic2VydmUgb3IgcmVhcCB0aGUKLy8vIGNoaWxkKSByZW1haW5zIGEgaGFyZCBlcnJvciwgc2luY2UgdGhhdCBpbmRpY2F0ZXMgdGhlIHN1cGVydmlzb3IgaXRzZWxmCi8vLyBtYWxmdW5jdGlvbmVkLCBub3QgYSBmYWN0IGFib3V0IHRoZSBzdXBlcnZpc2VkIHdvcmtsb2FkLgpmbiBjbGFzc2lmeV9jb21wbGV0aW9uX3N0YXR1cygKICAgIHN0YXR1c19yZXN1bHQ6IFJlc3VsdDxFeGl0U3RhdHVzLCBCb3VuZGVkQ29tbWFuZEVycm9yPiwKKSAtPiBSZXN1bHQ8Qm91bmRlZENvbXBsZXRpb24sIEJvdW5kZWRDb21tYW5kRXJyb3I+IHsKICAgIG1hdGNoIHN0YXR1c19yZXN1bHQgewogICAgICAgIE9rKHN0YXR1cykgPT4gT2soQm91bmRlZENvbXBsZXRpb246OkV4aXRlZChzdGF0dXMpKSwKICAgICAgICBFcnIoQm91bmRlZENvbW1hbmRFcnJvcjo6VGltZW91dCkgPT4gT2soQm91bmRlZENvbXBsZXRpb246OlRpbWVkT3V0KSwKICAgICAgICBFcnIoQm91bmRlZENvbW1hbmRFcnJvcjo6T3V0cHV0TGltaXQpID0+IE9rKEJvdW5kZWRDb21wbGV0aW9uOjpPdXRwdXRMaW1pdCksCiAgICAgICAgRXJyKG90aGVyKSA9PiBFcnIob3RoZXIpLAogICAgfQp9CiIiIiwKKQoKcmVwbGFjZV9vbmNlKAogICAgInNyYy9pbmZyYXN0cnVjdHVyZS9wb2RtYW4ucnMiLAogICAgInVzZSBzdXBlcjo6Ym91bmRlZF9jb21tYW5kOjp7Qm91bmRlZENvbW1hbmRFcnJvciwgQm91bmRlZENvbW1hbmRSdW5uZXJ9OyIsCiAgICAidXNlIHN1cGVyOjpib3VuZGVkX2NvbW1hbmQ6OntCb3VuZGVkQ29tbWFuZEVycm9yLCBCb3VuZGVkQ29tbWFuZFJ1bm5lciwgQm91bmRlZENvbXBsZXRpb259OyIsCikKCnJlcGxhY2Vfb25jZSgKICAgICJzcmMvaW5mcmFzdHJ1Y3R1cmUvcG9kbWFuLnJzIiwKICAgICIiIiAgICAgICAgaWYgIXdhaXRfb3V0Y29tZS50aW1lZF9vdXQgewogICAgICAgICAgICBpZiB3YWl0X291dGNvbWUuc3Rkb3V0X3RydW5jYXRlZCB8fCB3YWl0X291dGNvbWUuc3RkZXJyX3RydW5jYXRlZCB7CiAgICAgICAgICAgICAgICByZXR1cm4gRXJyKENvbW1hbmRFeGVjdXRpb25FcnJvcjo6QmFja2VuZCgKICAgICAgICAgICAgICAgICAgICBBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6QmFja2VuZE91dHB1dExpbWl0RXhjZWVkZWQgewogICAgICAgICAgICAgICAgICAgICAgICBvcGVyYXRpb246ICJjb21tYW5kX3dhaXQiLAogICAgICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICApKTsKICAgICAgICAgICAgfQogICAgICAgICAgICBtYXRjaCB3YWl0X291dGNvbWUuc3RhdHVzIHsKICAgICAgICAgICAgICAgIFNvbWUoc3RhdHVzKSBpZiBzdGF0dXMuc3VjY2VzcygpID0+IHsKICAgICAgICAgICAgICAgICAgICByZXR1cm4gT2soKAogICAgICAgICAgICAgICAgICAgICAgICBwYXJzZV93YWl0X2V4aXRfY29kZSgmd2FpdF9vdXRjb21lLnN0ZG91dCwgImNvbW1hbmRfd2FpdCIpPywKICAgICAgICAgICAgICAgICAgICAgICAgZmFsc2UsCiAgICAgICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBTb21lKF8pID0+IHsKICAgICAgICAgICAgICAgICAgICByZXR1cm4gRXJyKENvbW1hbmRFeGVjdXRpb25FcnJvcjo6QmFja2VuZCgKICAgICAgICAgICAgICAgICAgICAgICAgQXBwbGljYXRpb25TZXJ2aWNlRXJyb3I6OkJhY2tlbmRDb21tYW5kRmFpbGVkIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdGlvbjogImNvbW1hbmRfd2FpdCIsCiAgICAgICAgICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBOb25lID0+IHsKICAgICAgICAgICAgICAgICAgICByZXR1cm4gRXJyKENvbW1hbmRFeGVjdXRpb25FcnJvcjo6QmFja2VuZCgKICAgICAgICAgICAgICAgICAgICAgICAgQXBwbGljYXRpb25TZXJ2aWNlRXJyb3I6OkJhY2tlbmRJbnZvY2F0aW9uRmFpbGVkIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdGlvbjogImNvbW1hbmRfd2FpdCIsCiAgICAgICAgICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICB9CgoiIiIsCiAgICAiIiIgICAgICAgIG1hdGNoIHdhaXRfb3V0Y29tZS5jb21wbGV0aW9uIHsKICAgICAgICAgICAgQm91bmRlZENvbXBsZXRpb246OkV4aXRlZChzdGF0dXMpID0+IHsKICAgICAgICAgICAgICAgIGlmIHdhaXRfb3V0Y29tZS5zdGRvdXRfdHJ1bmNhdGVkIHx8IHdhaXRfb3V0Y29tZS5zdGRlcnJfdHJ1bmNhdGVkIHsKICAgICAgICAgICAgICAgICAgICByZXR1cm4gRXJyKENvbW1hbmRFeGVjdXRpb25FcnJvcjo6QmFja2VuZCgKICAgICAgICAgICAgICAgICAgICAgICAgQXBwbGljYXRpb25TZXJ2aWNlRXJyb3I6OkJhY2tlbmRPdXRwdXRMaW1pdEV4Y2VlZGVkIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIG9wZXJhdGlvbjogImNvbW1hbmRfd2FpdCIsCiAgICAgICAgICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBpZiBzdGF0dXMuc3VjY2VzcygpIHsKICAgICAgICAgICAgICAgICAgICByZXR1cm4gT2soKAogICAgICAgICAgICAgICAgICAgICAgICBwYXJzZV93YWl0X2V4aXRfY29kZSgmd2FpdF9vdXRjb21lLnN0ZG91dCwgImNvbW1hbmRfd2FpdCIpPywKICAgICAgICAgICAgICAgICAgICAgICAgZmFsc2UsCiAgICAgICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICByZXR1cm4gRXJyKENvbW1hbmRFeGVjdXRpb25FcnJvcjo6QmFja2VuZCgKICAgICAgICAgICAgICAgICAgICBBcHBsaWNhdGlvblNlcnZpY2VFcnJvcjo6QmFja2VuZENvbW1hbmRGYWlsZWQgewogICAgICAgICAgICAgICAgICAgICAgICBvcGVyYXRpb246ICJjb21tYW5kX3dhaXQiLAogICAgICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICApKTsKICAgICAgICAgICAgfQogICAgICAgICAgICBCb3VuZGVkQ29tcGxldGlvbjo6T3V0cHV0TGltaXQgPT4gewogICAgICAgICAgICAgICAgcmV0dXJuIEVycihDb21tYW5kRXhlY3V0aW9uRXJyb3I6OkJhY2tlbmQoCiAgICAgICAgICAgICAgICAgICAgQXBwbGljYXRpb25TZXJ2aWNlRXJyb3I6OkJhY2tlbmRPdXRwdXRMaW1pdEV4Y2VlZGVkIHsKICAgICAgICAgICAgICAgICAgICAgICAgb3BlcmF0aW9uOiAiY29tbWFuZF93YWl0IiwKICAgICAgICAgICAgICAgICAgICB9LAogICAgICAgICAgICAgICAgKSk7CiAgICAgICAgICAgIH0KICAgICAgICAgICAgQm91bmRlZENvbXBsZXRpb246OlRpbWVkT3V0ID0+IHt9CiAgICAgICAgfQoKIiIiLAopCg==' | base64 --decode > /tmp/repair.py
+          python3 /tmp/repair.py
 
       - name: Format and validate repair
         shell: bash
@@ -235,15 +33,17 @@ fn classify_completion_status(
           cargo fmt --all
           cargo test --locked --workspace --all-targets --no-fail-fast
           cargo clippy --locked --workspace --all-targets -- -D warnings
-          RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
           git diff --check
 
       - name: Remove one-shot workflow and publish ordinary descendant
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rm .github/workflows/repair-command-completion-state.yml
           git add src/infrastructure/bounded_command.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(command): type bounded completion state'
-          git push origin HEAD:automation/command-chronology-owner-repair
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/command-chronology-owner-repair
