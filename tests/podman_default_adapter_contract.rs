@@ -1,3 +1,8 @@
+//! Default command-adapter construction preserves pre-backend policy validation.
+//!
+//! This witness constructs `RootlessPodmanAdapter::default()` and requires an invalid root-user
+//! policy to fail through the typed public command boundary before any Podman invocation.
+
 #![cfg(target_os = "linux")]
 
 use quarantine_sandbox_runtime::{
@@ -44,8 +49,7 @@ fn default_adapter_keeps_policy_validation_a_pre_backend_boundary() {
     let mut invalid_policy = policy();
     invalid_policy.run_as_user_id = 0;
 
-    let result =
-        adapter.run_legacy_command_at_for_test(&request(), &invalid_policy, 1_780_000_000);
+    let result = adapter.run_legacy_command_at_for_test(&request(), &invalid_policy, 1_780_000_000);
 
     assert_eq!(
         result,
