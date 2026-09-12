@@ -104,7 +104,7 @@ impl Default for Fixture {
                 }
             }),
             container: json!([{
-                "Id": "fake-container-id",
+                "Id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 "AppArmorProfile": "containers-default",
                 "ProcessLabel": "",
                 "EffectiveCaps": [],
@@ -124,7 +124,8 @@ impl Default for Fixture {
             }]),
             network: json!([{"internal": true, "dns_enabled": false}]),
             process_top: GOOD_TOP.to_owned(),
-            create_identifier: "fake-container-id\n".to_owned(),
+            create_identifier: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+                .to_owned(),
             info_output_override: None,
             container_output_override: None,
             network_output_override: None,
@@ -236,7 +237,7 @@ fn backend_and_inspection_identity_parsing_is_fail_closed() {
         assert_fixture(
             fixture,
             ApplicationServiceError::MalformedIsolationInspection {
-                operation: "container_create",
+                operation: "container_create_receipt",
             },
         );
     }
