@@ -7,7 +7,7 @@
 
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -73,11 +73,11 @@ fn immutable_fixture_executable() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
 }
 
-fn fixture_sidecar(program: &PathBuf, suffix: &str) -> PathBuf {
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(format!("{}.{suffix}", program.display()))
 }
 
-fn write_fake_podman_fixture(program: &PathBuf, script: String) {
+fn write_fake_podman_fixture(program: &Path, script: String) {
     let script_path = fixture_sidecar(program, "script");
     let config_path = fixture_sidecar(program, "config");
     let log_path = fixture_sidecar(program, "log");
