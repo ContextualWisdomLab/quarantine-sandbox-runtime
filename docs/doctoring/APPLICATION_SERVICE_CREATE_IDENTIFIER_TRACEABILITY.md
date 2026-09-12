@@ -1,52 +1,83 @@
 # Application-service create-identifier authority traceability
 
-Status: causal RED reproduced on current-root ancestry; minimum parser repair is under exact-head verification on Draft #21.
+Status: Issue #113 has an executed causal RED and a minimum exact-ID receipt repair on Draft #21 ancestry. Source-fix run `34660711504` validated the repair broadly before publishing ordinary descendant `3a37a4f7073a6d159844ec0f37bb5bc1df0772ea`. That bot-authored descendant received an `action_required` native CI run with zero jobs, so the same source must still reacquire ordinary exact-head PR CI before merge or release authority is claimed.
 
 ## Problem and security boundary
 
-`RootlessPodmanAdapter::launch_at` parses successful `podman create` stdout with `parse_backend_identifier`. Before the current repair, the parser accepted any non-empty UTF-8 token up to 128 characters as long as it contained no whitespace or control characters. Issue #40 requires the create result to become the immutable lifecycle/destructive authority after creation, so that parser contract is too weak: a Podman name, short ID, arbitrary token, or non-hex 64-character value must not be promoted into ownership authority.
+`RootlessPodmanAdapter::launch_at` receives two distinct identities around successful `podman create`:
 
-The generated `qsr-app-*` name remains runtime-owned correlation metadata and is still the safe cleanup selector when create output itself is malformed, because a failed/malformed create response may nevertheless have persisted the requested named resource. The untrusted create-output value must not be used for `start`, `container inspect`, `top`, `port`, `stop`, or `rm` until it has been proven to be one full long container ID.
+- the generated `qsr-app-*` name, which is correlation/audit metadata chosen before creation;
+- the backend-acquired container ID, which is the only acceptable post-create lifecycle and destructive container authority.
 
-## Evidence chain
+The earlier create-ID repair correctly rejected name-like, short and non-hex stdout before promoting it to lifecycle authority. A separate edge remained: `podman create` can return success while stdout is malformed. Earlier production then called generated-name cleanup. That was not safe: a requested name is a re-resolvable selector and does not prove which resource was created. Removing that cleanup without another identity source would avoid deleting the wrong container but could leave a successfully created container orphaned.
 
-1. `podman create` creates but does not start the container and prints the container ID to stdout.
-2. Podman lifecycle commands accept IDs or names, so accepting a human-friendly or abbreviated selector is semantically different from retaining the full immutable ID returned by create.
-3. NIST SP 800-190 assigns the runtime the role of establishing and maintaining container isolation and lifecycle controls; NISTIR 8176 treats Linux container security as an assurance problem, not only a configuration-intent problem.
-4. Therefore the runtime must validate the identifier before it becomes lifecycle/destructive authority, then bind later operations to that exact long ID.
+Issue #113 therefore requires an independent runtime-owned create receipt. The current repair passes a private `--cidfile` to Podman and admits only one exact 64-character lowercase hexadecimal receipt value for recovery. The generated name never becomes fallback destructive authority.
 
-## RED
+## Authoritative backend contract
 
-The RED originated in test-bearing commit `52387cf69c3b32356caba8bc126e659c6d94461d` and was dependency-safely restacked onto current root `5c6a44bb2b35eb17d0315d72db242f4488c3c426`. After rustfmt-only prerequisite repairs, exact head `a22ddda022dcdb5b03378c368fce71ad86dc7fa3` ran native CI `34298464566`. Exact checkout, dependency lock, repository policy, coverage-parser tests, rustfmt, and the existing application-service suite passed before `tests/podman_application_service_create_identifier_red.rs` executed.
+Podman's current `podman-create(1)` documentation states that a successful create prints the container ID to stdout and that `--cidfile=file` writes the container ID to a file. These are two backend-produced channels for the identity of the created resource. The runtime uses the receipt as independent recovery evidence when stdout cannot be admitted; it does not infer identity from a mutable name.
 
-All three hostile create outputs then failed for the intended causal reason:
+The security rule is intentionally asymmetric:
 
-- `foreign-container` — name-like selector;
-- `0123456789ab` — short hexadecimal ID;
-- 64 `g` characters — full-width but non-hex token.
+1. valid stdout plus an absent receipt can continue with the already admitted exact stdout ID;
+2. valid stdout plus a matching receipt uses the same exact ID;
+3. valid stdout plus a different valid receipt fails closed after cleaning only the receipt-owned exact ID;
+4. malformed stdout plus a valid receipt cleans only that exact receipt ID and preserves the original `MalformedIsolationInspection { operation: "container_create" }`;
+5. malformed stdout plus no trustworthy receipt cleans only the invocation-owned network and returns `MalformedIsolationInspection { operation: "container_create_receipt" }`;
+6. no path is allowed to convert the generated `qsr-app-*` name into destructive container authority.
 
-Each expected `ApplicationServiceError::MalformedIsolationInspection { operation: "container_create" }`, but the implementation advanced to `container_start` and returned `BackendCommandFailed { operation: "container_start" }`. This proves the create-output admission boundary, rather than a formatting/repository prerequisite, was missing. The fixture also proved no post-create lifecycle operation should be reachable for those values.
+The missing-receipt case deliberately remains an explicit unreconciled-identity condition. There is no safe container deletion target to invent. Crash/restart orphan reconciliation is a separate Recovery-context gap and must not be approximated with name lookup.
 
-The existing #40 name-rebinding RED remains complementary: it proves that a valid acquired long ID must continue to be used after create rather than resolving the mutable name again.
+## Causal RED
 
-## Smallest causal GREEN
+Issue #113 was staged on canonical application-service Draft #21 rather than command-runtime #112, preserving the single-writer bounded-context boundary.
 
-Candidate commit `5dc13da83ceda911464ac0d3264495d6f3a747df` changes only `parse_backend_identifier`: the admitted value must be exactly 64 ASCII hexadecimal characters. Fresh compare from the causal RED shows one production file changed, with two added and nine removed lines; no retry, normalization, name fallback, short-ID acceptance, or lifecycle semantic change was introduced.
+The exact source-fix execution reproduced two independent causal failures before applying production changes:
 
-This is deliberately narrower than the later #40 lifecycle-ownership repair. Once a valid acquired long ID is admitted, runtime-owned provenance must still use it for every supported post-create container operation. Keep `inspect.Id == acquired_id` as defense in depth.
+- `podman_application_service_malformed_create_receipt_red::malformed_successful_service_create_uses_runtime_receipt_for_exact_id_cleanup` expected the original malformed-create error after exact receipt-ID cleanup but observed `Err(CleanupFailed)` because production still attempted generated-name removal;
+- `podman_application_service_missing_create_receipt_red::malformed_successful_create_without_receipt_never_uses_generated_name_for_cleanup` expected explicit `container_create_receipt` failure without destructive container action but likewise observed `Err(CleanupFailed)` from generated-name cleanup.
 
-Exact native CI `34298773775` belongs to candidate `5dc13da8...` and must complete before this parser repair is called GREEN. Predecessor checks do not transfer.
+Both failures were reproduced in source-fix run `34660711504` before the repair step. They reached the intended ownership boundary rather than failing on checkout, dependency, formatting or repository-policy prerequisites.
 
-Do not treat syntax alone as cleanup authorization for a deserialized lease; issue #42 separately requires runtime-owned cleanup provenance. Do not replace the public `sandbox_id` correlation contract without a versioned contract change.
+An earlier repair attempt also exposed a stale `root_coverage_edges` fake-backend mode. After the production repair was applied, that fixture advanced to `ReadinessTimeout` because its shell failure token still used the old `malformed_identifier_cleanup_failure` name. This was fixture drift, not a production semantic failure. Commit `dafb0722446b1cb727c8018c06f657c629bde312` aligned the two stale shell tokens while retaining generated-name `rm` failure as a negative-control tripwire.
+
+## Minimum GREEN
+
+Source-fix run `34660711504` then applied the minimum repair and proved focused GREEN for:
+
+- malformed successful create with a valid runtime-owned receipt;
+- malformed successful create with no trustworthy receipt;
+- the `root_coverage_edges` negative-control family.
+
+The same run subsequently passed repository validation, full locked workspace/all-target tests, Clippy with `-D warnings`, rustdoc with `-D warnings`, rustfmt and `git diff --check`. It removed its temporary source-fix workflow and repair scripts before publishing ordinary descendant `3a37a4f7073a6d159844ec0f37bb5bc1df0772ea` (`fix(application-service): recover exact create identity`).
+
+Production now creates a private temporary receipt directory, inserts `--cidfile=<runtime-owned-path>` into the application-service create argv, reads the receipt through a bounded identity admission helper, and removes the obsolete generated-name cleanup helper. All admitted post-create start/inspect/top/port/stop/remove behavior remains bound to the acquired exact container ID through the existing #40 lifecycle repair. Public `sandbox_id` remains correlation evidence; private cleanup authority retains the exact acquired container ID.
+
+The source-fix GREEN is strong implementation evidence, but it is not a substitute for exact-head PR CI. The first native CI attached to bot-authored `3a37a4f...` concluded `action_required` without materializing jobs. A later user-authored documentation descendant must therefore reacquire the full native CI/coverage/security lanes on the unchanged production repair before this document calls the candidate exact-head GREEN.
+
+## Invariants preserved
+
+- `request_id` remains consumer correlation, not runtime resource identity.
+- generated `qsr-app-*` names remain audit/correlation metadata and are never post-create destructive authority.
+- successful admitted-ID lifecycle commands remain exact-ID bound under #40.
+- public/deserialized lease fields cannot recreate cleanup authority under #42.
+- network ownership/foreign-safe cleanup remains separately governed by the network-binding lane.
+- receipt disagreement or malformed identity fails closed; there is no name, short-ID or normalization fallback.
+- cleanup failure still takes precedence when exact-ID cleanup itself cannot be proven successful.
+- no retry, sleep, force-rebase, provider-specific fallback or mutable sibling dependency was introduced.
 
 ## Rejected alternatives
 
-- **Accept short IDs.** Rejected because abbreviation reintroduces selector ambiguity and is unnecessary when create already returns the full ID.
-- **Accept names when they match `qsr-app-*`.** Rejected because a name is a re-resolvable selector, not immutable ownership evidence.
-- **Accept arbitrary 64-character strings.** Rejected because width alone does not establish Podman's hexadecimal container-ID grammar.
-- **Use inspect-by-name and compare `Id` afterward.** Rejected as the primary boundary because a foreign resource has already been selected before the comparison.
-- **Retry or normalize malformed output.** Rejected because it would hide the evidence-integrity failure or widen an immutable-identity boundary.
-- **Make `ApplicationServiceLease.sandbox_id` the acquired ID.** Rejected as an incidental fix because it silently changes the public correlation contract and does not solve #42 cleanup authorization.
+- **Delete by generated name after malformed stdout.** Rejected because a name is mutable/re-resolvable and is not backend-acquired ownership evidence.
+- **Do nothing after successful create with malformed stdout.** Rejected when an exact receipt is available because it knowingly leaks a recoverable runtime-owned resource.
+- **Resolve the generated name with a later inspect/list query.** Rejected because the lookup first selects a potentially foreign resource; a later ID check does not make the initial selector authoritative.
+- **Accept short IDs or arbitrary tokens.** Rejected because abbreviation or token normalization widens the destructive selector grammar.
+- **Hide missing receipt behind the original stdout error.** Rejected because the security-relevant unreconciled-resource condition must remain explicit evidence.
+- **Treat test-only fake backend success as positive confinement evidence.** Rejected. These regressions prove identity/cleanup control flow only; real rootless, positive-LSM, cgroup/mount/network and release evidence remain separate gates.
+
+## Remaining release evidence
+
+Draft #21 stays open. Required work still includes native exact-head CI and complete owned-production coverage on the current descendant, qualifying independent review/security gates, real rootless resource/network/cleanup acceptance, dedicated positive effective-LSM evidence, ordinary protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication. Issue #113 remains open until those release-level requirements are satisfied.
 
 ## References
 
