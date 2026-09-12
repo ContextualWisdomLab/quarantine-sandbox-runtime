@@ -337,8 +337,8 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status, drain_stream,
-        finalize_output, join_stream, kill_and_reap, supervise_child,
+        BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status,
+        drain_stream, finalize_output, join_stream, kill_and_reap, supervise_child,
     };
 
     #[derive(Clone, Copy)]
