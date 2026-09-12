@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::Write,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -191,7 +191,7 @@ pub enum RuntimeGateArtifactError {
 }
 
 /// Collapse private staging I/O failures into the stable public staging error.
-fn map_staging_failure(_: io::Error) -> RuntimeGateArtifactError {
+fn map_staging_failure(_: std::io::Error) -> RuntimeGateArtifactError {
     RuntimeGateArtifactError::StagingFailed
 }
 
@@ -334,7 +334,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture, map_staging_failure,
+        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture,
         validate_expected_digest,
     };
 
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn staging_io_errors_map_to_stable_public_error() {
-        let error = map_staging_failure(std::io::Error::other("staging failure witness"));
+        let error = super::map_staging_failure(std::io::Error::other("staging failure witness"));
         assert!(matches!(error, RuntimeGateArtifactError::StagingFailed));
     }
 
