@@ -118,6 +118,15 @@ fn isolation_failure(control_name: &'static str) -> CommandExecutionError {
 }
 
 #[test]
+fn container_inspection_rejects_malformed_json() {
+    assert_eq!(
+        execute_with_evidence("malformed-inspection", "[{", "unused"),
+        Err(malformed("container_inspect")),
+        "malformed inspection JSON must fail closed before any runtime evidence is trusted"
+    );
+}
+
+#[test]
 fn container_inspection_requires_exactly_one_runtime_record() {
     assert_eq!(
         execute_with_evidence("empty-inspection", "[]", "unused"),
