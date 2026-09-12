@@ -5,8 +5,8 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -68,6 +68,14 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
+}
+
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
@@ -81,12 +89,19 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
         network,
         container,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink should be creatable");
+    let script_path = fixture_sidecar(&program, "script");
+    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        fixture_sidecar(&program, "config"),
+        format!(
+            "MODE='source_script'\nLOG='{}'\nSCRIPT='{}'\n",
+            log.display(),
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
     (program, log)
 }
 
@@ -99,6 +114,8 @@ fn closed_loopback_port() -> u16 {
 }
 
 fn remove_fixture(program: PathBuf, log: PathBuf) {
+    let _ = fs::remove_file(fixture_sidecar(&program, "config"));
+    let _ = fs::remove_file(fixture_sidecar(&program, "script"));
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
 }
