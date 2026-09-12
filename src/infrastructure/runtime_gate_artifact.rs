@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, OpenOptions},
-    io::Write,
+    io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -120,20 +120,16 @@ impl RuntimeGateArtifact {
         let staging_directory = tempfile::Builder::new()
             .prefix("qsr-runtime-gate-")
             .tempdir()
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
+            .map_err(map_staging_failure)?;
         let path = staging_directory.path().join(RUNTIME_GATE_FILE_NAME);
         let mut staged = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o555)
             .open(&path)
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
-        staged
-            .write_all(&bytes)
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
-        staged
-            .sync_all()
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
+            .map_err(map_staging_failure)?;
+        staged.write_all(&bytes).map_err(map_staging_failure)?;
+        staged.sync_all().map_err(map_staging_failure)?;
         drop(staged);
 
         Ok(Self {
@@ -192,6 +188,11 @@ pub enum RuntimeGateArtifactError {
     /// The verified bytes could not be materialized into a private read-only executable staging area.
     #[error("runtime gate private staging failed")]
     StagingFailed,
+}
+
+/// Collapse private staging I/O failures into the stable public staging error.
+fn map_staging_failure(_: io::Error) -> RuntimeGateArtifactError {
+    RuntimeGateArtifactError::StagingFailed
 }
 
 /// Require an exact 64-character lowercase hexadecimal SHA-256 release identity.
@@ -333,7 +334,7 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture,
+        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture, map_staging_failure,
         validate_expected_digest,
     };
 
@@ -390,6 +391,12 @@ mod tests {
             validate_expected_digest(&"0".repeat(63)),
             Err(RuntimeGateArtifactError::InvalidExpectedDigest)
         ));
+    }
+
+    #[test]
+    fn staging_io_errors_map_to_stable_public_error() {
+        let error = map_staging_failure(std::io::Error::other("staging failure witness"));
+        assert!(matches!(error, RuntimeGateArtifactError::StagingFailed));
     }
 
     #[test]
