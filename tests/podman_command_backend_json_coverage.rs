@@ -52,8 +52,8 @@ fn malformed_backend_security_json_fails_closed_before_container_create() {
     let program = fixture.path().join("podman");
     let scenario = fixture.path().join("scenario.sh");
     let invocation_log = fixture.path().join("invocations.log");
-    let immutable_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fake_podman.sh");
+    let immutable_fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
 
     symlink(&immutable_fixture, &program).expect("immutable fake Podman symlink should be created");
     fs::write(
