@@ -30,7 +30,7 @@ jobs:
           import base64
           import subprocess
 
-          expected_parent = "c5c2fdc4211fe955de06b4a1c363b5157273560c"
+          expected_parent = "0c4188e812939dfda4c9916dd365f28c257402a3"
           actual_parent = subprocess.check_output(["git", "rev-parse", "HEAD^"], text=True).strip()
           if actual_parent != expected_parent:
               raise SystemExit(f"repair parent drifted: expected {expected_parent}, got {actual_parent}")
@@ -63,6 +63,47 @@ jobs:
           sed -i 's/ApplicationServiceEror/ApplicationServiceError/' src/infrastructure/podman.rs
           ! grep -q 'ApplicationServiceEror' src/infrastructure/podman.rs
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/infrastructure/bounded_command_concrete_tests.rs")
+          text = path.read_text()
+          old_import = "use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};"
+          new_import = "use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};"
+          if text.count(old_import) != 1:
+              raise SystemExit("concrete test import anchor drifted")
+          text = text.replace(old_import, new_import, 1)
+
+          old_map = '''        .map(|outcome| {
+            (
+                outcome.status.is_some_and(|status| status.success()),
+                outcome.timed_out,
+                outcome.stdout,
+                outcome.stdout_truncated,
+                outcome.stderr,
+                outcome.stderr_truncated,
+            )
+        });'''
+          new_map = '''        .map(|outcome| {
+            (
+                outcome.completion,
+                outcome.stdout,
+                outcome.stdout_truncated,
+                outcome.stderr,
+                outcome.stderr_truncated,
+            )
+        });'''
+          if text.count(old_map) != 1:
+              raise SystemExit("concrete test completion map anchor drifted")
+          text = text.replace(old_map, new_map, 1)
+
+          old_expected = 'Ok((false, false, b"1234".to_vec(), true, vec![], false))'
+          new_expected = 'Ok((BoundedCompletion::OutputLimit, b"1234".to_vec(), true, vec![], false))'
+          if text.count(old_expected) != 1:
+              raise SystemExit("concrete test expectation anchor drifted")
+          path.write_text(text.replace(old_expected, new_expected, 1))
+          PY
+
       - name: Format and validate repair
         shell: bash
         run: |
@@ -78,7 +119,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm .github/workflows/repair-command-completion-state.yml
-          git add src/infrastructure/bounded_command.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
+          git add src/infrastructure/bounded_command.rs src/infrastructure/bounded_command_concrete_tests.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(command): type bounded completion state'
