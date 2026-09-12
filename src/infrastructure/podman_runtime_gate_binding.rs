@@ -189,17 +189,14 @@ impl RuntimeGatePodmanAdapter {
                 })
             })?;
 
-        // Successful spawn after explicitly requesting piped handles guarantees both child handles.
-        // Keep that construction invariant out of the runtime error surface instead of maintaining
-        // structurally unreachable fail-closed branches that cannot be produced by this call site.
-        let stdout = child
-            .stdout
-            .take()
-            .expect("release client stdout is piped by construction");
-        let mut stdin = child
-            .stdin
-            .take()
-            .expect("release client stdin is piped by construction");
+        let stdout = take_release_pipe(
+            child.stdout.take(),
+            RUNTIME_GATE_RELEASE_ACK_OPERATION,
+        )?;
+        let mut stdin = take_release_pipe(
+            child.stdin.take(),
+            RUNTIME_GATE_RELEASE_WRITE_OPERATION,
+        )?;
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let _reader = thread::spawn(move || {
@@ -241,6 +238,18 @@ fn is_exact_container_id(container_id: &str) -> bool {
         && container_id
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Preserve a provider-neutral fail-closed error if the release-client pipe invariant is broken.
+///
+/// `release_command_gate` asks `Command` for piped stdin and stdout before spawning. The standard
+/// library exposes those configured pipes on `Child`; keeping this tiny guard separate avoids a
+/// panic shortcut while making the defensive contradiction path directly testable.
+fn take_release_pipe<T>(
+    pipe: Option<T>,
+    operation: &'static str,
+) -> Result<T, CommandExecutionError> {
+    pipe.ok_or_else(|| release_invocation_error(operation))
 }
 
 /// Read until the trusted gate's exact acknowledgement or the fixed control-byte budget is spent.
@@ -329,8 +338,13 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
-    use super::RootlessPodmanAdapter;
-    use crate::{CommandExecutionRequest, IsolationPolicy, ResourceRequest, RuntimeGateArtifact};
+    use super::{
+        RUNTIME_GATE_RELEASE_ACK_OPERATION, RootlessPodmanAdapter, take_release_pipe,
+    };
+    use crate::{
+        ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+        ResourceRequest, RuntimeGateArtifact,
+    };
 
     const ELF_HEADER_BYTES: usize = 64;
     const PROGRAM_HEADER_BYTES: usize = 56;
@@ -393,6 +407,23 @@ mod tests {
                 tmpfs_bytes: 16 * 1024 * 1024,
             },
         }
+    }
+
+    #[test]
+    fn release_pipe_guard_preserves_present_handle_and_rejects_missing_handle() {
+        assert_eq!(
+            take_release_pipe(Some(7_u8), RUNTIME_GATE_RELEASE_ACK_OPERATION)
+                .expect("present release pipe should be preserved"),
+            7
+        );
+        let error = take_release_pipe::<u8>(None, RUNTIME_GATE_RELEASE_ACK_OPERATION)
+            .expect_err("missing release pipe should fail closed");
+        assert!(matches!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: RUNTIME_GATE_RELEASE_ACK_OPERATION,
+            })
+        ));
     }
 
     #[test]
