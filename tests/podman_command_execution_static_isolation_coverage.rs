@@ -71,15 +71,51 @@ fn fake_podman(mode: &str) -> (TempDir, PathBuf, PathBuf) {
     let scenario = directory.path().join("scenario.sh");
     symlink(fixture_executable(), &program).expect("fake Podman symlink must be creatable");
 
-    let (readonly_rootfs, privileged, security_options, userns_mode, pid_mode, ipc_mode) = match mode {
-        "writable_root" => (false, false, "[\"no-new-privileges\"]", "auto", "private", "none"),
-        "privileged" => (true, true, "[\"no-new-privileges\"]", "auto", "private", "none"),
-        "missing_nnp" => (true, false, "[]", "auto", "private", "none"),
-        "host_userns" => (true, false, "[\"no-new-privileges\"]", "host", "private", "none"),
-        "host_pid" => (true, false, "[\"no-new-privileges\"]", "auto", "host", "none"),
-        "host_ipc" => (true, false, "[\"no-new-privileges\"]", "auto", "private", "host"),
-        other => panic!("unsupported static isolation mode: {other}"),
-    };
+    let (readonly_rootfs, privileged, security_options, userns_mode, pid_mode, ipc_mode) =
+        match mode {
+            "writable_root" => (
+                false,
+                false,
+                "[\"no-new-privileges\"]",
+                "auto",
+                "private",
+                "none",
+            ),
+            "privileged" => (
+                true,
+                true,
+                "[\"no-new-privileges\"]",
+                "auto",
+                "private",
+                "none",
+            ),
+            "missing_nnp" => (true, false, "[]", "auto", "private", "none"),
+            "host_userns" => (
+                true,
+                false,
+                "[\"no-new-privileges\"]",
+                "host",
+                "private",
+                "none",
+            ),
+            "host_pid" => (
+                true,
+                false,
+                "[\"no-new-privileges\"]",
+                "auto",
+                "host",
+                "none",
+            ),
+            "host_ipc" => (
+                true,
+                false,
+                "[\"no-new-privileges\"]",
+                "auto",
+                "private",
+                "host",
+            ),
+            other => panic!("unsupported static isolation mode: {other}"),
+        };
     let inspect = format!(
         "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":{readonly_rootfs},\"Privileged\":{privileged},\"SecurityOpt\":{security_options},\"UsernsMode\":\"{userns_mode}\",\"PidMode\":\"{pid_mode}\",\"IpcMode\":\"{ipc_mode}\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[]}}]"
     );
