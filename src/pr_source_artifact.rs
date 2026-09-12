@@ -186,27 +186,22 @@ fn validate_declared_file_length(
 }
 
 fn collect_regular_files(
-    root: &Path,
     directory: &Path,
+    relative_directory: &Path,
     files: &mut Vec<(PathBuf, PathBuf, bool, u64)>,
 ) -> Result<(), PrSourceArtifactError> {
     let entries = fs::read_dir(directory).map_err(PrSourceArtifactError::Io)?;
     for entry in entries {
         let entry = entry.map_err(PrSourceArtifactError::Io)?;
         let path = entry.path();
-        // `read_dir` yields children of `directory`; because every recursive
-        // directory is itself beneath `root`, a successful strip always has a
-        // non-empty child-relative path. Do not manufacture an unreachable
-        // security branch for an invariant already established by traversal.
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| PrSourceArtifactError::InvalidInput {
-                field_name: "host_path",
-            })?
-            .to_path_buf();
+        // `read_dir` yields a child name without leading path components. Carry
+        // the already-proven relative traversal state forward instead of
+        // re-deriving it with `strip_prefix` and manufacturing an impossible
+        // error branch after successful rooted traversal.
+        let relative = relative_directory.join(entry.file_name());
         let metadata = fs::symlink_metadata(&path).map_err(PrSourceArtifactError::Io)?;
         if metadata.is_dir() {
-            collect_regular_files(root, &path, files)?;
+            collect_regular_files(&path, &relative, files)?;
         } else if metadata.is_file() {
             files.push((relative, path, metadata.mode() & 0o111 != 0, metadata.len()));
         } else {
@@ -250,7 +245,7 @@ pub fn stage_pr_source_artifact(
         canonical_root.ino(),
     )?;
     let mut files = Vec::new();
-    collect_regular_files(&source, &source, &mut files)?;
+    collect_regular_files(&source, Path::new(""), &mut files)?;
     files.sort_by(|left, right| {
         left.0
             .as_os_str()
