@@ -607,14 +607,11 @@ impl RootlessPodmanAdapter {
             observed_started_at_epoch_seconds,
         )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
-        let create_receipt_directory = tempfile::Builder::new()
-            .prefix("qsr-command-create-")
-            .tempdir()
-            .map_err(|_| {
-                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                    operation: "container_create_receipt",
-                })
-            })?;
+        let create_receipt_directory = resolve_command_create_receipt_directory(
+            tempfile::Builder::new()
+                .prefix("qsr-command-create-")
+                .tempdir(),
+        )?;
         let create_receipt_path = create_receipt_directory.path().join("container-id");
         let create_receipt_path_text =
             create_receipt_path
@@ -1771,6 +1768,36 @@ fn runtime_epoch_seconds(operation: &'static str) -> Result<u64, CommandExecutio
     epoch_seconds_from_system_time(SystemTime::now(), operation)
 }
 
+/// Preserve the provider-neutral create-receipt failure contract without
+/// requiring process-global temporary-directory mutation in tests.
+fn resolve_command_create_receipt_directory(
+    result: std::io::Result<tempfile::TempDir>,
+) -> Result<tempfile::TempDir, CommandExecutionError> {
+    match result {
+        Ok(directory) => Ok(directory),
+        Err(_) => Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            },
+        )),
+    }
+}
+
+/// Reject execution identity construction when the OS entropy source fails.
+fn require_execution_identity_entropy(
+    entropy_available: bool,
+) -> Result<(), CommandExecutionError> {
+    if entropy_available {
+        Ok(())
+    } else {
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "execution_identity",
+            },
+        ))
+    }
+}
+
 fn epoch_seconds_from_system_time(
     observed: SystemTime,
     operation: &'static str,
@@ -1806,11 +1833,7 @@ fn command_sandbox_identity(
     started_at_epoch_seconds: u64,
 ) -> Result<String, CommandExecutionError> {
     let mut execution_nonce = [0_u8; 16];
-    getrandom::fill(&mut execution_nonce).map_err(|_| {
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "execution_identity",
-        })
-    })?;
+    require_execution_identity_entropy(getrandom::fill(&mut execution_nonce).is_ok())?;
 
     let mut hasher = Sha256::new();
     for component in [request_id, image_reference, policy_id] {
@@ -1888,6 +1911,33 @@ mod tests {
         map_bounded_command_error, validate_command_chronology,
     };
     use crate::{ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError};
+
+    #[test]
+    fn command_create_receipt_directory_failure_is_typed() {
+        let error = super::resolve_command_create_receipt_directory(Err(std::io::Error::other(
+            "deterministic receipt directory failure",
+        )))
+        .expect_err("receipt-directory creation failure must fail closed");
+        assert_eq!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            },)
+        );
+    }
+
+    #[test]
+    fn execution_identity_entropy_failure_is_typed() {
+        assert_eq!(super::require_execution_identity_entropy(true), Ok(()));
+        assert_eq!(
+            super::require_execution_identity_entropy(false),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "execution_identity",
+                },
+            ))
+        );
+    }
 
     #[test]
     fn command_chronology_accepts_equal_and_ordered_runtime_observations() {

@@ -1,3 +1,12 @@
+<!-- current-authority-2026-09-13-command-owner-system-failures -->
+## Current authority supersession — command-owner system failure coverage (2026-09-13)
+
+Exact native artifacts on `a28803f47aad499a6c411596831ca365971076df` measure **5068/5129 lines, 484/486 functions, 6805/6956 regions, and 712/720 branches**. `podman_runtime_gate_binding.rs` is **60/60 functions and 24/24 branches**, closing the earlier release-token entropy deficit. Source-coordinate grouping isolates the remaining two wholly unexecuted `podman.rs` function outcomes as command-owner system failures: command create-receipt temporary-directory creation failure and execution-identity OS entropy failure.
+
+This descendant preserves the same production APIs and provider-neutral errors while replacing only those hard-to-induce mapper closures with deterministic decision boundaries. Production still calls `tempfile::Builder::tempdir()` and `getrandom::fill`; tests inject an explicit failed `io::Result` into the receipt resolver and exercise the entropy decision directly. Process-global environment/permission mutation, host RNG fault injection, retry/fallback entropy, panic/unsafe, coverage exclusions, and application-service fixture duplication are rejected. See `docs/doctoring/COMMAND_OWNER_SYSTEM_FAILURE_TRACEABILITY.md`.
+
+The first staging attempt for this repair failed before changing source because its authoring matcher was indentation-fragile; the failed workflow was removed. Native exact-head CI/coverage must be reacquired after the replacement source-fix publishes before these repairs become merge authority. Application-service lifecycle/readiness and network-inspection gaps remain #21/#113 canonical work. Positive effective-LSM, independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain blockers.
+
 <!-- current-authority-2026-09-13-release-token-entropy -->
 ## Current authority supersession — runtime-gate release-token entropy failure (2026-09-13)
 
