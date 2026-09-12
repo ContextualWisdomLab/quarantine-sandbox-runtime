@@ -449,7 +449,7 @@ mod tests {
         let empty = Ok(Vec::new());
 
         assert_eq!(
-            finalize_completion((wait, capture, empty.clone(), false, false)),
+            finalize_completion((wait, capture.clone(), empty.clone(), false, false)),
             Err(BoundedCommandError::Capture)
         );
         assert_eq!(
