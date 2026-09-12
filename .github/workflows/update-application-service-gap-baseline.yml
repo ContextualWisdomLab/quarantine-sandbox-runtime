@@ -1,0 +1,54 @@
+name: one-shot update application-service gap baseline
+
+on:
+  push:
+    branches:
+      - test/application-service-runtime-identity-red
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-application-service-gap-baseline
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: test/application-service-runtime-identity-red
+          fetch-depth: 0
+      - name: Update current authority supersession
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('docs/product-technical-gap-baseline.md')
+          text = path.read_text()
+          old_date = 'Last reviewed on 2026-09-09 KST'
+          if text.count(old_date) != 1:
+              raise SystemExit(f'expected one baseline review date, found {text.count(old_date)}')
+          text = text.replace(old_date, 'Last reviewed on 2026-09-12 KST', 1)
+          marker = '## Application-service isolation and lifecycle\n'
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one application-service marker, found {text.count(marker)}')
+          section = '''## Current application-service authority supersession — 2026-09-12\n\nThis section supersedes stale current-state wording in the historical application-service table below without deleting its causal ledger. Draft #21 current lineage now binds admitted post-create lifecycle/destructive operations to the exact acquired long container ID while retaining generated `qsr-app-*` values as correlation/audit metadata. P0 issue #113 adds a private runtime-owned create receipt so successful create with malformed stdout can recover and clean only a proven exact container ID; generated names are never a destructive fallback.\n\nA later exact-head review found that stdout identity parsing still admitted upper-case ASCII hexadecimal while create-receipt admission allowed only lower-case hexadecimal. Causal RED `db42f814265dbf99c807b843000dc8aa93cc8ba7`, native CI `34668364957`, proved a 64-character upper-case `A` identifier could cross the stdout parser. Minimum production repair `31cc048a8a94e73dca49ee5d2c097582859b039a` aligned stdout admission with the receipt contract: exactly 64 ASCII digits or lower-case `a` through `f`, with no normalization of untrusted input. The purpose-bound source-fix workflow removed itself after focused/full tests, Clippy/rustdoc `-D warnings`, formatting, and `git diff --check` passed.\n\nConnector-authored exact candidate `7d176d59ebe063535a51006b01197404a95e8402`, native CI `34668885473`, then reacquired repository policy, formatting, full workspace/all-target tests, Clippy, rustdoc, production coverage, branch coverage, and hosted negative rootless/AppArmor GREEN on one unchanged head. Uploaded branch evidence reports lines `2123/2123`, functions `205/205`, branches `462/462`; raw LLVM regions remain `2816/2819` and are not represented as 100%. Repository canonical source-region admission passed. Production coverage artifact `10289985875` has `sha256:66cf92e434c53e5eecd2eb98a490ac407a24eb581aca1a1dc0462fa61e8cfca8`; branch artifact `10290995707` has `sha256:7161525c2367a826632c54dae040118f64b36897c85b994f58d718c1e82fec89`.\n\nThis is candidate evidence, not release authority. Dedicated positive effective-LSM remains queued on `[self-hosted, linux, cwl-hostile-workload, selinux]`; qualifying independent approval/security, ordinary protected integration, and immutable release/SBOM/provenance/reproducibility/rollback evidence are still required. Issue #113 therefore remains open, and no tag/package/GitHub Release or consumer pin is authorized.\n\n'''
+          if '## Current application-service authority supersession — 2026-09-12' not in text:
+              text = text.replace(marker, section + marker, 1)
+          path.write_text(text)
+      - name: Validate deterministic documentation delta
+        run: |
+          git diff --check
+          grep -F '31cc048a8a94e73dca49ee5d2c097582859b039a' docs/product-technical-gap-baseline.md
+          grep -F '7d176d59ebe063535a51006b01197404a95e8402' docs/product-technical-gap-baseline.md
+          grep -F '2816/2819' docs/product-technical-gap-baseline.md
+      - name: Remove one-shot workflow and publish ordinary descendant
+        run: |
+          rm .github/workflows/update-application-service-gap-baseline.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/product-technical-gap-baseline.md .github/workflows/update-application-service-gap-baseline.yml
+          git commit -m 'docs: refresh application-service gap authority'
+          git push origin HEAD:test/application-service-runtime-identity-red
