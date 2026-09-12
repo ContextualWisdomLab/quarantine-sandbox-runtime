@@ -10,7 +10,7 @@
 #[path = "support/runtime_gate_fixture.rs"]
 mod runtime_gate_fixture;
 
-use std::{fs, os::unix::fs::PermissionsExt};
+use std::{fs, os::unix::fs::symlink, path::Path};
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -20,7 +20,8 @@ use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
-const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_CONTAINER_ID: &str =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -56,20 +57,21 @@ fn request(request_id: &str) -> CommandExecutionRequest {
 }
 
 fn write_fake_podman(
-    directory: &std::path::Path,
+    directory: &Path,
     gate_path: &str,
     attach_response: &str,
 ) -> (std::path::PathBuf, std::path::PathBuf) {
+    let immutable_fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
     let program = directory.join("podman");
     let calls = directory.join("calls");
+    let scenario = directory.join("runtime_gate_ack_scenario.sh");
+    let config = directory.join("podman.config");
     let inspect = format!(
         "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[{{\"Source\":\"{gate_path}\",\"Destination\":\"/qsr-runtime-gate\",\"Type\":\"bind\",\"Options\":[\"ro\"],\"RW\":false}}]}}]"
     );
     let script = format!(
-        r#"#!/bin/sh
-set -eu
-printf '%s\n' "$*" >> '{calls}'
-case "${{1:-}}:${{2:-}}" in
+        r#"case "${{1:-}}:${{2:-}}" in
   info:--format)
     printf '%s\n' '{{"host":{{"security":{{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}},"version":{{"Version":"6.1.0"}}}}'
     ;;
@@ -99,17 +101,22 @@ case "${{1:-}}:${{2:-}}" in
   *) exit 91 ;;
 esac
 "#,
-        calls = calls.display(),
         owned_id = OWNED_CONTAINER_ID,
         inspect = inspect,
         attach_response = attach_response,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    fs::write(&scenario, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        &config,
+        format!(
+            "MODE=source_script\nLOG='{}'\nSCRIPT='{}'\n",
+            calls.display(),
+            scenario.display()
+        ),
+    )
+    .expect("fake Podman config should be writable");
+    symlink(&immutable_fixture, &program)
+        .expect("fake Podman should symlink to the checked-in immutable executable");
     (program, calls)
 }
 
