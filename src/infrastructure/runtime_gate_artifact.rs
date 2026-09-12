@@ -379,8 +379,8 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        RuntimeGateArtifact, RuntimeGateArtifactError, RuntimeGateStagingIo,
-        executable_architecture, validate_expected_digest,
+        RuntimeGateArtifact, RuntimeGateStagingIo, executable_architecture,
+        validate_expected_digest,
     };
 
     const ELF_HEADER_BYTES: usize = 64;
