@@ -10,11 +10,13 @@ A successful `podman create` may have created a container even when stdout is ma
 
 The application-service adapter therefore treats a runtime-owned `--cidfile` receipt as a separate authority channel. Container cleanup may target only an admitted exact identifier. Generated correlation names remain audit/public lease metadata and must never be promoted to `rm --force` authority.
 
+The stdout and receipt proof channels must also enforce the same identifier grammar before destructive use. The repository contract is one exact 64-character lower-case hexadecimal container identifier. Upper-case `A-F` is not normalized and must not be admitted as an alternative spelling of destructive authority.
+
 ## Implemented boundary
 
 Current PR #21 lineage provisions a private temporary create receipt, inserts `--cidfile=<runtime-owned path>` into the create argv, and reconciles stdout with the receipt before post-create lifecycle operations.
 
-The admission contract is intentionally narrower for destructive receipt authority than the legacy stdout parser: a receipt is one exact 64-character lower-case hexadecimal identifier. Missing, malformed, invalid UTF-8, mismatched, or unreadable receipt state fails closed. When an exact receipt or already-admitted stdout identifier exists, cleanup uses only that exact identifier. Cleanup failure takes precedence over the original create/reconciliation error because incomplete cleanup is the stronger operational failure.
+The admission contract is intentionally narrow for destructive authority: stdout and receipt evidence must resolve to one exact 64-character lower-case hexadecimal identifier. Missing, malformed, invalid UTF-8, mismatched, unreadable, name-like, short, non-hexadecimal, upper-case, or padded identity evidence fails closed. When an exact receipt or already-admitted stdout identifier exists, cleanup uses only that exact identifier. Cleanup failure takes precedence over the original create/reconciliation error because incomplete cleanup is the stronger operational failure.
 
 No branch falls back to `rm --force qsr-app-*`.
 
@@ -26,6 +28,9 @@ No branch falls back to `rm --force qsr-app-*`.
 - `f28d9ac2fc8dd404b6b297478e135f73e0383b4e` added cleanup-precedence cases covering failed create, malformed stdout, receipt mismatch/read failure, exact-ID container cleanup failure, and network cleanup failure while forbidding generated-name destructive fallback.
 - Exact CI `34667414544` on `f28d9ac2...` passed verify and hosted negative rootless/AppArmor. Production coverage reached lines `2072/2072` and functions `202/202`; branch coverage reached `460/460`. The canonical source-region gate retained one uncovered region at the `plan_at` propagation of `runtime_identity()` failure, so 100% coverage was not claimed.
 - `c41f721e3044c44fca7e1e1350bb48c935429436` introduced a private identity-source seam that preserves public `plan_at` behavior and validation/expiry ordering while allowing the existing typed `RuntimeIdentityUnavailable` path to be exercised through launch planning. The purpose-bound source-fix workflow removed itself in the same ordinary descendant after full tests, Clippy `-D warnings`, rustdoc `-D warnings`, formatting, and `git diff --check` passed.
+- `1f0b2d8607407e4057fc9fdfffde72364ff1a80e` reached the repository's canonical production coverage and branch-coverage admissions. Its uploaded production evidence reported lines `2120/2120`, functions `205/205`, and branches `460/460`; raw LLVM regions remained `2813/2816`, so that raw counter is not represented as 100%.
+- Review of that exact lineage found an inconsistent proof grammar: `parse_backend_identifier()` admitted upper-case ASCII hexadecimal while the create-receipt parser admitted only lower-case hexadecimal. `db42f814265dbf99c807b843000dc8aa93cc8ba7` added a causal regression requiring `A` repeated 64 times to fail before application-service lifecycle use. Native CI run `34668364957` reached the Test step after repository validation and formatting, then failed as expected on the new regression; the hosted negative rootless/AppArmor lane remained green. This is the RED evidence for the grammar inconsistency.
+- The selected causal repair is deliberately smaller than receipt/lifecycle behavior: replace broad ASCII-hex admission in the stdout parser with the same digit-or-`a`-through-`f` predicate used by the receipt boundary. It does not lowercase untrusted input and does not change public error taxonomy, cleanup precedence, retry policy, lifecycle ordering, or resource planning. Exact GREEN SHA and native whole-head evidence remain pending until the source-fix descendant is published and revalidated.
 
 ## Evidence hierarchy and remaining gates
 
