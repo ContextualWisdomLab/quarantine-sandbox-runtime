@@ -1,0 +1,85 @@
+name: One-shot command release callback reachability repair
+
+'on':
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/one-shot-command-release-callback-reachability.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify single-writer head
+        env:
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+      - name: Remove unreachable legacy release callback closure
+        env:
+          OLD_LEGACY_CALL_B64: ICAgICAgICBzZWxmLnJ1bl9jb21tYW5kX3dpdGhfYmluZGluZ19hdCgKICAgICAgICAgICAgcmVxdWVzdCwKICAgICAgICAgICAgcG9saWN5LAogICAgICAgICAgICBzdGFydGVkX2F0X2Vwb2NoX3NlY29uZHMsCiAgICAgICAgICAgIE5vbmUsCiAgICAgICAgICAgIE5vbmUsCiAgICAgICAgICAgIHxffCBPaygoKSksCiAgICAgICAgKQo=
+          NEW_LEGACY_CALL_B64: ICAgICAgICBzZWxmLnJ1bl9jb21tYW5kX3dpdGhfYmluZGluZ19hdCgKICAgICAgICAgICAgcmVxdWVzdCwKICAgICAgICAgICAgcG9saWN5LAogICAgICAgICAgICBzdGFydGVkX2F0X2Vwb2NoX3NlY29uZHMsCiAgICAgICAgICAgIE5vbmUsCiAgICAgICAgICAgIE5vbmUsCiAgICAgICAgICAgIE5vbmU6Ojxmbigmc3RyKSAtPiBSZXN1bHQ8KCksIENvbW1hbmRFeGVjdXRpb25FcnJvcj4+LAogICAgICAgICkK
+          OLD_RUNTIME_CALL_B64: ICAgICAgICAgICAgU29tZShydW50aW1lX2dhdGVfYXJ0aWZhY3RfcGF0aCksCiAgICAgICAgICAgIFNvbWUocnVudGltZV9nYXRlX2JpbmRpbmdfYXJncyksCiAgICAgICAgICAgIHJlbGVhc2VfZ2F0ZSwKICAgICAgICApCg==
+          NEW_RUNTIME_CALL_B64: ICAgICAgICAgICAgU29tZShydW50aW1lX2dhdGVfYXJ0aWZhY3RfcGF0aCksCiAgICAgICAgICAgIFNvbWUocnVudGltZV9nYXRlX2JpbmRpbmdfYXJncyksCiAgICAgICAgICAgIFNvbWUocmVsZWFzZV9nYXRlKSwKICAgICAgICApCg==
+          OLD_SIGNATURE_B64: ICAgICAgICBydW50aW1lX2dhdGVfYXJ0aWZhY3RfcGF0aDogT3B0aW9uPCZQYXRoPiwKICAgICAgICBydW50aW1lX2dhdGVfYmluZGluZ19hcmdzOiBPcHRpb248JltTdHJpbmddPiwKICAgICAgICByZWxlYXNlX2dhdGU6IEYsCiAgICApIC0+IFJlc3VsdDxDb21tYW5kRXhlY3V0aW9uUmVzdWx0LCBDb21tYW5kRXhlY3V0aW9uRXJyb3I+Cg==
+          NEW_SIGNATURE_B64: ICAgICAgICBydW50aW1lX2dhdGVfYXJ0aWZhY3RfcGF0aDogT3B0aW9uPCZQYXRoPiwKICAgICAgICBydW50aW1lX2dhdGVfYmluZGluZ19hcmdzOiBPcHRpb248JltTdHJpbmddPiwKICAgICAgICByZWxlYXNlX2dhdGU6IE9wdGlvbjxGPiwKICAgICkgLT4gUmVzdWx0PENvbW1hbmRFeGVjdXRpb25SZXN1bHQsIENvbW1hbmRFeGVjdXRpb25FcnJvcj4K
+          OLD_RELEASE_B64: ICAgICAgICBpZiBydW50aW1lX2dhdGVfYmluZGluZ19hcmdzLmlzX3NvbWUoKSB7CiAgICAgICAgICAgIHJlbGVhc2VfZ2F0ZSgmY29udGFpbmVyX2lkKS5tYXBfZXJyKHxlcnJvcnwgewogICAgICAgICAgICAgICAgc2VsZi5jbGVhbnVwX293bmVkX2NvbW1hbmRfY29udGFpbmVyX29yX3JlcG9ydCgmY29udGFpbmVyX2lkLCBlcnJvcikKICAgICAgICAgICAgfSk/OwogICAgICAgIH0K
+          NEW_RELEASE_B64: ICAgICAgICBpZiBsZXQgU29tZShyZWxlYXNlX2dhdGUpID0gcmVsZWFzZV9nYXRlIHsKICAgICAgICAgICAgcmVsZWFzZV9nYXRlKCZjb250YWluZXJfaWQpLm1hcF9lcnIofGVycm9yfCB7CiAgICAgICAgICAgICAgICBzZWxmLmNsZWFudXBfb3duZWRfY29tbWFuZF9jb250YWluZXJfb3JfcmVwb3J0KCZjb250YWluZXJfaWQsIGVycm9yKQogICAgICAgICAgICB9KT87CiAgICAgICAgfQo=
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          path = Path('src/infrastructure/podman.rs')
+          text = path.read_text()
+          pairs = [
+              ('OLD_LEGACY_CALL_B64', 'NEW_LEGACY_CALL_B64'),
+              ('OLD_RUNTIME_CALL_B64', 'NEW_RUNTIME_CALL_B64'),
+              ('OLD_SIGNATURE_B64', 'NEW_SIGNATURE_B64'),
+              ('OLD_RELEASE_B64', 'NEW_RELEASE_B64'),
+          ]
+          for old_key, new_key in pairs:
+              old = base64.b64decode(os.environ[old_key]).decode()
+              new = base64.b64decode(os.environ[new_key]).decode()
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exact source fragment once: {old_key}')
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          git rm .github/workflows/one-shot-command-release-callback-reachability.yml
+      - name: Validate causal repair
+        run: |
+          python3 scripts/validate_repository.py
+          cargo fmt --check
+          cargo test --locked --test podman_command_resource_option_coverage
+          cargo test --locked --test podman_runtime_gate_command_integration_red
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+          test ! -e .github/workflows/one-shot-command-release-callback-reachability.yml
+      - name: Publish ordinary descendant
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/infrastructure/podman.rs
+          git commit -m 'refactor(runtime): encode optional release callback'
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/$BRANCH
