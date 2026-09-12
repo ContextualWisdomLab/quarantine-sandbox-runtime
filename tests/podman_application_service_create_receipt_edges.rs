@@ -21,10 +21,8 @@ use quarantine_sandbox_runtime::{
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
-const STDOUT_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const RECEIPT_ID: &str =
-    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+const STDOUT_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const RECEIPT_ID: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -117,10 +115,15 @@ fn cleanup_fixture(program: &Path, log: &Path, unexpected: &Path) {
 
 #[test]
 fn failed_create_with_valid_receipt_cleans_only_the_receipt_id() {
-    let (program, log, unexpected) = write_fake_podman("create_fail_with_receipt", Some(RECEIPT_ID));
+    let (program, log, unexpected) =
+        write_fake_podman("create_fail_with_receipt", Some(RECEIPT_ID));
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
-    let result = adapter.launch_at(&request("create_fail_with_receipt"), &policy(), 1_780_001_300);
+    let result = adapter.launch_at(
+        &request("create_fail_with_receipt"),
+        &policy(),
+        1_780_001_300,
+    );
     assert_eq!(
         result,
         Err(ApplicationServiceError::BackendCommandFailed {
@@ -128,7 +131,11 @@ fn failed_create_with_valid_receipt_cleans_only_the_receipt_id() {
         })
     );
     let calls = calls(&log);
-    assert!(calls.lines().any(|line| line == format!("rm --force {RECEIPT_ID}")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {RECEIPT_ID}"))
+    );
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());
     cleanup_fixture(&program, &log, &unexpected);
@@ -152,8 +159,16 @@ fn matching_stdout_and_receipt_select_the_exact_id_before_start_cleanup() {
         })
     );
     let calls = calls(&log);
-    assert!(calls.lines().any(|line| line == format!("start {STDOUT_ID}")));
-    assert!(calls.lines().any(|line| line == format!("rm --force {STDOUT_ID}")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("start {STDOUT_ID}"))
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {STDOUT_ID}"))
+    );
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());
     cleanup_fixture(&program, &log, &unexpected);
@@ -172,7 +187,11 @@ fn mismatched_stdout_and_receipt_fail_closed_and_cleanup_the_receipt_id() {
         })
     );
     let calls = calls(&log);
-    assert!(calls.lines().any(|line| line == format!("rm --force {RECEIPT_ID}")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {RECEIPT_ID}"))
+    );
     assert!(!calls.lines().any(|line| line.starts_with("start ")));
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());
@@ -180,9 +199,9 @@ fn mismatched_stdout_and_receipt_fail_closed_and_cleanup_the_receipt_id() {
 }
 
 #[test]
-fn malformed_stdout_with_unreadable_receipt_reports_receipt_io_failure_without_container_guessing() {
-    let (program, log, unexpected) =
-        write_fake_podman("malformed_stdout_receipt_read_error", None);
+fn malformed_stdout_with_unreadable_receipt_reports_receipt_io_failure_without_container_guessing()
+{
+    let (program, log, unexpected) = write_fake_podman("malformed_stdout_receipt_read_error", None);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(
@@ -221,7 +240,11 @@ fn valid_stdout_with_unreadable_receipt_cleans_the_admitted_stdout_id() {
         })
     );
     let calls = calls(&log);
-    assert!(calls.lines().any(|line| line == format!("rm --force {STDOUT_ID}")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {STDOUT_ID}"))
+    );
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());
     cleanup_fixture(&program, &log, &unexpected);
