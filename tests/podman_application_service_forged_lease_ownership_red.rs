@@ -15,7 +15,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use quarantine_sandbox_runtime::{ApplicationServiceLease, RootlessPodmanAdapter};
+use quarantine_sandbox_runtime::{
+    ApplicationServiceError, ApplicationServiceLease, RootlessPodmanAdapter,
+};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -89,9 +91,10 @@ fn deserialized_lease_cannot_select_destructive_backend_resources() {
     let lease = forged_lease();
 
     let result = adapter.terminate_at(&lease, 1_780_000_301);
-    assert!(
-        result.is_err(),
-        "a caller-deserialized lease must not be accepted as destructive backend authority; got {result:?}"
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::CleanupAuthorityUnavailable),
+        "a caller-deserialized lease must fail specifically for missing runtime cleanup authority"
     );
     assert_eq!(
         fs::read_to_string(&foreign_marker).expect("foreign marker must remain readable"),
