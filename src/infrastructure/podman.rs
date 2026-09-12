@@ -896,8 +896,11 @@ where
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
     let identifier = text.strip_suffix('\n').unwrap_or(text);
-    (identifier.len() == 64 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| identifier.to_owned())
+    (identifier.len() == 64
+        && identifier
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then(|| identifier.to_owned())
 }
 
 fn read_application_service_create_receipt(
