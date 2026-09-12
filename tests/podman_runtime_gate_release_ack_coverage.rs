@@ -20,8 +20,7 @@ use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
-const OWNED_CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
