@@ -1,3 +1,14 @@
+<!-- current-authority-2026-09-13-release-token-entropy -->
+## Current authority supersession — runtime-gate release-token entropy failure (2026-09-13)
+
+Exact causal coverage RED `c31b569f9d65ba0960b0358fca2c8dc2e8c0e788`, native CI `34709222684`, left verify `103594820336` and hosted negative rootless/AppArmor `103594820266` GREEN while coverage failed only repository-wide 100% admission. Exact totals were **5042/5109 lines, 479/482 functions, 6772/6927 regions, and 710/718 branches**. Runtime-gate binding was **454/462 lines, 55/56 functions, 652/666 regions, and 22/22 branches**; source-coordinate analysis isolated the sole function deficit as the real `getrandom::fill` failure outcome in one-time release-token generation.
+
+The repair keeps OS entropy as the only production source and adds a private deterministic success/failure seam solely to prove that entropy failure returns the existing provider-neutral `BackendInvocationFailed { operation: "runtime_gate_release_token" }` without a guessed/deterministic token. The success witness proves hashing of the exact supplied 32-byte nonce. Retry, fallback entropy, host-RNG mutation, panic/unsafe, and coverage exclusion are rejected. `docs/doctoring/RUNTIME_GATE_RELEASE_TOKEN_ENTROPY_TRACEABILITY.md` records the causal evidence, decision, acceptance contract, and pinned getrandom primary reference.
+
+The first temporary source-fix workflow at `dd917bd93c508d9aa26d0c7b0f5783bef83f5a01` failed before source publication because its encoded test payload contained an invalid literal `\r`; validation and push were skipped. That failed workflow was removed. This replacement source-fix workflow must also remove itself after local validation, and its bot-authored source commit is not merge authority until an ordinary descendant reacquires native exact-head CI/coverage/security.
+
+Application-service lifecycle/readiness remains canonical #21/#113 work. Positive effective-LSM, qualifying independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain blockers.
+
 <!-- current-authority-2026-09-13-pr-source-relative-path -->
 ## Current authority supersession — PR source traversal relative-path invariant (2026-09-13)
 

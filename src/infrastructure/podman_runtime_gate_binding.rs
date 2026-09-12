@@ -369,14 +369,24 @@ fn fail_after_release_client_cleanup(
     terminate_release_client(child).err().unwrap_or(original)
 }
 
+/// Fill one release-token nonce from the operating-system entropy source.
+fn fill_runtime_gate_nonce(nonce: &mut [u8; 32]) -> bool {
+    getrandom::fill(nonce).is_ok()
+}
+
 /// Generate an unpredictable one-time release token without a deterministic fallback.
 fn runtime_gate_release_token() -> Result<String, CommandExecutionError> {
+    runtime_gate_release_token_with(fill_runtime_gate_nonce)
+}
+
+/// Resolve one entropy attempt behind a deterministic private test seam.
+fn runtime_gate_release_token_with(
+    fill_nonce: fn(&mut [u8; 32]) -> bool,
+) -> Result<String, CommandExecutionError> {
     let mut nonce = [0_u8; 32];
-    getrandom::fill(&mut nonce).map_err(|_| {
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "runtime_gate_release_token",
-        })
-    })?;
+    if !fill_nonce(&mut nonce) {
+        return Err(release_invocation_error("runtime_gate_release_token"));
+    }
     Ok(format!("{:x}", Sha256::digest(nonce)))
 }
 
@@ -404,6 +414,28 @@ mod tests {
         ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
         ResourceRequest, RuntimeGateArtifact,
     };
+
+    #[test]
+    fn release_token_entropy_failure_is_fail_closed() {
+        let error = super::runtime_gate_release_token_with(|_| false)
+            .expect_err("entropy failure must not produce a release token");
+        assert!(matches!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: "runtime_gate_release_token"
+            })
+        ));
+    }
+
+    #[test]
+    fn release_token_entropy_success_hashes_exact_nonce() {
+        let token = super::runtime_gate_release_token_with(|nonce| {
+            nonce.fill(0xa5);
+            true
+        })
+        .expect("deterministic entropy seam should produce a token");
+        assert_eq!(token, format!("{:x}", Sha256::digest([0xa5_u8; 32])));
+    }
 
     const ELF_HEADER_BYTES: usize = 64;
     const PROGRAM_HEADER_BYTES: usize = 56;
