@@ -224,11 +224,28 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
     ) -> Result<PodmanLaunchPlan, ApplicationServiceError> {
+        Self::plan_at_with_identity_source(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            runtime_identity,
+        )
+    }
+
+    fn plan_at_with_identity_source<F>(
+        request: &ApplicationServiceRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+        identity_source: F,
+    ) -> Result<PodmanLaunchPlan, ApplicationServiceError>
+    where
+        F: FnOnce() -> Result<String, ApplicationServiceError>,
+    {
         request.validate(policy)?;
         let expires_at_epoch_seconds = started_at_epoch_seconds
             .checked_add(u64::from(request.resources.lease_seconds))
             .ok_or(ApplicationServiceError::LeaseExpiryOverflow)?;
-        let identity = runtime_identity()?;
+        let identity = identity_source()?;
         let sandbox_name = format!("qsr-app-{identity}");
         let network_name = format!("qsr-net-{identity}");
 
@@ -977,6 +994,52 @@ mod runtime_identity_tests {
     #[test]
     fn entropy_failure_is_typed_and_fail_closed() {
         let result = runtime_identity_with(|_| Err::<(), ()>(()));
+        assert_eq!(
+            result,
+            Err(ApplicationServiceError::RuntimeIdentityUnavailable)
+        );
+    }
+
+    #[test]
+    fn launch_plan_propagates_identity_source_failure_after_domain_validation() {
+        use super::RootlessPodmanAdapter;
+        use crate::{ApplicationServiceRequest, IsolationPolicy, ResourceRequest, ServiceProtocol};
+
+        let request = ApplicationServiceRequest {
+            schema_version: "1.0.0".to_owned(),
+            request_id: "identity_source_failure".to_owned(),
+            image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
+            container_port: 8_080,
+            protocol: ServiceProtocol::Http,
+            command: vec!["serve".to_owned()],
+            resources: ResourceRequest {
+                memory_bytes: 128 * 1024 * 1024,
+                cpu_millicores: 250,
+                maximum_processes: 16,
+                lease_seconds: 30,
+                tmpfs_bytes: 16 * 1024 * 1024,
+            },
+        };
+        let policy = IsolationPolicy {
+            policy_id: "identity_source_failure_policy".to_owned(),
+            maximum_memory_bytes: 256 * 1024 * 1024,
+            maximum_cpu_millicores: 500,
+            maximum_processes: 32,
+            maximum_lease_seconds: 60,
+            maximum_tmpfs_bytes: 32 * 1024 * 1024,
+            readiness_timeout_millis: 100,
+            readiness_poll_interval_millis: 10,
+            shutdown_grace_seconds: 1,
+            run_as_user_id: 65_532,
+            run_as_group_id: 65_532,
+        };
+
+        let result = RootlessPodmanAdapter::plan_at_with_identity_source(
+            &request,
+            &policy,
+            1_780_001_600,
+            || Err(ApplicationServiceError::RuntimeIdentityUnavailable),
+        );
         assert_eq!(
             result,
             Err(ApplicationServiceError::RuntimeIdentityUnavailable)
