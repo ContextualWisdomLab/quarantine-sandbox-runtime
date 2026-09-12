@@ -1,6 +1,6 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-09 KST against root Draft PR #1 exact `5c6a44bb2b35eb17d0315d72db242f4488c3c426`, application-service runtime/lifecycle Draft #21 current candidate lineage, protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`, and the live open PR/Issue/security state. This ledger separates protected truth, active-PR implementation, checked-in RED, causal RED, candidate GREEN, real backend evidence, central required-workflow evidence, and release authority. Evidence from a predecessor SHA never transfers after implementation or dependency movement.
+Last reviewed on 2026-09-12 KST against root Draft PR #1 exact `5c6a44bb2b35eb17d0315d72db242f4488c3c426`, application-service runtime/lifecycle Draft #21 current candidate lineage, protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`, and the live open PR/Issue/security state. This ledger separates protected truth, active-PR implementation, checked-in RED, causal RED, candidate GREEN, real backend evidence, central required-workflow evidence, and release authority. Evidence from a predecessor SHA never transfers after implementation or dependency movement.
 
 ## Product responsibility and DDD authority
 
@@ -31,6 +31,16 @@ The runtime currently owns no durable database. Any future durable job/evidence/
 | SAST | Predecessor root SAST Semgrep was GREEN; the final protected integration SHA still requires its own current SAST result. | Reacquire after source movement | Do not treat one security gate or predecessor result as full release authority. |
 
 GitHub's immutable-action guidance requires full-length commit SHA pinning for external actions, while its `$/` self-repository syntax is already bound to the exact running workflow commit and must not carry an `@ref` suffix. Organization/reusable CI/review/security/release policy remains canonical in `ContextualWisdomLab/.github`; repository validation is defense in depth and must preserve that distinction without duplicating central workflow implementation.
+
+## Current application-service authority supersession — 2026-09-12
+
+This section supersedes stale current-state wording in the historical application-service table below without deleting its causal ledger. Draft #21 current lineage now binds admitted post-create lifecycle/destructive operations to the exact acquired long container ID while retaining generated `qsr-app-*` values as correlation/audit metadata. P0 issue #113 adds a private runtime-owned create receipt so successful create with malformed stdout can recover and clean only a proven exact container ID; generated names are never a destructive fallback.
+
+A later exact-head review found that stdout identity parsing still admitted upper-case ASCII hexadecimal while create-receipt admission allowed only lower-case hexadecimal. Causal RED `db42f814265dbf99c807b843000dc8aa93cc8ba7`, native CI `34668364957`, proved a 64-character upper-case `A` identifier could cross the stdout parser. Minimum production repair `31cc048a8a94e73dca49ee5d2c097582859b039a` aligned stdout admission with the receipt contract: exactly 64 ASCII digits or lower-case `a` through `f`, with no normalization of untrusted input. The purpose-bound source-fix workflow removed itself after focused/full tests, Clippy/rustdoc `-D warnings`, formatting, and `git diff --check` passed.
+
+Connector-authored exact candidate `7d176d59ebe063535a51006b01197404a95e8402`, native CI `34668885473`, then reacquired repository policy, formatting, full workspace/all-target tests, Clippy, rustdoc, production coverage, branch coverage, and hosted negative rootless/AppArmor GREEN on one unchanged head. Uploaded branch evidence reports lines `2123/2123`, functions `205/205`, branches `462/462`; raw LLVM regions remain `2816/2819` and are not represented as 100%. Repository canonical source-region admission passed. Production coverage artifact `10289985875` has `sha256:66cf92e434c53e5eecd2eb98a490ac407a24eb581aca1a1dc0462fa61e8cfca8`; branch artifact `10290995707` has `sha256:7161525c2367a826632c54dae040118f64b36897c85b994f58d718c1e82fec89`.
+
+This is candidate evidence, not release authority. Dedicated positive effective-LSM remains queued on `[self-hosted, linux, cwl-hostile-workload, selinux]`; qualifying independent approval/security, ordinary protected integration, and immutable release/SBOM/provenance/reproducibility/rollback evidence are still required. Issue #113 therefore remains open, and no tag/package/GitHub Release or consumer pin is authorized.
 
 ## Application-service isolation and lifecycle
 
