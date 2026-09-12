@@ -1,3 +1,13 @@
+## Current authority supersession — command release-callback reachability (2026-09-13)
+
+Exact causal RED `2c66fca09e01b7301e1722b58f802f91ddb71543`, native CI `34704870262`, generated branch artifact `10301233710` (`sha256:bc3ede1d5cf85d56eaea79b6256974c4722a2bd6ec6f60ceabb568d69a18bd39`) at 5044/5114 lines, 479/484 functions, 6772/6929 regions, and 710/718 branches. Source-coordinate/instantiation analysis identified one command-owner function deficit as the anonymous no-op closure supplied by `run_legacy_command_at_for_test`: that call always passed `runtime_gate_binding_args = None`, while `run_command_with_binding_at` only invoked the callback when runtime-gate binding args were present. The closure was therefore structurally unreachable, not a missing hostile workload fixture.
+
+One-shot exact `5e3c4a527eeb3cdf7f0b193b688986fd572df19d`, run `34707552403`, job `103590244387`, replaced that contradictory representation and validated the repair before publication. Ordinary source descendant `5a146ada3f3bfc5a325ce99dbea95faedd4a218f` makes release control explicitly optional: the legacy debug path passes `None`, the runtime-gated path passes `Some(release_gate)`, and the callback executes only from `Some`. The temporary source-fix workflow removed itself in the same commit. Repository validation, rustfmt, focused legacy/runtime-gate tests, full locked workspace/all-target tests, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check` all passed in the one-shot job.
+
+Connector-authored no-tree-change descendant `f337419fffab80509fd9da941168c588a7e01039` exists only to reacquire native exact-head CI because the bot-authored source commit produced an `action_required` PR run. No predecessor coverage or GREEN status transfers until that exact native run completes. The application-service owner remains PR #21 at `65f69de6eb1cf78b316b38424f8c35c316cd0672`: its hosted verify, production coverage, branch coverage, and negative rootless/AppArmor lanes are GREEN, while dedicated positive SELinux `103566660828` remains runner-unassigned. Application-service lifecycle/readiness coverage and receipt/capability/network-cardinality findings remain owned there and must not be reimplemented in #112.
+
+Release remains blocked on exact-current-head native coverage, positive effective-LSM evidence, qualifying independent review/security, ordinary owner-ancestry integration, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback evidence.
+
 <!-- current-authority-2026-09-12-378abe-exact -->
 ## Current authority supersession — 2026-09-12 exact `378abe88c93d0e4e42e2879851250f158d8c3ce9`
 
