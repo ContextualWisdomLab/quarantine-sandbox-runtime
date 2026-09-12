@@ -19,21 +19,19 @@ jobs:
         with:
           ref: automation/command-chronology-owner-repair
           fetch-depth: 2
+          persist-credentials: true
 
-      - name: Verify repair parent and patch typed completion state
-        shell: python
+      - name: Patch typed completion state
+        shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path
           import subprocess
 
-          expected_parent = "6b65abd55adf1e9d7577d57d839533aa2f1233a1"
-          actual_parent = subprocess.check_output(
-              ["git", "rev-parse", "HEAD^"], text=True
-          ).strip()
+          expected_parent = "b0da4c2f2aa5fcc9bb97d230573dc2691725048a"
+          actual_parent = subprocess.check_output(["git", "rev-parse", "HEAD^"], text=True).strip()
           if actual_parent != expected_parent:
-              raise SystemExit(
-                  f"repair parent drifted: expected {expected_parent}, got {actual_parent}"
-              )
+              raise SystemExit(f"repair parent drifted: expected {expected_parent}, got {actual_parent}")
 
           def replace_once(path: str, old: str, new: str) -> None:
               target = Path(path)
@@ -157,8 +155,8 @@ fn classify_completion_status(
 
           replace_once(
               "src/infrastructure/podman.rs",
-              '''use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};''',
-              '''use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};''',
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};',
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};',
           )
 
           replace_once(
@@ -229,18 +227,19 @@ fn classify_completion_status(
 
 ''',
           )
+          PY
 
-      - name: Format repair
-        run: cargo fmt --all
-
-      - name: Validate repair
+      - name: Format and validate repair
+        shell: bash
         run: |
+          cargo fmt --all
           cargo test --locked --workspace --all-targets --no-fail-fast
           cargo clippy --locked --workspace --all-targets -- -D warnings
           RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
           git diff --check
 
-      - name: Remove repair workflow and publish ordinary descendant
+      - name: Remove one-shot workflow and publish ordinary descendant
+        shell: bash
         run: |
           rm .github/workflows/repair-command-completion-state.yml
           git add src/infrastructure/bounded_command.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
