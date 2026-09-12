@@ -44,7 +44,9 @@ struct HostRuntimeGateStagingIo;
 
 impl RuntimeGateStagingIo for HostRuntimeGateStagingIo {
     fn create_directory(&self) -> io::Result<TempDir> {
-        tempfile::Builder::new().prefix("qsr-runtime-gate-").tempdir()
+        tempfile::Builder::new()
+            .prefix("qsr-runtime-gate-")
+            .tempdir()
     }
 
     fn open_gate(&self, path: &Path) -> io::Result<File> {
@@ -162,9 +164,7 @@ impl RuntimeGateArtifact {
             });
         }
 
-        let staging_directory = staging_io
-            .create_directory()
-            .map_err(map_staging_failure)?;
+        let staging_directory = staging_io.create_directory().map_err(map_staging_failure)?;
         let path = staging_directory.path().join(RUNTIME_GATE_FILE_NAME);
         let mut staged = staging_io.open_gate(&path).map_err(map_staging_failure)?;
         staging_io
@@ -484,8 +484,8 @@ mod tests {
             uppercase_error.to_string(),
             "runtime gate expected digest is not canonical SHA-256"
         );
-        let short_error = validate_expected_digest(&"0".repeat(63))
-            .expect_err("short digest must fail closed");
+        let short_error =
+            validate_expected_digest(&"0".repeat(63)).expect_err("short digest must fail closed");
         assert_eq!(
             short_error.to_string(),
             "runtime gate expected digest is not canonical SHA-256"
