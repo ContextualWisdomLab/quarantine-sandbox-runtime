@@ -199,11 +199,7 @@ impl RuntimeGatePodmanAdapter {
         });
 
         let release_write = write_release_payload(&mut stdin, &plan.release_token);
-        if release_write.is_err() {
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
-            return Err(fail_after_release_writer_close(stdin, &mut child, original));
-        }
-        drop(stdin);
+        complete_release_payload_write(release_write, stdin, &mut child)?;
 
         let acknowledgement = receiver.recv_timeout(self._inner.command_timeout());
         terminate_release_client(&mut child)?;
@@ -304,6 +300,24 @@ fn write_release_payload(writer: &mut impl Write, release_token: &str) -> io::Re
         .and_then(|()| writer.flush())
 }
 
+/// Resolve the release-write decision while the writer is still owned by this boundary.
+///
+/// The helper makes the real write-failure branch deterministic under unit test while preserving
+/// the production invariant: stdin is closed before attach-client cleanup can begin, and a
+/// successful write closes stdin before acknowledgement processing continues.
+fn complete_release_payload_write(
+    release_write: io::Result<()>,
+    writer: impl Write,
+    child: &mut impl ReleaseClientProcess,
+) -> Result<(), CommandExecutionError> {
+    if release_write.is_err() {
+        let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
+        return Err(fail_after_release_writer_close(writer, child, original));
+    }
+    drop(writer);
+    Ok(())
+}
+
 /// Close the release writer before any failed-write cleanup touches the local attach client.
 fn fail_after_release_writer_close(
     writer: impl Write,
@@ -383,8 +397,8 @@ mod tests {
     use super::{
         RUNTIME_GATE_RELEASE_ACK_OPERATION, RUNTIME_GATE_RELEASE_DETACH_OPERATION,
         RUNTIME_GATE_RELEASE_WRITE_OPERATION, ReleaseClientProcess, RootlessPodmanAdapter,
-        fail_after_release_writer_close, take_release_pipe, terminate_release_client,
-        write_release_payload,
+        complete_release_payload_write, fail_after_release_writer_close, take_release_pipe,
+        terminate_release_client, write_release_payload,
     };
     use crate::{
         ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -606,11 +620,26 @@ mod tests {
         let mut child = ScriptedReleaseClient::new(vec![Ok(Some(exited()))], vec![], vec![])
             .requiring_closed_writer(writer_closed.clone());
 
-        let write_result = write_release_payload(&mut writer, "release-token");
-        assert!(write_result.is_err());
-        let error = fail_after_release_writer_close(writer, &mut child, write_error());
+        let release_write = write_release_payload(&mut writer, "release-token");
+        let error = complete_release_payload_write(release_write, writer, &mut child)
+            .expect_err("failed release write must fail closed after writer close and cleanup");
 
         assert_eq!(error, write_error());
+        assert!(writer_closed.get());
+    }
+
+    #[test]
+    fn release_write_success_closes_writer_without_cleanup() {
+        let writer_closed = Rc::new(Cell::new(false));
+        let mut writer =
+            ScriptedWriter::new(WriterFailure::None).with_close_witness(writer_closed.clone());
+        let mut child = ScriptedReleaseClient::new(vec![], vec![], vec![])
+            .requiring_closed_writer(writer_closed.clone());
+
+        let release_write = write_release_payload(&mut writer, "release-token");
+        complete_release_payload_write(release_write, writer, &mut child)
+            .expect("successful release write should close the writer without cleanup");
+
         assert!(writer_closed.get());
     }
 
