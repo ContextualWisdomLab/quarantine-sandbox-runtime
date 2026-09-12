@@ -1,0 +1,40 @@
+name: Trigger runtime gate repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/repair-runtime-gate-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact trigger head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Trigger existing one-shot repair by an ordinary descendant
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin automation/command-chronology-owner-repair
+          test "$(git rev-parse origin/automation/command-chronology-owner-repair)" = "$EXPECTED_HEAD_SHA"
+          printf '\n# Triggered from exact parent %s\n' "$EXPECTED_HEAD_SHA" >> .github/workflows/repair-runtime-gate-write-branch.yml
+          rm .github/repair-runtime-gate-trigger.txt
+          rm .github/workflows/trigger-runtime-gate-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/repair-runtime-gate-write-branch.yml .github/repair-runtime-gate-trigger.txt .github/workflows/trigger-runtime-gate-repair.yml
+          git commit -m "chore(runtime): trigger one-shot release-write repair"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:automation/command-chronology-owner-repair
