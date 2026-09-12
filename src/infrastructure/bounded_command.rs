@@ -337,8 +337,8 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipes, drain_stream, finalize_output,
-        join_stream, kill_and_reap, supervise_child,
+        BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status, drain_stream,
+        finalize_output, join_stream, kill_and_reap, supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -424,6 +424,14 @@ mod tests {
         assert_eq!(
             captured_pipes(None::<u8>, None::<u8>),
             Err(BoundedCommandError::Capture)
+        );
+    }
+
+    #[test]
+    fn completion_status_preserves_supervisor_wait_failure() {
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::Wait)),
+            Err(BoundedCommandError::Wait)
         );
     }
 
