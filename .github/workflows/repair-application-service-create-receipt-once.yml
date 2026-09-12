@@ -13,10 +13,10 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_PARENT: d1c7a1d1cc79971b1c0daed5d5b3fa8e664511b7
+      EXPECTED_PARENT: a73b67cf05e6e925d5165e2ee2c47a8ab3957773
       WORKFLOW_FILE: .github/workflows/repair-application-service-create-receipt-once.yml
       REPAIR_SCRIPT: .github/scripts/repair_application_service_create_receipt.py
-      RETIRED_FIXTURE_SCRIPT: .github/scripts/repair_root_coverage_receipt_fixture.py
+      FIXTURE_SCRIPT: .github/scripts/repair_root_coverage_receipt_fixture.py
     steps:
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -28,10 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
-          expected=$(printf '%s\n' "$WORKFLOW_FILE" "$RETIRED_FIXTURE_SCRIPT" | sort)
+          expected=$(printf '%s\n' "$WORKFLOW_FILE" "$FIXTURE_SCRIPT" | sort)
           actual=$(git diff --name-only HEAD^ HEAD | sort)
           test "$actual" = "$expected"
-          test ! -e "$RETIRED_FIXTURE_SCRIPT"
       - name: Install repository Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
@@ -60,6 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 "$REPAIR_SCRIPT"
+          python3 "$FIXTURE_SCRIPT"
           cargo check --workspace --all-targets
           cargo fmt --all
           cargo fmt --all -- --check
@@ -86,12 +86,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
+          rm "$WORKFLOW_FILE" "$REPAIR_SCRIPT" "$FIXTURE_SCRIPT"
           python3 scripts/validate_repository.py
           cargo fmt --all -- --check
           git diff --check
-          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs tests/podman_effective_attestation_red.rs tests/podman_launch_error_propagation.rs tests/podman_started_cleanup_remove_failure.rs tests/root_coverage_edges.rs tests/root_coverage_reachable_edges.rs "$WORKFLOW_FILE" "$REPAIR_SCRIPT"
-          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs tests/podman_effective_attestation_red.rs tests/podman_launch_error_propagation.rs tests/podman_started_cleanup_remove_failure.rs tests/root_coverage_edges.rs tests/root_coverage_reachable_edges.rs "$REPAIR_SCRIPT" "$WORKFLOW_FILE" | sort)
+          git add Cargo.toml Cargo.lock src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs tests/podman_effective_attestation_red.rs tests/podman_launch_error_propagation.rs tests/podman_started_cleanup_remove_failure.rs tests/root_coverage_edges.rs tests/root_coverage_reachable_edges.rs "$WORKFLOW_FILE" "$REPAIR_SCRIPT" "$FIXTURE_SCRIPT"
+          expected=$(printf '%s\n' Cargo.lock Cargo.toml src/infrastructure/podman.rs tests/podman_application_service_create_identifier_red.rs tests/podman_isolation_failure_matrix.rs tests/podman_effective_attestation_red.rs tests/podman_launch_error_propagation.rs tests/podman_started_cleanup_remove_failure.rs tests/root_coverage_edges.rs tests/root_coverage_reachable_edges.rs "$REPAIR_SCRIPT" "$FIXTURE_SCRIPT" "$WORKFLOW_FILE" | sort)
           actual=$(git diff --cached --name-only | sort)
           test "$actual" = "$expected"
           git config user.name "github-actions[bot]"
