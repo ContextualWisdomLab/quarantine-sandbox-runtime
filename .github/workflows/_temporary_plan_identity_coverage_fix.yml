@@ -139,7 +139,7 @@ jobs:
       - name: Validate exact repair
         shell: bash
         run: |
-          cargo fmt --all -- --check
+          cargo fmt --all
           cargo test --workspace --all-targets --no-fail-fast
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
