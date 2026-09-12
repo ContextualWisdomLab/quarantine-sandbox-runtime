@@ -189,14 +189,17 @@ impl RuntimeGatePodmanAdapter {
                 })
             })?;
 
-        let Some(stdout) = child.stdout.take() else {
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_ACK_OPERATION);
-            return Err(fail_after_release_client_cleanup(&mut child, original));
-        };
-        let Some(mut stdin) = child.stdin.take() else {
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
-            return Err(fail_after_release_client_cleanup(&mut child, original));
-        };
+        // Successful spawn after explicitly requesting piped handles guarantees both child handles.
+        // Keep that construction invariant out of the runtime error surface instead of maintaining
+        // structurally unreachable fail-closed branches that cannot be produced by this call site.
+        let stdout = child
+            .stdout
+            .take()
+            .expect("release client stdout is piped by construction");
+        let mut stdin = child
+            .stdin
+            .take()
+            .expect("release client stdin is piped by construction");
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let _reader = thread::spawn(move || {
