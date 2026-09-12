@@ -16,9 +16,15 @@ Production continues to call the operating-system entropy source exactly once. `
 
 Rejected alternatives are retry loops, deterministic fallback entropy, environment mutation, host RNG fault injection, panic/unsafe paths, and coverage exclusion.
 
+## Candidate validation and authority boundary
+
+Replacement one-shot run `34710251758`, job `103597602395`, executed exact staging head `c45131e2b3d87ea99cfa90c6df3b814c8fee1317`. Exact-head ownership verification, source/traceability authoring, repository validation, rustfmt, focused entropy tests, the full locked workspace/all-target suite, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check` all completed successfully. The workflow then removed itself and published bot-authored candidate `1d20fbfcda84f89cb27b2bcc387745e9bff62648`.
+
+That one-shot result establishes causal candidate validation only. It is not transferable merge or release authority. This connector-authored documentation descendant exists to reacquire ordinary native exact-head CI and coverage on the same source tree plus this authority record. The former runtime-gate 55/56 function deficit is not considered closed until that descendant's immutable native coverage proves it while preserving the existing 22/22 branch result.
+
 ## Acceptance
 
-The exact descendant must pass repository validation, rustfmt, focused entropy tests, the full locked workspace/all-target test suite, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check`. Native exact-head coverage must then show the former 55/56 runtime-gate function deficit closed without reducing the 22/22 branch result. Positive effective-LSM, independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain separate gates.
+The exact ordinary descendant must pass repository validation, rustfmt, the full locked workspace/all-target test suite, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check`. Native exact-head coverage must then show the former 55/56 runtime-gate function deficit closed without reducing the 22/22 branch result. Positive effective-LSM, independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain separate gates.
 
 ## Primary reference
 
