@@ -129,11 +129,7 @@ fn receipt_failure_paths_surface_cleanup_failure_without_name_fallback() {
         let adapter = RootlessPodmanAdapter::new(program.clone());
 
         assert_eq!(
-            adapter.launch_at(
-                &request(scenario),
-                &policy(),
-                1_780_001_500 + index as u64,
-            ),
+            adapter.launch_at(&request(scenario), &policy(), 1_780_001_500 + index as u64,),
             Err(ApplicationServiceError::CleanupFailed),
             "cleanup must take precedence for scenario {scenario}"
         );
@@ -145,7 +141,10 @@ fn receipt_failure_paths_surface_cleanup_failure_without_name_fallback() {
                 .any(|line| line.starts_with("rm --force qsr-app-")),
             "generated correlation names must never become destructive authority: {calls}"
         );
-        assert!(!unexpected.exists(), "unexpected backend call in {scenario}");
+        assert!(
+            !unexpected.exists(),
+            "unexpected backend call in {scenario}"
+        );
         cleanup_fixture(&program, &log, &unexpected);
     }
 }
