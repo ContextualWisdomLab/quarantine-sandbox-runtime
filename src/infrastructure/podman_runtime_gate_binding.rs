@@ -189,14 +189,9 @@ impl RuntimeGatePodmanAdapter {
                 })
             })?;
 
-        let stdout = take_release_pipe(
-            child.stdout.take(),
-            RUNTIME_GATE_RELEASE_ACK_OPERATION,
-        )?;
-        let mut stdin = take_release_pipe(
-            child.stdin.take(),
-            RUNTIME_GATE_RELEASE_WRITE_OPERATION,
-        )?;
+        let stdout = take_release_pipe(child.stdout.take(), RUNTIME_GATE_RELEASE_ACK_OPERATION)?;
+        let mut stdin =
+            take_release_pipe(child.stdin.take(), RUNTIME_GATE_RELEASE_WRITE_OPERATION)?;
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let _reader = thread::spawn(move || {
@@ -338,9 +333,7 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
-    use super::{
-        RUNTIME_GATE_RELEASE_ACK_OPERATION, RootlessPodmanAdapter, take_release_pipe,
-    };
+    use super::{RUNTIME_GATE_RELEASE_ACK_OPERATION, RootlessPodmanAdapter, take_release_pipe};
     use crate::{
         ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
         ResourceRequest, RuntimeGateArtifact,
