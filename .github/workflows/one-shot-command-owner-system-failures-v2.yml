@@ -1,0 +1,239 @@
+name: One-shot command-owner system failure witnesses v2
+
+'on':
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/one-shot-command-owner-system-failures-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact single-writer head
+        env:
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+      - name: Repair command-owner failure decisions and traceability
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/infrastructure/podman.rs")
+          text = source.read_text()
+
+          receipt_start_token = '        let create_receipt_directory = tempfile::Builder::new()\n'
+          receipt_operation = '                    operation: "container_create_receipt",\n'
+          receipt_end_token = '            })?;\n'
+          receipt_start = text.find(receipt_start_token)
+          if receipt_start < 0:
+              raise SystemExit("command create receipt start anchor missing")
+          receipt_operation_index = text.find(receipt_operation, receipt_start)
+          if receipt_operation_index < 0:
+              raise SystemExit("command create receipt operation anchor missing")
+          receipt_end_start = text.find(receipt_end_token, receipt_operation_index)
+          if receipt_end_start < 0:
+              raise SystemExit("command create receipt end anchor missing")
+          receipt_end = receipt_end_start + len(receipt_end_token)
+          receipt_fragment = text[receipt_start:receipt_end]
+          if receipt_fragment.count('container_create_receipt') != 1 or '.tempdir()' not in receipt_fragment:
+              raise SystemExit("command create receipt fragment is not uniquely bounded")
+          receipt_replacement = '''        let create_receipt_directory = resolve_command_create_receipt_directory(
+              tempfile::Builder::new()
+                  .prefix("qsr-command-create-")
+                  .tempdir(),
+          )?;
+          '''
+          text = text[:receipt_start] + receipt_replacement + text[receipt_end:]
+
+          identity_function = text.find('fn command_sandbox_identity(\n')
+          if identity_function < 0:
+              raise SystemExit("command sandbox identity function anchor missing")
+          entropy_start_token = '    let mut execution_nonce = [0_u8; 16];\n'
+          entropy_start = text.find(entropy_start_token, identity_function)
+          if entropy_start < 0:
+              raise SystemExit("execution identity nonce anchor missing")
+          entropy_operation = '            operation: "execution_identity",\n'
+          entropy_operation_index = text.find(entropy_operation, entropy_start)
+          if entropy_operation_index < 0:
+              raise SystemExit("execution identity operation anchor missing")
+          entropy_end_token = '    })?;\n'
+          entropy_end_start = text.find(entropy_end_token, entropy_operation_index)
+          if entropy_end_start < 0:
+              raise SystemExit("execution identity end anchor missing")
+          entropy_end = entropy_end_start + len(entropy_end_token)
+          entropy_fragment = text[entropy_start:entropy_end]
+          if entropy_fragment.count('execution_identity') != 1 or 'getrandom::fill' not in entropy_fragment:
+              raise SystemExit("execution identity fragment is not uniquely bounded")
+          entropy_replacement = '''    let mut execution_nonce = [0_u8; 16];
+              require_execution_identity_entropy(getrandom::fill(&mut execution_nonce).is_ok())?;
+          '''
+          text = text[:entropy_start] + entropy_replacement + text[entropy_end:]
+
+          helper_anchor = '\n\nfn epoch_seconds_from_system_time(\n'
+          helper_index = text.find(helper_anchor)
+          if helper_index < 0:
+              raise SystemExit("runtime clock helper insertion anchor missing")
+          helpers = '''
+
+          /// Preserve the provider-neutral create-receipt failure contract without
+          /// requiring process-global temporary-directory mutation in tests.
+          fn resolve_command_create_receipt_directory(
+              result: std::io::Result<tempfile::TempDir>,
+          ) -> Result<tempfile::TempDir, CommandExecutionError> {
+              match result {
+                  Ok(directory) => Ok(directory),
+                  Err(_) => Err(CommandExecutionError::Backend(
+                      ApplicationServiceError::BackendInvocationFailed {
+                          operation: "container_create_receipt",
+                      },
+                  )),
+              }
+          }
+
+          /// Reject execution identity construction when the OS entropy source fails.
+          fn require_execution_identity_entropy(
+              entropy_available: bool,
+          ) -> Result<(), CommandExecutionError> {
+              if entropy_available {
+                  Ok(())
+              } else {
+                  Err(CommandExecutionError::Backend(
+                      ApplicationServiceError::BackendInvocationFailed {
+                          operation: "execution_identity",
+                      },
+                  ))
+              }
+          }
+          '''
+          text = text[:helper_index] + helpers + text[helper_index:]
+
+          test_anchor = '''    #[test]
+              fn command_chronology_accepts_equal_and_ordered_runtime_observations() {
+          '''
+          if text.count(test_anchor) != 1:
+              raise SystemExit("command chronology test anchor must occur exactly once")
+          tests = '''    #[test]
+              fn command_create_receipt_directory_failure_is_typed() {
+                  let error = super::resolve_command_create_receipt_directory(Err(std::io::Error::other(
+                      "deterministic receipt directory failure",
+                  )))
+                  .expect_err("receipt-directory creation failure must fail closed");
+                  assert_eq!(
+                      error,
+                      CommandExecutionError::Backend(
+                          ApplicationServiceError::BackendInvocationFailed {
+                              operation: "container_create_receipt",
+                          },
+                      )
+                  );
+              }
+
+              #[test]
+              fn execution_identity_entropy_failure_is_typed() {
+                  assert_eq!(super::require_execution_identity_entropy(true), Ok(()));
+                  assert_eq!(
+                      super::require_execution_identity_entropy(false),
+                      Err(CommandExecutionError::Backend(
+                          ApplicationServiceError::BackendInvocationFailed {
+                              operation: "execution_identity",
+                          },
+                      ))
+                  );
+              }
+
+              #[test]
+              fn command_chronology_accepts_equal_and_ordered_runtime_observations() {
+          '''
+          text = text.replace(test_anchor, tests, 1)
+          source.write_text(text)
+
+          trace = Path("docs/doctoring/COMMAND_OWNER_SYSTEM_FAILURE_TRACEABILITY.md")
+          if trace.exists():
+              raise SystemExit("command-owner system failure traceability already exists")
+          trace.write_text('''# Command-owner system failure traceability
+
+          Last reviewed: 2026-09-13
+
+          ## Causal coverage finding
+
+          Exact native branch artifact `10302873384` on `a28803f47aad499a6c411596831ca365971076df` measured 5068/5129 lines, 484/486 functions, 6805/6956 regions, and 712/720 branches. Source-coordinate grouping of `src/infrastructure/podman.rs` isolated its two wholly unexecuted function outcomes: the error mapper for command create-receipt temporary-directory creation at the former line 613, and the OS-entropy error mapper for `command_sandbox_identity` at the former line 1809. Both are command/runtime owner responsibilities, not application-service lifecycle/readiness behavior.
+
+          The first source-fix staging run for these two findings, `34710805259` on `7002008f155ec8ddd5583e0ea06b919d3fafa86e`, failed before modifying source because its authoring script matched a multiline Rust fragment with indentation-sensitive literal text. Validation and publication were skipped, and the failed workflow was removed at `efedacef91d56793ebd2ba4bfac1b2e04a708d45` before this replacement was staged.
+
+          ## Decision
+
+          Command create-receipt setup continues to use `tempfile::Builder::tempdir()` in production. The returned `std::io::Result<TempDir>` is passed through a provider-neutral resolver whose failure remains `BackendInvocationFailed { operation: "container_create_receipt" }`. The test supplies an explicit `io::Error` value instead of mutating `TMPDIR`, permissions, or process-global filesystem state.
+
+          Execution identity continues to obtain a 16-byte nonce from `getrandom::fill`. Only the already-existing success/failure decision is extracted into `require_execution_identity_entropy`; a failed entropy call returns `BackendInvocationFailed { operation: "execution_identity" }` before the nonce can be hashed into an identity. No deterministic nonce, retry, fallback entropy, panic, unsafe path, or coverage exclusion is introduced.
+
+          ## Rejected alternatives
+
+          Rejected approaches are process-global temporary-directory mutation, permission races, host RNG fault injection, retry loops, deterministic fallback randomness, weakening exact error taxonomy, synthetic application-service fixtures, and denominator/exclusion changes. Those approaches either create scheduler-dependent tests or cross the canonical owner boundary.
+
+          ## Acceptance
+
+          The exact descendant must pass repository validation, rustfmt, both focused system-failure tests, the full locked workspace/all-target suite, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check`. Native exact-head coverage must then prove the prior 484/486 function deficit is closed or identify the remaining functions without transferring application-service-owned gaps into this lane. Positive effective-LSM, qualifying independent review/security, #21/#113 integration, #35/#43 real-runtime evidence, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain separate gates.
+
+          ## References
+
+          Allen, S., The Rust Project Developers, Mannix, A., & White, J. (2026). *tempfile 3.27.0: Builder::tempdir*. Docs.rs. https://docs.rs/tempfile/latest/tempfile/struct.Builder.html
+
+          The Rand Project Developers. (2025). *getrandom 0.3.4: System's random number generator*. Docs.rs. https://docs.rs/crate/getrandom/0.3.4
+          ''')
+
+          baseline = Path("docs/product-technical-gap-baseline.md")
+          baseline_text = baseline.read_text()
+          marker = "<!-- current-authority-2026-09-13-command-owner-system-failures -->"
+          if marker in baseline_text:
+              raise SystemExit("baseline command-owner system failure marker already exists")
+          prefix = '''<!-- current-authority-2026-09-13-command-owner-system-failures -->
+          ## Current authority supersession — command-owner system failure coverage (2026-09-13)
+
+          Exact native artifacts on `a28803f47aad499a6c411596831ca365971076df` measure **5068/5129 lines, 484/486 functions, 6805/6956 regions, and 712/720 branches**. `podman_runtime_gate_binding.rs` is **60/60 functions and 24/24 branches**, closing the earlier release-token entropy deficit. Source-coordinate grouping isolates the remaining two wholly unexecuted `podman.rs` function outcomes as command-owner system failures: command create-receipt temporary-directory creation failure and execution-identity OS entropy failure.
+
+          This descendant preserves the same production APIs and provider-neutral errors while replacing only those hard-to-induce mapper closures with deterministic decision boundaries. Production still calls `tempfile::Builder::tempdir()` and `getrandom::fill`; tests inject an explicit failed `io::Result` into the receipt resolver and exercise the entropy decision directly. Process-global environment/permission mutation, host RNG fault injection, retry/fallback entropy, panic/unsafe, coverage exclusions, and application-service fixture duplication are rejected. See `docs/doctoring/COMMAND_OWNER_SYSTEM_FAILURE_TRACEABILITY.md`.
+
+          The first staging attempt for this repair failed before changing source because its authoring matcher was indentation-fragile; the failed workflow was removed. Native exact-head CI/coverage must be reacquired after the replacement source-fix publishes before these repairs become merge authority. Application-service lifecycle/readiness and network-inspection gaps remain #21/#113 canonical work. Positive effective-LSM, independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain blockers.
+
+          '''
+          baseline.write_text(prefix + baseline_text)
+          PY
+          cargo fmt
+          git rm .github/workflows/one-shot-command-owner-system-failures-v2.yml
+      - name: Validate causal repairs
+        run: |
+          python3 scripts/validate_repository.py
+          cargo fmt --check
+          cargo test --locked --lib command_create_receipt_directory_failure_is_typed
+          cargo test --locked --lib execution_identity_entropy_failure_is_typed
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+          test ! -e .github/workflows/one-shot-command-owner-system-failures-v2.yml
+      - name: Publish ordinary descendant
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'test(runtime): cover command-owner system failures'
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/$BRANCH
