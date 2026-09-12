@@ -153,19 +153,7 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<BoundedRunOutcome, BoundedCommandError> {
-        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =
-            self.execute(program, args)?;
-        let stdout = stdout_result?;
-        let stderr = stderr_result?;
-        let (status, timed_out) = classify_completion_status(status_result)?;
-        Ok(BoundedRunOutcome {
-            status,
-            timed_out,
-            stdout,
-            stdout_truncated: stdout_overflow,
-            stderr,
-            stderr_truncated: stderr_overflow,
-        })
+        finalize_completion(self.execute(program, args)?)
     }
 }
 
@@ -209,6 +197,24 @@ fn finalize_output(
         status,
         stdout,
         stderr,
+    })
+}
+
+/// Convert supervisor and pipe results into workload completion facts without
+/// reclassifying capture or wait failures as workload outcomes.
+fn finalize_completion(
+    (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow): ExecuteOutcome,
+) -> Result<BoundedRunOutcome, BoundedCommandError> {
+    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    let (status, timed_out) = classify_completion_status(status_result)?;
+    Ok(BoundedRunOutcome {
+        status,
+        timed_out,
+        stdout,
+        stdout_truncated: stdout_overflow,
+        stderr,
+        stderr_truncated: stderr_overflow,
     })
 }
 
@@ -338,7 +344,8 @@ mod tests {
 
     use super::{
         BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status,
-        drain_stream, finalize_output, join_stream, kill_and_reap, supervise_child,
+        drain_stream, finalize_completion, finalize_output, join_stream, kill_and_reap,
+        supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -431,6 +438,26 @@ mod tests {
     fn completion_status_preserves_supervisor_wait_failure() {
         assert_eq!(
             classify_completion_status(Err(BoundedCommandError::Wait)),
+            Err(BoundedCommandError::Wait)
+        );
+    }
+
+    #[test]
+    fn finalized_completion_preserves_pipe_and_supervisor_failure_precedence() {
+        let wait = Err(BoundedCommandError::Wait);
+        let capture = Err(BoundedCommandError::Capture);
+        let empty = Ok(Vec::new());
+
+        assert_eq!(
+            finalize_completion((wait, capture, empty.clone(), false, false)),
+            Err(BoundedCommandError::Capture)
+        );
+        assert_eq!(
+            finalize_completion((wait, empty.clone(), capture, false, false)),
+            Err(BoundedCommandError::Capture)
+        );
+        assert_eq!(
+            finalize_completion((wait, empty.clone(), empty, false, false)),
             Err(BoundedCommandError::Wait)
         );
     }
