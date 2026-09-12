@@ -31,10 +31,10 @@ jobs:
           from pathlib import Path
           path = Path('src/infrastructure/podman.rs')
           text = path.read_text()
-          old = '(identifier.len() == 64 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))'
-          new = "(identifier.len() == 64\n        && identifier\n            .bytes()\n            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))"
+          old = "(identifier.len() == 64 && identifier.bytes().all(|byte| byte.is_ascii_hexdigit()))\n        .then(|| identifier.to_owned())"
+          new = "(identifier.len() == 64\n        && identifier\n            .bytes()\n            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))\n    .then(|| identifier.to_owned())"
           if text.count(old) != 1:
-              raise SystemExit(f'expected one exact parser predicate, found {text.count(old)}')
+              raise SystemExit(f'expected one exact parser block, found {text.count(old)}')
           path.write_text(text.replace(old, new, 1))
       - name: Validate repair
         run: |
