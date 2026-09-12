@@ -123,6 +123,16 @@ fn container_inspection_requires_exactly_one_runtime_record() {
         execute_with_evidence("empty-inspection", "[]", "unused"),
         Err(malformed("container_inspect"))
     );
+
+    let record = CONTAINER_INSPECTION
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .expect("fixture must contain one inspection record");
+    let duplicate = format!("[{record},{record}]");
+    assert_eq!(
+        execute_with_evidence("duplicate-inspection", &duplicate, "unused"),
+        Err(malformed("container_inspect"))
+    );
 }
 
 #[test]
