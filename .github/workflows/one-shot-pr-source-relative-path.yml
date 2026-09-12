@@ -1,0 +1,96 @@
+name: One-shot PR source relative-path invariant repair
+
+'on':
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/one-shot-pr-source-relative-path.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify single-writer head
+        env:
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+      - name: Remove unreachable rooted-strip failure
+        env:
+          OLD_FUNC_B64: Zm4gY29sbGVjdF9yZWd1bGFyX2ZpbGVzKAogICAgcm9vdDogJlBhdGgsCiAgICBkaXJlY3Rvcnk6ICZQYXRoLAogICAgZmlsZXM6ICZtdXQgVmVjPChQYXRoQnVmLCBQYXRoQnVmLCBib29sLCB1NjQpPiwKKSAtPiBSZXN1bHQ8KCksIFByU291cmNlQXJ0aWZhY3RFcnJvcj4gewogICAgbGV0IGVudHJpZXMgPSBmczo6cmVhZF9kaXIoZGlyZWN0b3J5KS5tYXBfZXJyKFByU291cmNlQXJ0aWZhY3RFcnJvcjo6SW8pPzsKICAgIGZvciBlbnRyeSBpbiBlbnRyaWVzIHsKICAgICAgICBsZXQgZW50cnkgPSBlbnRyeS5tYXBfZXJyKFByU291cmNlQXJ0aWZhY3RFcnJvcjo6SW8pPzsKICAgICAgICBsZXQgcGF0aCA9IGVudHJ5LnBhdGgoKTsKICAgICAgICAvLyBgcmVhZF9kaXJgIHlpZWxkcyBjaGlsZHJlbiBvZiBgZGlyZWN0b3J5YDsgYmVjYXVzZSBldmVyeSByZWN1cnNpdmUKICAgICAgICAvLyBkaXJlY3RvcnkgaXMgaXRzZWxmIGJlbmVhdGggYHJvb3RgLCBhIHN1Y2Nlc3NmdWwgc3RyaXAgYWx3YXlzIGhhcyBhCiAgICAgICAgLy8gbm9uLWVtcHR5IGNoaWxkLXJlbGF0aXZlIHBhdGguIERvIG5vdCBtYW51ZmFjdHVyZSBhbiB1bnJlYWNoYWJsZQogICAgICAgIC8vIHNlY3VyaXR5IGJyYW5jaCBmb3IgYW4gaW52YXJpYW50IGFscmVhZHkgZXN0YWJsaXNoZWQgYnkgdHJhdmVyc2FsLgogICAgICAgIGxldCByZWxhdGl2ZSA9IHBhdGgKICAgICAgICAgICAgLnN0cmlwX3ByZWZpeChyb290KQogICAgICAgICAgICAubWFwX2Vycih8X3wgUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpJbnZhbGlkSW5wdXQgewogICAgICAgICAgICAgICAgZmllbGRfbmFtZTogImhvc3RfcGF0aCIsCiAgICAgICAgICAgIH0pPwogICAgICAgICAgICAudG9fcGF0aF9idWYoKTsKICAgICAgICBsZXQgbWV0YWRhdGEgPSBmczo6c3ltbGlua19tZXRhZGF0YSgmcGF0aCkubWFwX2VycihQclNvdXJjZUFydGlmYWN0RXJyb3I6OklvKT87CiAgICAgICAgaWYgbWV0YWRhdGEuaXNfZGlyKCkgewogICAgICAgICAgICBjb2xsZWN0X3JlZ3VsYXJfZmlsZXMocm9vdCwgJnBhdGgsIGZpbGVzKT87CiAgICAgICAgfSBlbHNlIGlmIG1ldGFkYXRhLmlzX2ZpbGUoKSB7CiAgICAgICAgICAgIGZpbGVzLnB1c2goKHJlbGF0aXZlLCBwYXRoLCBtZXRhZGF0YS5tb2RlKCkgJiAwbzExMSAhPSAwLCBtZXRhZGF0YS5sZW4oKSkpOwogICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgIHJldHVybiBFcnIoUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpVbnN1cHBvcnRlZEVudHJ5IHsKICAgICAgICAgICAgICAgIHJlbGF0aXZlX3BhdGg6IHJlbGF0aXZlLnRvX3N0cmluZ19sb3NzeSgpLmludG9fb3duZWQoKSwKICAgICAgICAgICAgfSk7CiAgICAgICAgfQogICAgfQogICAgT2soKCkpCn0K
+          NEW_FUNC_B64: Zm4gY29sbGVjdF9yZWd1bGFyX2ZpbGVzKAogICAgZGlyZWN0b3J5OiAmUGF0aCwKICAgIHJlbGF0aXZlX2RpcmVjdG9yeTogJlBhdGgsCiAgICBmaWxlczogJm11dCBWZWM8KFBhdGhCdWYsIFBhdGhCdWYsIGJvb2wsIHU2NCk+LAopIC0+IFJlc3VsdDwoKSwgUHJTb3VyY2VBcnRpZmFjdEVycm9yPiB7CiAgICBsZXQgZW50cmllcyA9IGZzOjpyZWFkX2RpcihkaXJlY3RvcnkpLm1hcF9lcnIoUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpJbyk/OwogICAgZm9yIGVudHJ5IGluIGVudHJpZXMgewogICAgICAgIGxldCBlbnRyeSA9IGVudHJ5Lm1hcF9lcnIoUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpJbyk/OwogICAgICAgIGxldCBwYXRoID0gZW50cnkucGF0aCgpOwogICAgICAgIC8vIGByZWFkX2RpcmAgeWllbGRzIGEgY2hpbGQgbmFtZSB3aXRob3V0IGxlYWRpbmcgcGF0aCBjb21wb25lbnRzLiBDYXJyeQogICAgICAgIC8vIHRoZSBhbHJlYWR5LXByb3ZlbiByZWxhdGl2ZSB0cmF2ZXJzYWwgc3RhdGUgZm9yd2FyZCBpbnN0ZWFkIG9mCiAgICAgICAgLy8gcmUtZGVyaXZpbmcgaXQgd2l0aCBgc3RyaXBfcHJlZml4YCBhbmQgbWFudWZhY3R1cmluZyBhbiBpbXBvc3NpYmxlCiAgICAgICAgLy8gZXJyb3IgYnJhbmNoIGFmdGVyIHN1Y2Nlc3NmdWwgcm9vdGVkIHRyYXZlcnNhbC4KICAgICAgICBsZXQgcmVsYXRpdmUgPSByZWxhdGl2ZV9kaXJlY3Rvcnkuam9pbihlbnRyeS5maWxlX25hbWUoKSk7CiAgICAgICAgbGV0IG1ldGFkYXRhID0gZnM6OnN5bWxpbmtfbWV0YWRhdGEoJnBhdGgpLm1hcF9lcnIoUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpJbyk/OwogICAgICAgIGlmIG1ldGFkYXRhLmlzX2RpcigpIHsKICAgICAgICAgICAgY29sbGVjdF9yZWd1bGFyX2ZpbGVzKCZwYXRoLCAmcmVsYXRpdmUsIGZpbGVzKT87CiAgICAgICAgfSBlbHNlIGlmIG1ldGFkYXRhLmlzX2ZpbGUoKSB7CiAgICAgICAgICAgIGZpbGVzLnB1c2goKHJlbGF0aXZlLCBwYXRoLCBtZXRhZGF0YS5tb2RlKCkgJiAwbzExMSAhPSAwLCBtZXRhZGF0YS5sZW4oKSkpOwogICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgIHJldHVybiBFcnIoUHJTb3VyY2VBcnRpZmFjdEVycm9yOjpVbnN1cHBvcnRlZEVudHJ5IHsKICAgICAgICAgICAgICAgIHJlbGF0aXZlX3BhdGg6IHJlbGF0aXZlLnRvX3N0cmluZ19sb3NzeSgpLmludG9fb3duZWQoKSwKICAgICAgICAgICAgfSk7CiAgICAgICAgfQogICAgfQogICAgT2soKCkpCn0K
+          OLD_CALL_B64: ICAgIGNvbGxlY3RfcmVndWxhcl9maWxlcygmc291cmNlLCAmc291cmNlLCAmbXV0IGZpbGVzKT87Cg==
+          NEW_CALL_B64: ICAgIGNvbGxlY3RfcmVndWxhcl9maWxlcygmc291cmNlLCBQYXRoOjpuZXcoIiIpLCAmbXV0IGZpbGVzKT87Cg==
+          TRACE_B64: IyBQUiBzb3VyY2UgdHJhdmVyc2FsIHJlbGF0aXZlLXBhdGggaW52YXJpYW50IHRyYWNlYWJpbGl0eQoKTGFzdCByZXZpZXdlZDogMjAyNi0wOS0xMwoKIyMgUHJvYmxlbSBhbmQgY2F1c2FsIFJFRAoKRXhhY3QgY29tbWFuZC1vd25lciBoZWFkIGBjNzBjYzM2MjJhOTk2NWQwMDJkNjA0YzZiZjZjNjFkMDM0Zjg0ZWZkYCByYW4gbmF0aXZlIENJIGAzNDcwNzg4NjA0NWAuIFZlcmlmeSBgMTAzNTkxMTc1NTI2YCBhbmQgaG9zdGVkIG5lZ2F0aXZlIHJvb3RsZXNzL0FwcEFybW9yIGAxMDM1OTExNzU0OTlgIHdlcmUgR1JFRU4uIFByb2R1Y3Rpb24gYW5kIGJyYW5jaCBjb3ZlcmFnZSBnZW5lcmF0ZWQgaW1tdXRhYmxlIGV2aWRlbmNlIGFuZCB0aGVuIGZhaWxlZCBvbmx5IHRoZSByZXBvc2l0b3J5LXdpZGUgMTAwJSBhZG1pc3Npb25zLiBQcm9kdWN0aW9uIGFydGlmYWN0IGAxMDMwMjIxNzYyNWAgaGFzIGRpZ2VzdCBgc2hhMjU2OjA0ZWY4MWYxZjc3ZTkxODFlMTMxNjRjOGYzZmMzODM0ODNiNDU5Mjg1ZDI2NGFhNTc0YzViMWQzYzZkN2NiNWJgOyBicmFuY2ggYXJ0aWZhY3QgYDEwMzAxODYzMjY5YCBoYXMgZGlnZXN0IGBzaGEyNTY6MGRkNWZlZjFiYmMyMWJkOTA5Y2ZjNGI5YmUzM2M4NWE5ZjVlNDMyMDA0NmVjNzFjOWRhZjc2MGEzNjczNjU5ZWAuCgpUaGUgZXhhY3QgYnJhbmNoIGFydGlmYWN0IG1lYXN1cmVkIDUwNDUvNTExNCBsaW5lcywgNDc5LzQ4MyBmdW5jdGlvbnMsIDY3NzIvNjkyOSByZWdpb25zLCBhbmQgNzEwLzcxOCBicmFuY2hlcy4gYHNyYy9wcl9zb3VyY2VfYXJ0aWZhY3QucnNgIGFsb25lIG1lYXN1cmVkIDIxOC8yMjEgbGluZXMsIDIwLzIxIGZ1bmN0aW9ucywgMjkzLzMxNCByZWdpb25zLCBhbmQgMzIvMzIgYnJhbmNoZXMuIFRoZSBtaXNzaW5nIHNvdXJjZSBmdW5jdGlvbiB3YXMgdGhlIGBzdHJpcF9wcmVmaXgocm9vdCkubWFwX2VyciguLi4pYCBjbG9zdXJlIGluc2lkZSBgY29sbGVjdF9yZWd1bGFyX2ZpbGVzYC4KClRoYXQgY2xvc3VyZSBjb250cmFkaWN0ZWQgdGhlIGltcGxlbWVudGF0aW9uJ3Mgb3duIHRyYXZlcnNhbCBpbnZhcmlhbnQuIEV2ZXJ5IGBwYXRoYCBpcyBhIGBEaXJFbnRyeTo6cGF0aCgpYCBjaGlsZCBvZiB0aGUgZGlyZWN0b3J5IHBhc3NlZCB0byBgcmVhZF9kaXJgLCBhbmQgZXZlcnkgcmVjdXJzaXZlIGRpcmVjdG9yeSBpcyByZWFjaGVkIGZyb20gdGhlIHNhbWUgcm9vdGVkIHRyYXZlcnNhbC4gVGhlIGNvZGUgY29tbWVudCBhbHJlYWR5IHN0YXRlZCB0aGF0IHByZWZpeCBmYWlsdXJlIHdhcyB1bnJlYWNoYWJsZSwgYnV0IHRoZSBpbXBsZW1lbnRhdGlvbiBzdGlsbCByZXByZXNlbnRlZCBpdCBhcyBhIHByb2R1Y3Rpb24gZXJyb3IgYnJhbmNoLgoKIyMgRGVjaXNpb24KCkNhcnJ5IHRoZSByZWxhdGl2ZSBkaXJlY3RvcnkgcGF0aCBhcyBleHBsaWNpdCB0cmF2ZXJzYWwgc3RhdGUuIEZvciBlYWNoIGVudHJ5LCBkZXJpdmUgdGhlIGNoaWxkLXJlbGF0aXZlIHBhdGggd2l0aCBgcmVsYXRpdmVfZGlyZWN0b3J5LmpvaW4oZW50cnkuZmlsZV9uYW1lKCkpYDsgcmVjdXJzZSB3aXRoIHRoYXQgZGVyaXZlZCByZWxhdGl2ZSBkaXJlY3RvcnkuIFRoZSByb290IGNhbGwgYmVnaW5zIHdpdGggYFBhdGg6Om5ldygiIilgLgoKVGhpcyBrZWVwcyBleGFjdCBVbml4IGZpbGVuYW1lIGJ5dGVzLCBpbmNsdWRpbmcgbm9uLVVURi04IG5hbWVzLCBiZWNhdXNlIGBEaXJFbnRyeTo6ZmlsZV9uYW1lKClgIHJldHVybnMgYE9zU3RyaW5nYCBhbmQgdGhlIGV4aXN0aW5nIG1hbmlmZXN0IGNvbnRpbnVlcyB0byBoYXNoIGBPc1N0ckV4dDo6YXNfYnl0ZXMoKWAuIEl0IHByZXNlcnZlcyBuby1mb2xsb3cgbWV0YWRhdGEgaW5zcGVjdGlvbiwgdW5zdXBwb3J0ZWQtZW50cnkgcmVqZWN0aW9uLCBkZXRlcm1pbmlzdGljIGJ5dGUgc29ydGluZywgc2l6ZSBsaW1pdHMsIG11dGF0aW9uIGRldGVjdGlvbiwgYW5kIHN0YWdlZC10cmVlIGRpZ2VzdCBzZW1hbnRpY3MuCgpSZWplY3RlZCBhbHRlcm5hdGl2ZXM6CgotIGEgc3ludGhldGljIGZpeHR1cmUgdGhhdCB0cmllcyB0byBtYWtlIGEgYHJlYWRfZGlyYCBjaGlsZCBlc2NhcGUgdGhlIGRpcmVjdG9yeSB0aGF0IHByb2R1Y2VkIGl0OwotIGBleHBlY3RgLCBwYW5pYywgb3IgYHVuc2FmZWAgdG8gc2lsZW5jZSB0aGUgaW1wb3NzaWJsZSBicmFuY2g7Ci0gY292ZXJhZ2UgZXhjbHVzaW9uIG9yIGRlbm9taW5hdG9yIG1hbmlwdWxhdGlvbjsKLSBsb3NzeSBzdHJpbmcgY29udmVyc2lvbiBvciBub3JtYWxpemF0aW9uIG9mIHBhdGggaWRlbnRpdHkuCgojIyBFdmlkZW5jZSBhbmQgYWNjZXB0YW5jZQoKVGhlIG9uZS1zaG90IHJlcGFpciB3b3JrZmxvdyBtdXN0IHJ1biByZXBvc2l0b3J5IHZhbGlkYXRpb24sIHJ1c3RmbXQsIGZvY3VzZWQgc291cmNlLXN0YWdpbmcgcmVncmVzc2lvbnMsIHRoZSBmdWxsIGxvY2tlZCB3b3Jrc3BhY2UvYWxsLXRhcmdldCBzdWl0ZSwgQ2xpcHB5IHdpdGggd2FybmluZ3MgZGVuaWVkLCBydXN0ZG9jIHdpdGggd2FybmluZ3MgZGVuaWVkLCBhbmQgYGdpdCBkaWZmIC0tY2hlY2tgLiBJdCByZW1vdmVzIGl0c2VsZiBpbiB0aGUgc291cmNlIGNvbW1pdC4gVGhlIGJvdC1hdXRob3JlZCBzb3VyY2UgZGVzY2VuZGFudCBpcyBub3QgbWVyZ2UgYXV0aG9yaXR5OyBhIGNvbm5lY3Rvci1hdXRob3JlZCBvcmRpbmFyeSBkZXNjZW5kYW50IG11c3QgcmVhY3F1aXJlIG5hdGl2ZSBleGFjdC1oZWFkIENJIGFuZCBpbW11dGFibGUgY292ZXJhZ2UgZXZpZGVuY2UgYmVmb3JlIHRoZSByZXBhaXIgY2FuIGJlIGNhbGxlZCBHUkVFTi4KCkFjY2VwdGFuY2UgaXMgc291cmNlLWNvb3JkaW5hdGUgY2xvc3VyZSBvZiB0aGUgdW5yZWFjaGFibGUgYGNvbGxlY3RfcmVndWxhcl9maWxlc2AgZXJyb3IgZnVuY3Rpb24gd2l0aG91dCB3ZWFrZW5pbmcgdGhlIDMyLzMyIGJyYW5jaCByZXN1bHQsIG5vbi1VVEYtOCBwYXRobmFtZSBwcmVzZXJ2YXRpb24sIHN5bWxpbmsvdW5zdXBwb3J0ZWQtZW50cnkgcmVqZWN0aW9uLCBkaWdlc3QgY2hlY2tzLCBvciBUT0NUT1UgZ3VhcmRzLgoKIyMgUHJpbWFyeSByZWZlcmVuY2UKClJ1c3QgUHJvamVjdC4gKDIwMjYsIFNlcHRlbWJlciA0KS4gKkRpckVudHJ5IGluIHN0ZDo6ZnMqLiBSdXN0IHN0YW5kYXJkIGxpYnJhcnkuIGh0dHBzOi8vZG9jLnJ1c3QtbGFuZy5vcmcvYmV0YS9zdGQvZnMvc3RydWN0LkRpckVudHJ5Lmh0bWwKClJ1c3QgUHJvamVjdC4gKDIwMjYsIFNlcHRlbWJlciAxKS4gKnJlYWRfZGlyIGluIHN0ZDo6ZnMqLiBSdXN0IHN0YW5kYXJkIGxpYnJhcnkuIGh0dHBzOi8vZG9jLnJ1c3QtbGFuZy5vcmcvc3RhYmxlL3N0ZC9mcy9mbi5yZWFkX2Rpci5odG1sCg==
+          PREFIX_B64: PCEtLSBjdXJyZW50LWF1dGhvcml0eS0yMDI2LTA5LTEzLXByLXNvdXJjZS1yZWxhdGl2ZS1wYXRoIC0tPgojIyBDdXJyZW50IGF1dGhvcml0eSBzdXBlcnNlc3Npb24g4oCUIFBSIHNvdXJjZSB0cmF2ZXJzYWwgcmVsYXRpdmUtcGF0aCBpbnZhcmlhbnQgKDIwMjYtMDktMTMpCgpFeGFjdCBjYXVzYWwgUkVEIGBjNzBjYzM2MjJhOTk2NWQwMDJkNjA0YzZiZjZjNjFkMDM0Zjg0ZWZkYCwgbmF0aXZlIENJIGAzNDcwNzg4NjA0NWAsIGxlZnQgdmVyaWZ5IGAxMDM1OTExNzU1MjZgIGFuZCBob3N0ZWQgbmVnYXRpdmUgcm9vdGxlc3MvQXBwQXJtb3IgYDEwMzU5MTE3NTQ5OWAgR1JFRU4gd2hpbGUgcHJvZHVjdGlvbi9icmFuY2ggY292ZXJhZ2UgZmFpbGVkIG9ubHkgcmVwb3NpdG9yeS13aWRlIDEwMCUgYWRtaXNzaW9uLiBQcm9kdWN0aW9uIGFydGlmYWN0IGAxMDMwMjIxNzYyNWAgaGFzIGRpZ2VzdCBgc2hhMjU2OjA0ZWY4MWYxZjc3ZTkxODFlMTMxNjRjOGYzZmMzODM0ODNiNDU5Mjg1ZDI2NGFhNTc0YzViMWQzYzZkN2NiNWJgOyBicmFuY2ggYXJ0aWZhY3QgYDEwMzAxODYzMjY5YCBoYXMgZGlnZXN0IGBzaGEyNTY6MGRkNWZlZjFiYmMyMWJkOTA5Y2ZjNGI5YmUzM2M4NWE5ZjVlNDMyMDA0NmVjNzFjOWRhZjc2MGEzNjczNjU5ZWAuIEV4YWN0IHRvdGFscyB3ZXJlICoqNTA0NS81MTE0IGxpbmVzLCA0NzkvNDgzIGZ1bmN0aW9ucywgNjc3Mi82OTI5IHJlZ2lvbnMsIGFuZCA3MTAvNzE4IGJyYW5jaGVzKiouIGBzcmMvcHJfc291cmNlX2FydGlmYWN0LnJzYCB3YXMgKioyMTgvMjIxIGxpbmVzLCAyMC8yMSBmdW5jdGlvbnMsIDI5My8zMTQgcmVnaW9ucywgMzIvMzIgYnJhbmNoZXMqKi4KClRoZSByZW1haW5pbmcgc291cmNlLWZ1bmN0aW9uIGRlZmljaXQgdGhlcmUgd2FzIG5vdCBhIG1pc3NpbmcgaG9zdGlsZSBjYXNlLiBgY29sbGVjdF9yZWd1bGFyX2ZpbGVzYCBvYnRhaW5zIGVhY2ggcGF0aCBmcm9tIGByZWFkX2RpcihkaXJlY3RvcnkpYCBhbmQgcmVjdXJzaXZlbHkgZW50ZXJzIG9ubHkgdGhvc2UgZGlzY292ZXJlZCBjaGlsZHJlbiwgeWV0IHJlLWRlcml2ZWQgcmVsYXRpdmUgaWRlbnRpdHkgd2l0aCBgcGF0aC5zdHJpcF9wcmVmaXgocm9vdCkubWFwX2VyciguLi4pYDsgdGhlIGFkamFjZW50IHNvdXJjZSBjb21tZW50IGFscmVhZHkgZGVjbGFyZWQgdGhhdCBmYWlsdXJlIHVucmVhY2hhYmxlLiBUaGUgcmVwYWlyIHRoZXJlZm9yZSBjYXJyaWVzIHRoZSByZWxhdGl2ZSBkaXJlY3RvcnkgYXMgdHJhdmVyc2FsIHN0YXRlIGFuZCBkZXJpdmVzIGVhY2ggY2hpbGQgd2l0aCBgcmVsYXRpdmVfZGlyZWN0b3J5LmpvaW4oZW50cnkuZmlsZV9uYW1lKCkpYCwgcHJlc2VydmluZyBgT3NTdHJpbmdgL1VuaXggYnl0ZSBpZGVudGl0eSwgbm8tZm9sbG93IG1ldGFkYXRhIGNoZWNrcywgdW5zdXBwb3J0ZWQtZW50cnkgcmVqZWN0aW9uLCBkZXRlcm1pbmlzdGljIHNvcnRpbmcsIGJ5dGUvZGlnZXN0IGJvdW5kcywgYW5kIG11dGF0aW9uIGd1YXJkcy4gUGFuaWMvYGV4cGVjdGAsIGB1bnNhZmVgLCBsb3NzeSBwYXRoIGNvbnZlcnNpb24sIHN5bnRoZXRpYyBpbXBvc3NpYmxlIGZpeHR1cmVzLCBhbmQgY292ZXJhZ2UgZXhjbHVzaW9ucyBhcmUgcmVqZWN0ZWQuCgpgZG9jcy9kb2N0b3JpbmcvUFJfU09VUkNFX1RSQVZFUlNBTF9SRUxBVElWRV9QQVRIX1RSQUNFQUJJTElUWS5tZGAgcmVjb3JkcyB0aGUgUkVELCBkZWNpc2lvbiwgdmFsaWRhdGlvbiBjb250cmFjdCwgYW5kIFJ1c3Qgc3RhbmRhcmQtbGlicmFyeSBwcmltYXJ5IHJlZmVyZW5jZXMuIFRoZSBvbmUtc2hvdCBzb3VyY2UtZml4IHdvcmtmbG93IG11c3QgcmVtb3ZlIGl0c2VsZiBhZnRlciB2YWxpZGF0aW5nIHRoZSBjYW5kaWRhdGUuIEFueSBib3QtYXV0aG9yZWQgcmVwYWlyIGNvbW1pdCByZW1haW5zIG5vbi10cmFuc2ZlcmFibGUgZXZpZGVuY2UgdW50aWwgYW4gb3JkaW5hcnkgY29ubmVjdG9yLWF1dGhvcmVkIGRlc2NlbmRhbnQgcmVhY3F1aXJlcyBuYXRpdmUgZXhhY3QtaGVhZCB2ZXJpZnkvY292ZXJhZ2Uvc2VjdXJpdHkuIEFwcGxpY2F0aW9uLXNlcnZpY2UgcmVjZWlwdC9jYXBhYmlsaXR5L25ldHdvcmsvcmVhZGluZXNzL2xpZmVjeWNsZSBmaW5kaW5ncyByZW1haW4gY2Fub25pY2FsICMyMS8jMTEzIHdvcmsgYW5kIGFyZSBub3QgZHVwbGljYXRlZCBoZXJlLiBEZWRpY2F0ZWQgcG9zaXRpdmUgZWZmZWN0aXZlLUxTTSwgaW5kZXBlbmRlbnQgYXBwcm92YWwvc2VjdXJpdHksICMzNS8jNDMgcmVhbC1ydW50aW1lIGFjY2VwdGFuY2UsIHByb3RlY3RlZCBpbnRlZ3JhdGlvbiwgYW5kIGltbXV0YWJsZSByZWxlYXNlL1NCT00vcHJvdmVuYW5jZS9yZXByb2R1Y2liaWxpdHkvcm9sbGJhY2sgcmVtYWluIGJsb2NrZXJzLgoK
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          source = Path('src/pr_source_artifact.rs')
+          text = source.read_text()
+          old_func = base64.b64decode(os.environ['OLD_FUNC_B64']).decode()
+          new_func = base64.b64decode(os.environ['NEW_FUNC_B64']).decode()
+          old_call = base64.b64decode(os.environ['OLD_CALL_B64']).decode()
+          new_call = base64.b64decode(os.environ['NEW_CALL_B64']).decode()
+          if text.count(old_func) != 1:
+              raise SystemExit('expected collect_regular_files causal fragment exactly once')
+          if text.count(old_call) != 1:
+              raise SystemExit('expected root traversal call exactly once')
+          text = text.replace(old_func, new_func).replace(old_call, new_call)
+          source.write_text(text)
+
+          trace = Path('docs/doctoring/PR_SOURCE_TRAVERSAL_RELATIVE_PATH_TRACEABILITY.md')
+          if trace.exists():
+              raise SystemExit('traceability file already exists')
+          trace.write_bytes(base64.b64decode(os.environ['TRACE_B64']))
+
+          baseline = Path('docs/product-technical-gap-baseline.md')
+          baseline_text = baseline.read_text()
+          marker = '<!-- current-authority-2026-09-13-pr-source-relative-path -->'
+          if marker in baseline_text:
+              raise SystemExit('baseline authority marker already exists')
+          prefix = base64.b64decode(os.environ['PREFIX_B64']).decode()
+          baseline.write_text(prefix + baseline_text)
+          PY
+          cargo fmt
+          git rm .github/workflows/one-shot-pr-source-relative-path.yml
+      - name: Validate causal repair
+        run: |
+          python3 scripts/validate_repository.py
+          cargo fmt --check
+          cargo test --locked --test pr_source_artifact_execution
+          cargo test --locked --test pr_source_artifact_non_utf8_path_red
+          cargo test --locked --test pr_source_artifact_path_identity_red
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+          test ! -e .github/workflows/one-shot-pr-source-relative-path.yml
+          ! grep -F '.strip_prefix(root)' src/pr_source_artifact.rs
+      - name: Publish ordinary descendant
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/command-chronology-owner-repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor(source): carry relative traversal paths directly'
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/$BRANCH
