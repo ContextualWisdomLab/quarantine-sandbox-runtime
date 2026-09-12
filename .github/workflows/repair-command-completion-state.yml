@@ -1,0 +1,250 @@
+name: Repair command completion state
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/repair-command-completion-state.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: automation/command-chronology-owner-repair
+          fetch-depth: 2
+
+      - name: Verify repair parent and patch typed completion state
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          expected_parent = "6b65abd55adf1e9d7577d57d839533aa2f1233a1"
+          actual_parent = subprocess.check_output(
+              ["git", "rev-parse", "HEAD^"], text=True
+          ).strip()
+          if actual_parent != expected_parent:
+              raise SystemExit(
+                  f"repair parent drifted: expected {expected_parent}, got {actual_parent}"
+              )
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact repair anchor, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "src/infrastructure/bounded_command.rs",
+              '''/// Terminal facts for a command run to completion under bounded wall-clock and
+/// output budgets, where exceeding either budget is an expected, reportable
+/// outcome rather than a hard error.
+///
+/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
+/// (inspect a JSON payload, create a resource) treat any overflow as an
+/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
+/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
+/// hostile backend. A workload's own stdout/stderr has no such ceiling on
+/// legitimate size, and a workload exceeding its wall-clock lease is routine,
+/// so this variant reports both as facts on a successful outcome instead of
+/// discarding the partial evidence collected before termination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundedRunOutcome {
+    /// The process's own exit status, or `None` when it was killed before
+    /// reporting one (wall-clock timeout or output-budget enforcement).
+    pub(crate) status: Option<ExitStatus>,
+    /// Whether the process was killed for exceeding its wall-clock budget.
+    pub(crate) timed_out: bool,
+''',
+              '''/// Typed terminal state for one bounded command execution.
+///
+/// An exited process always carries an [`ExitStatus`]. Timeout and output-budget
+/// termination cannot carry one because the supervised CLI was killed before it
+/// reported a status. Encoding these states as an enum prevents consumers from
+/// constructing or handling contradictory combinations such as `status=None`
+/// without either terminal cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum BoundedCompletion {
+    /// The supervised CLI exited and reported its own status.
+    Exited(ExitStatus),
+    /// The supervised CLI exceeded its wall-clock budget.
+    TimedOut,
+    /// The supervised CLI was terminated for exceeding retained output budget.
+    OutputLimit,
+}
+
+/// Terminal facts for a command run to completion under bounded wall-clock and
+/// output budgets, where exceeding either budget is an expected, reportable
+/// outcome rather than a hard error.
+///
+/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
+/// (inspect a JSON payload, create a resource) treat any overflow as an
+/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
+/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
+/// hostile backend. A workload's own stdout/stderr has no such ceiling on
+/// legitimate size, and a workload exceeding its wall-clock lease is routine,
+/// so this variant reports both as facts on a successful outcome instead of
+/// discarding the partial evidence collected before termination.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BoundedRunOutcome {
+    /// Mutually exclusive terminal state reported by the bounded supervisor.
+    pub(crate) completion: BoundedCompletion,
+''',
+          )
+
+          replace_once(
+              "src/infrastructure/bounded_command.rs",
+              '''    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    let (status, timed_out) = classify_completion_status(status_result)?;
+    Ok(BoundedRunOutcome {
+        status,
+        timed_out,
+        stdout,
+''',
+              '''    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    let completion = classify_completion_status(status_result)?;
+    Ok(BoundedRunOutcome {
+        completion,
+        stdout,
+''',
+          )
+
+          replace_once(
+              "src/infrastructure/bounded_command.rs",
+              '''/// A wall-clock timeout or output-budget overflow become terminal facts
+/// (`None` status, `timed_out` set only for the former); any other
+/// supervision failure (an inability to observe or reap the child) remains a
+/// hard error, since that indicates the supervisor itself malfunctioned, not
+/// a fact about the supervised workload.
+fn classify_completion_status(
+    status_result: Result<ExitStatus, BoundedCommandError>,
+) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
+    match status_result {
+        Ok(status) => Ok((Some(status), false)),
+        Err(BoundedCommandError::Timeout) => Ok((None, true)),
+        Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
+        Err(other) => Err(other),
+    }
+}
+''',
+              '''/// A wall-clock timeout or output-budget overflow become distinct terminal
+/// states; any other supervision failure (an inability to observe or reap the
+/// child) remains a hard error, since that indicates the supervisor itself
+/// malfunctioned, not a fact about the supervised workload.
+fn classify_completion_status(
+    status_result: Result<ExitStatus, BoundedCommandError>,
+) -> Result<BoundedCompletion, BoundedCommandError> {
+    match status_result {
+        Ok(status) => Ok(BoundedCompletion::Exited(status)),
+        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
+        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
+        Err(other) => Err(other),
+    }
+}
+''',
+          )
+
+          replace_once(
+              "src/infrastructure/podman.rs",
+              '''use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};''',
+              '''use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};''',
+          )
+
+          replace_once(
+              "src/infrastructure/podman.rs",
+              '''        if !wait_outcome.timed_out {
+            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendOutputLimitExceeded {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            match wait_outcome.status {
+                Some(status) if status.success() => {
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
+                }
+                Some(_) => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                None => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+            }
+        }
+
+''',
+              '''        match wait_outcome.completion {
+            BoundedCompletion::Exited(status) => {
+                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendOutputLimitExceeded {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                if status.success() {
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
+                }
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendCommandFailed {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            BoundedCompletion::OutputLimit => {
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendOutputLimitExceeded {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            BoundedCompletion::TimedOut => {}
+        }
+
+''',
+          )
+
+      - name: Format repair
+        run: cargo fmt --all
+
+      - name: Validate repair
+        run: |
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Remove repair workflow and publish ordinary descendant
+        run: |
+          rm .github/workflows/repair-command-completion-state.yml
+          git add src/infrastructure/bounded_command.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(command): type bounded completion state'
+          git push origin HEAD:automation/command-chronology-owner-repair
