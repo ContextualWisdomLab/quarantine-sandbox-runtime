@@ -1,40 +1,48 @@
 # Application-service lifecycle ownership traceability
 
-## Decision under test
+## Decision
 
-Application-service container lifecycle authority must remain bound to the exact long container ID returned by the successful `podman create` invocation. The generated `qsr-app-*` name remains correlation/audit metadata and may continue to back the public `sandbox_id` contract, but it is not sufficient destructive authority once an immutable backend ID has been acquired.
+Application-service container lifecycle authority is bound to the exact long container ID admitted from the successful `podman create` invocation. The generated `qsr-app-*` name remains correlation/audit metadata and may continue to back the public `sandbox_id` contract, but it is not post-create lifecycle or destructive authority.
 
-This distinction is required because the current adapter creates the container, parses the returned ID, and then re-resolves the generated name for `start`, `container inspect`, `top`, `port`, partial-launch cleanup, readiness-failure cleanup, and later lease termination. The existing `inspect.Id == acquired_id` comparison is useful defense in depth but occurs after the name-based lookup has already selected a target.
+This document distinguishes the executed Issue #40 RED state from the repaired implementation. At the RED head, the adapter parsed the created container ID but then re-resolved the generated name for post-create lifecycle operations. Current production no longer does that: `launch_at` carries the admitted `container_id` into start/inspect/top/port, failure cleanup, readiness cleanup, and private cleanup authority; `terminate_at` uses that private exact-ID authority for stop/remove. Generated names are not a fallback destructive selector.
 
 ## Authority chain
 
 | Evidence | What it establishes | Runtime consequence |
 | --- | --- | --- |
-| Podman `create` success stdout | Invocation acquired one concrete container ID. | Retain this ID as backend lifecycle ownership evidence. |
-| Podman identifier semantics | Containers may be addressed by long ID, short ID, or name; names are human-friendly identifiers. | Prefer the exact acquired long ID for post-create lifecycle/destructive calls. |
-| Podman container inspect | Inspect accepts name or ID and returns `Id`. | Address inspect by acquired ID and still require returned `Id` equality. |
-| NIST SP 800-190 | The runtime is responsible for establishing and maintaining container isolation and lifecycle controls. | Cleanup and control operations must not cross an invocation ownership boundary. |
-| Issue #40 / Draft #21 RED | Models immediate name rebinding to a foreign container after successful create. | Any post-create use of the generated name is a security failure even if names are collision-resistant. |
+| Successful `podman create` identity evidence | The invocation acquired one concrete container identity. | Admit an exact long ID before post-create lifecycle use. |
+| Runtime-owned create receipt | Successful create may need exact-ID recovery even when stdout is malformed. | Reconcile trustworthy receipt/stdout evidence; never infer destructive authority from `qsr-app-*`. |
+| Podman container inspect | Inspect returns the concrete container `Id`. | Address inspect by admitted ID and require returned-ID consistency. |
+| NIST SP 800-190 | Runtime lifecycle/isolation controls must preserve container security boundaries. | Cleanup/control operations must not cross invocation ownership boundaries. |
+| Issue #40 / Draft #21 causal RED | Immediate name rebinding after successful create could redirect post-create operations. | Generated-name lifecycle selection is a security defect after ID acquisition. |
+| Issue #113 / Draft #21 receipt repair | Successful create with malformed stdout can otherwise leave ambiguous cleanup authority. | Recover only an exact runtime-owned receipt identity; fail closed without trustworthy authority. |
 
-## RED evidence
+The application-service destructive-authority grammar is intentionally narrower than human-facing Podman selectors: current repository policy admits exactly 64 lower-case hexadecimal bytes. Upper-case, short-ID, name-like, non-hex, padded, missing, mismatched, unreadable, or invalid-UTF-8 proof does not become lifecycle authority. Untrusted identity is not normalized into an accepted spelling.
 
-`tests/podman_application_service_post_create_ownership_red.rs` creates an otherwise-positive fake-Podman application-service launch. The fake backend returns one fixed long owned ID from `create`, then treats every lifecycle operation addressed by the generated name as a foreign-resource side effect. The same operations addressed by the exact ID remain valid.
+## Executed RED evidence
 
-The test requires:
+`tests/podman_application_service_post_create_ownership_red.rs` models an otherwise-positive application-service launch in which the fake backend returns one fixed long owned ID from `create` and treats lifecycle operations addressed by the generated name as a foreign-resource side effect. The same operations addressed by the exact ID remain valid.
 
-- launch succeeds without touching the foreign marker;
-- public `sandbox_id` continues to look like `qsr-app-*`, so the repair does not silently redefine the existing consumer-facing identifier;
-- `start`, `container inspect`, `top`, `port`, `stop`, and `rm` all target the acquired long ID;
-- `terminate_at` preserves the same ownership binding;
-- the runtime-owned network lifecycle remains separate and unchanged.
+The causal #40 lineage proved that the pre-repair implementation could select the generated name after exact ID acquisition. Exact predecessor `a7753b6d7219ae85d9fd97d93c809e9e3019ecd5`, native CI `34308490681`, reached the ownership regression in coverage and branch-coverage lanes and failed with cleanup/lifecycle selection evidence rather than merely inferring the defect from source.
 
-Current production is expected to RED at the first post-create name-based operation. Production must not change until that causal failure executes on an exact runner-backed head.
+The RED requires the public `sandbox_id` to remain `qsr-app-*` correlation metadata while `start`, `container inspect`, `top`, `port`, `stop`, and `rm` use the acquired long ID. This separates consumer-facing correlation identity from private backend lifecycle authority.
 
-## Smallest GREEN boundary
+## Current repair
 
-Retain the acquired container ID in runtime lease metadata as a backend resource identity distinct from the generated correlation name. Thread it through post-create launch verification, failure cleanup, readiness cleanup, and explicit termination. Preserve the generated name for current audit/correlation and public contract semantics unless a separate versioned contract deliberately changes them.
+The minimum #40 production repair is retained in current #21 ancestry:
 
-Do not treat larger random names as a substitute for ID-bound lifecycle ownership. Do not weaken effective isolation, network binding, resource attestation, LSM proof, cleanup precedence, or caller-scoped idempotency.
+- `a5d0ef1d5bcd2626ea12b7f6552d2ecf254a1616` separated runtime cleanup selection from public correlation identity;
+- `7cd4ffa6dff56e826aa432a6d348e154c3b4873f` bound successful post-create start, inspect/top, port, launch/readiness failure cleanup, and later termination to the admitted container ID;
+- later #113 work added a private runtime-owned create receipt so malformed-successful-create cleanup can recover exact authority without falling back to a generated name;
+- causal RED `db42f814265dbf99c807b843000dc8aa93cc8ba7` exposed inconsistent stdout/receipt grammar for upper-case hexadecimal, and minimum repair `31cc048a8a94e73dca49ee5d2c097582859b039a` aligned both channels to the same exact 64-character lower-case hexadecimal contract.
+
+Current exact PR candidate `f5e23f6611f7ee8782fba25f32de7fc5158b4f56`, native CI `34669059735`, made hosted verify, full tests, Clippy/rustdoc, production coverage admission, branch coverage admission, and hosted negative rootless/AppArmor GREEN before this documentation correction. That candidate reported lines `2123/2123`, functions `205/205`, branches `462/462`; raw LLVM regions remained diagnostic `2816/2819` while the canonical source-region admission passed. These predecessor results are causal evidence and do not transfer to a documentation descendant without fresh exact-head execution.
+
+## Remaining gates
+
+This repair does not by itself establish live confinement or release authority. Dedicated positive effective-LSM remains a separate self-hosted gate. Issue #113 remains open until the exact candidate has qualifying independent review/security, dependency-safe protected integration, positive runtime evidence, and immutable release/SBOM/provenance/reproducibility/rollback evidence.
+
+Do not replace exact-ID authority with larger random names. Do not weaken effective isolation, network binding, resource attestation, LSM proof, cleanup precedence, or caller-scoped idempotency to simplify lifecycle ownership.
 
 ## References
 
