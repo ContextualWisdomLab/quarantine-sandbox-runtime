@@ -543,7 +543,7 @@ impl RootlessPodmanAdapter {
             started_at_epoch_seconds,
             None,
             None,
-            |_| Ok(()),
+            None::<fn(&str) -> Result<(), CommandExecutionError>>,
         )
     }
 
@@ -570,7 +570,7 @@ impl RootlessPodmanAdapter {
             started_at_epoch_seconds,
             Some(runtime_gate_artifact_path),
             Some(runtime_gate_binding_args),
-            release_gate,
+            Some(release_gate),
         )
     }
 
@@ -581,7 +581,7 @@ impl RootlessPodmanAdapter {
         _started_at_epoch_seconds: u64,
         runtime_gate_artifact_path: Option<&Path>,
         runtime_gate_binding_args: Option<&[String]>,
-        release_gate: F,
+        release_gate: Option<F>,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
     where
         F: FnOnce(&str) -> Result<(), CommandExecutionError>,
@@ -803,7 +803,7 @@ impl RootlessPodmanAdapter {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
 
-        if runtime_gate_binding_args.is_some() {
+        if let Some(release_gate) = release_gate {
             release_gate(&container_id).map_err(|error| {
                 self.cleanup_owned_command_container_or_report(&container_id, error)
             })?;
