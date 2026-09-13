@@ -99,7 +99,9 @@ fn write_fake_podman(
     ;;
   start:*) : ;;
   top:*|attach:--sig-proxy=false) exit 95 ;;
-  rm:--force) : ;;
+  rm:--force)
+    [ "${{3:-}}" = '--ignore' ] && [ "${{4:-}}" = '{owned_id}' ] || exit 96
+    ;;
   *) exit 91 ;;
 esac
 "#,
@@ -163,10 +165,14 @@ fn poststart_configuration_drift_fails_before_live_attestation_and_release() {
             .any(|line| line.starts_with("top ") || line.starts_with("attach ")),
         "configuration drift must stop the lifecycle before live attestation or token release: {calls}"
     );
-    assert!(
-        calls
-            .lines()
-            .any(|line| line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
+    let expected_cleanup = format!("rm --force --ignore {OWNED_CONTAINER_ID}");
+    let cleanup_calls = calls
+        .lines()
+        .filter(|line| line.starts_with("rm --force --ignore "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cleanup_calls,
+        vec![expected_cleanup.as_str()],
         "post-start contradiction must clean only the exact acquired container ID: {calls}"
     );
 }
