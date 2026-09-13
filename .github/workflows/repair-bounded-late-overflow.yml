@@ -1,0 +1,296 @@
+name: Repair bounded late overflow
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/repair-bounded-late-overflow.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Canonicalize retained-output overflow after drain completion
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/infrastructure/bounded_command.rs")
+          text = source.read_text()
+
+          def block(lines):
+              return "\n".join(lines) + "\n"
+
+          def replace_once(label, old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one source anchor, found {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "execute completion normalization",
+              block([
+                  "        let status_result = supervise_child(&mut child, deadline, terminate_requested.as_ref());",
+                  "        let stdout_result = join_stream(stdout_handle);",
+                  "        let stderr_result = join_stream(stderr_handle);",
+                  "        Ok((",
+                  "            status_result,",
+                  "            stdout_result,",
+                  "            stderr_result,",
+                  "            stdout_overflow.load(Ordering::Acquire),",
+                  "            stderr_overflow.load(Ordering::Acquire),",
+                  "        ))",
+              ]),
+              block([
+                  "        let status_result = supervise_child(&mut child, deadline, terminate_requested.as_ref());",
+                  "        let stdout_result = join_stream(stdout_handle);",
+                  "        let stderr_result = join_stream(stderr_handle);",
+                  "        let stdout_overflow = stdout_overflow.load(Ordering::Acquire);",
+                  "        let stderr_overflow = stderr_overflow.load(Ordering::Acquire);",
+                  "        let status_result = match status_result {",
+                  "            Ok(_) if stdout_overflow || stderr_overflow => Err(BoundedCommandError::OutputLimit),",
+                  "            other => other,",
+                  "        };",
+                  "        Ok((",
+                  "            status_result,",
+                  "            stdout_result,",
+                  "            stderr_result,",
+                  "            stdout_overflow,",
+                  "            stderr_overflow,",
+                  "        ))",
+              ]),
+          )
+
+          replace_once(
+              "run finalizer call",
+              block([
+                  "        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =",
+                  "            self.execute(program, args)?;",
+                  "        finalize_output(",
+                  "            status_result,",
+                  "            stdout_result,",
+                  "            stderr_result,",
+                  "            stdout_overflow || stderr_overflow,",
+                  "        )",
+              ]),
+              block([
+                  "        let (status_result, stdout_result, stderr_result, _, _) = self.execute(program, args)?;",
+                  "        finalize_output(status_result, stdout_result, stderr_result)",
+              ]),
+          )
+
+          replace_once(
+              "finalize output late branch",
+              block([
+                  "fn finalize_output(",
+                  "    status_result: Result<ExitStatus, BoundedCommandError>,",
+                  "    stdout_result: Result<Vec<u8>, BoundedCommandError>,",
+                  "    stderr_result: Result<Vec<u8>, BoundedCommandError>,",
+                  "    overflowed: bool,",
+                  ") -> Result<Output, BoundedCommandError> {",
+                  "    let status = status_result?;",
+                  "    let stdout = stdout_result?;",
+                  "    let stderr = stderr_result?;",
+                  "    if overflowed {",
+                  "        return Err(BoundedCommandError::OutputLimit);",
+                  "    }",
+                  "    Ok(Output {",
+                  "        status,",
+                  "        stdout,",
+                  "        stderr,",
+                  "    })",
+                  "}",
+              ]),
+              block([
+                  "fn finalize_output(",
+                  "    status_result: Result<ExitStatus, BoundedCommandError>,",
+                  "    stdout_result: Result<Vec<u8>, BoundedCommandError>,",
+                  "    stderr_result: Result<Vec<u8>, BoundedCommandError>,",
+                  ") -> Result<Output, BoundedCommandError> {",
+                  "    let status = status_result?;",
+                  "    let stdout = stdout_result?;",
+                  "    let stderr = stderr_result?;",
+                  "    Ok(Output {",
+                  "        status,",
+                  "        stdout,",
+                  "        stderr,",
+                  "    })",
+                  "}",
+              ]),
+          )
+
+          replace_once(
+              "supervisor overflow handoff",
+              block([
+                  "        if overflow.load(Ordering::Acquire) {",
+                  "            kill_and_reap(child)?;",
+                  "            return Err(BoundedCommandError::OutputLimit);",
+                  "        }",
+              ]),
+              block([
+                  "        if overflow.load(Ordering::Acquire) {",
+                  "            return kill_and_reap(child);",
+                  "        }",
+              ]),
+          )
+
+          replace_once(
+              "overflow supervisor unit witness",
+              block([
+                  "        let overflow = AtomicBool::new(true);",
+                  "        let mut noisy = FakeChild::new([]);",
+                  "        assert_eq!(",
+                  "            supervise_child(&mut noisy, Instant::now(), &overflow),",
+                  "            Err(BoundedCommandError::OutputLimit)",
+                  "        );",
+              ]),
+              block([
+                  "        let overflow = AtomicBool::new(true);",
+                  "        let mut noisy = FakeChild::new([]);",
+                  "        assert!(supervise_child(&mut noisy, Instant::now(), &overflow).is_ok());",
+              ]),
+          )
+
+          replace_once(
+              "finalizer unit witness",
+              block([
+                  "    #[test]",
+                  "    fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Ok(b\"stdout\".to_vec()),",
+                  "                Ok(b\"stderr\".to_vec()),",
+                  "                false,",
+                  "            )",
+                  "            .map(|output| (output.stdout, output.stderr)),",
+                  "            Ok((b\"stdout\".to_vec(), b\"stderr\".to_vec()))",
+                  "        );",
+                  "",
+                  "        assert_eq!(",
+                  "            finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),",
+                  "            Err(BoundedCommandError::OutputLimit)",
+                  "        );",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Err(BoundedCommandError::Wait),",
+                  "                Ok(Vec::new()),",
+                  "                Ok(Vec::new()),",
+                  "                false,",
+                  "            ),",
+                  "            Err(BoundedCommandError::Wait)",
+                  "        );",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Err(BoundedCommandError::Capture),",
+                  "                Ok(Vec::new()),",
+                  "                false,",
+                  "            ),",
+                  "            Err(BoundedCommandError::Capture)",
+                  "        );",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Ok(Vec::new()),",
+                  "                Err(BoundedCommandError::Capture),",
+                  "                false,",
+                  "            ),",
+                  "            Err(BoundedCommandError::Capture)",
+                  "        );",
+                  "    }",
+              ]),
+              block([
+                  "    #[test]",
+                  "    fn finalized_output_preserves_capture_error_precedence() {",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Ok(b\"stdout\".to_vec()),",
+                  "                Ok(b\"stderr\".to_vec()),",
+                  "            )",
+                  "            .map(|output| (output.stdout, output.stderr)),",
+                  "            Ok((b\"stdout\".to_vec(), b\"stderr\".to_vec()))",
+                  "        );",
+                  "",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Err(BoundedCommandError::Wait),",
+                  "                Ok(Vec::new()),",
+                  "                Ok(Vec::new()),",
+                  "            ),",
+                  "            Err(BoundedCommandError::Wait)",
+                  "        );",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Err(BoundedCommandError::Capture),",
+                  "                Ok(Vec::new()),",
+                  "            ),",
+                  "            Err(BoundedCommandError::Capture)",
+                  "        );",
+                  "        assert_eq!(",
+                  "            finalize_output(",
+                  "                Ok(success_status()),",
+                  "                Ok(Vec::new()),",
+                  "                Err(BoundedCommandError::Capture),",
+                  "            ),",
+                  "            Err(BoundedCommandError::Capture)",
+                  "        );",
+                  "    }",
+              ]),
+          )
+
+          source.write_text(text)
+
+          trace = Path("docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md")
+          trace_text = trace.read_text()
+          start = trace_text.index("## Remaining command-owner finding\n")
+          end = trace_text.index("\n## Release consequences\n", start)
+          replacement = block([
+              "## Late overflow canonicalization",
+              "",
+              "Exact branch evidence on `343c77a...` left `bounded_command.rs` at 19/20 branches. The missing decision was not an impossible input: a child can exit before the drain worker records retained-output overflow. The repair preserves that race-safety requirement without a scheduler-sensitive test by moving output-limit classification to the point after both drain workers have joined. When the supervisor observes the overflow first it now kills/reaps and returns the reaped status; final classification then uses the retained overflow flag. When child exit wins the race, the same post-drain classification produces the same `OutputLimit`. Timeout and supervisor `Wait` failures keep their existing precedence because only a successful supervised status is reclassified.",
+              "",
+              "The existing concrete oversized-output test therefore exercises the same production decision deterministically regardless of whether child exit or the supervisor overflow observation wins the scheduling race. No sleep tuning, process-global mutation, coverage exclusion, or synthetic impossible state is introduced.",
+              "",
+              "Application-service readiness/lifecycle outcomes and the receipt/exact-ID, independent capability-column, and duplicate network-inspection findings remain canonical #21/#113 work.",
+          ])
+          trace.write_text(trace_text[:start] + replacement + trace_text[end:])
+          PY
+
+      - name: Validate causal repair
+        shell: bash
+        run: |
+          cargo fmt --all
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Publish ordinary repair and remove fixer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          remote_head="$(git ls-remote origin refs/heads/automation/command-chronology-owner-repair | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git add src/infrastructure/bounded_command.rs docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md
+          git rm .github/workflows/repair-bounded-late-overflow.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(command): canonicalize late output overflow'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/command-chronology-owner-repair
