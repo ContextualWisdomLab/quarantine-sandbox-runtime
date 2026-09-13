@@ -35,7 +35,7 @@ jobs:
           missing = [anchor for anchor in required if anchor not in source]
           if missing:
               raise SystemExit(f'causal source anchors drifted: {missing!r}')
-          print('RED authority: one-shot run 34728817073 measured bounded_command.rs at 23/24 branches, with the sole missing branch on the unit-test matches! guard, and confirmed the synthetic impossible supervisor OutputLimit input.')
+          print('RED authority: one-shot run 34728817073 measured bounded_command.rs at 23/24 branches and confirmed the synthetic impossible supervisor OutputLimit input.')
           PY
 
       - name: Remove impossible supervisor state and test-only branch
@@ -54,63 +54,36 @@ jobs:
                   raise SystemExit(f'{label}: expected one source anchor, found {count}')
               text = text.replace(old, new, 1)
 
-          replace_once(
-              'completion rustdoc',
-              '''/// A wall-clock timeout or output-budget overflow becomes a distinct
-/// [`BoundedCompletion`] variant; an inability to observe or reap the child
-/// remains a hard error because it indicates supervisor failure rather than a
-/// terminal fact about the supervised workload.
-''',
-              '''/// A wall-clock timeout observed by the supervisor becomes a distinct
-/// [`BoundedCompletion`] variant. Retained-output overflow is classified from
-/// the post-drain overflow flag after the child has been observed or reaped.
-/// An inability to observe or reap the child remains a hard supervisor error.
-''',
-          )
-          replace_once(
-              'impossible classifier arm',
-              '''        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
-        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
-        Err(other) => Err(other),
-''',
-              '''        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
-        Err(other) => Err(other),
-''',
-          )
-          replace_once(
-              'branchy success assertion',
-              '''        assert!(matches!(
-            classify_completion_status(Ok(success_status()), false),
-            Ok(BoundedCompletion::Exited(status)) if status.success()
-        ));
-''',
-              '''        assert_eq!(
-            classify_completion_status(Ok(success_status()), false),
-            Ok(BoundedCompletion::Exited(success_status()))
-        );
-''',
-          )
-          replace_once(
-              'synthetic impossible assertion',
-              '''        assert_eq!(
-            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),
-            Ok(BoundedCompletion::OutputLimit)
-        );
-''',
-              '',
-          )
+          old_doc = "/// A wall-clock timeout or output-budget overflow becomes a distinct\n" + "/// [`BoundedCompletion`] variant; an inability to observe or reap the child\n" + "/// remains a hard error because it indicates supervisor failure rather than a\n" + "/// terminal fact about the supervised workload.\n"
+          new_doc = "/// A wall-clock timeout observed by the supervisor becomes a distinct\n" + "/// [`BoundedCompletion`] variant. Retained-output overflow is classified from\n" + "/// the post-drain overflow flag after the child has been observed or reaped.\n" + "/// An inability to observe or reap the child remains a hard supervisor error.\n"
+          replace_once('completion rustdoc', old_doc, new_doc)
+
+          old_arm = "        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n" + "        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),\n" + "        Err(other) => Err(other),\n"
+          new_arm = "        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n" + "        Err(other) => Err(other),\n"
+          replace_once('impossible classifier arm', old_arm, new_arm)
+
+          old_success = "        assert!(matches!(\n" + "            classify_completion_status(Ok(success_status()), false),\n" + "            Ok(BoundedCompletion::Exited(status)) if status.success()\n" + "        ));\n"
+          new_success = "        assert_eq!(\n" + "            classify_completion_status(Ok(success_status()), false),\n" + "            Ok(BoundedCompletion::Exited(success_status()))\n" + "        );\n"
+          replace_once('branchy success assertion', old_success, new_success)
+
+          old_synthetic = "        assert_eq!(\n" + "            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),\n" + "            Ok(BoundedCompletion::OutputLimit)\n" + "        );\n"
+          replace_once('synthetic impossible assertion', old_synthetic, '')
           source.write_text(text)
 
           trace = Path('docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md')
           trace_text = trace.read_text()
           marker = '## Release consequences\n'
-          addition = '''## Supervisor-state and test-denominator repair
-
-Exact branch artifact `10309171287` on source `a5be6a3f25cd3c34e09f30bd041e2d287eb32cd6` (`sha256:c90c02a0267f18149709ea72efbd20b944db0e4115de847db95fe9a71b27fa5f`) measured `bounded_command.rs` at 23/24 branches. One-shot run `34728817073` then reproduced that exact 23/24 RED and confirmed the sole missing coordinate was line 450's `matches!` guard inside a unit test. The same source retained a synthetic `Err(BoundedCommandError::OutputLimit)` classifier fixture even though, after the capture-precedence repair, `execute()` forwards the raw `supervise_child()` result plus independent post-drain overflow flags. The supervisor can return an observed/reaped status, `Timeout`, or `Wait`; its overflow path kills/reaps and therefore cannot return `Err(OutputLimit)`.
-
-The causal repair removes that impossible classifier arm and synthetic fixture. Administrative `run()` still emits `BoundedCommandError::OutputLimit` after successful capture, so its public failure taxonomy is unchanged. Workload completion derives `OutputLimit` only from the post-drain overflow flag on a successfully observed/reaped status. The branchy `matches!` guard is replaced by exact equality against `BoundedCompletion::Exited(success_status())`, removing test-only control flow without excluding coverage or weakening a production condition.
-
-'''
+          addition = (
+              '## Supervisor-state and test-denominator repair\n\n'
+              'Exact branch artifact `10309171287` on source `a5be6a3f25cd3c34e09f30bd041e2d287eb32cd6` '
+              '(`sha256:c90c02a0267f18149709ea72efbd20b944db0e4115de847db95fe9a71b27fa5f`) measured `bounded_command.rs` at 23/24 branches. '
+              'One-shot run `34728817073` reproduced that exact RED and confirmed the sole missing coordinate was the unit-test `matches!` guard. '
+              'The same source retained a synthetic `Err(BoundedCommandError::OutputLimit)` classifier fixture even though `execute()` now forwards the raw `supervise_child()` result plus independent post-drain overflow flags. '
+              'The supervisor can return an observed/reaped status, `Timeout`, or `Wait`; its overflow path kills/reaps and therefore cannot return `Err(OutputLimit)`.\n\n'
+              'The causal repair removes that impossible classifier arm and synthetic fixture. Administrative `run()` still emits `BoundedCommandError::OutputLimit` after successful capture, so its public failure taxonomy is unchanged. '
+              'Workload completion derives `OutputLimit` only from the post-drain overflow flag on a successfully observed/reaped status. '
+              'The branchy `matches!` guard is replaced by exact equality against `BoundedCompletion::Exited(success_status())`, removing test-only control flow without excluding coverage or weakening a production condition.\n\n'
+          )
           if trace_text.count(marker) != 1:
               raise SystemExit('traceability release marker drifted')
           trace.write_text(trace_text.replace(marker, addition + marker, 1))
