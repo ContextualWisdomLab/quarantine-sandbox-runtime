@@ -1,4 +1,4 @@
-name: Repair command completion state
+name: Repair typed bounded completion
 
 on:
   push:
@@ -17,94 +17,318 @@ jobs:
       - name: Check out exact repair source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: automation/command-chronology-owner-repair
+          ref: ${{ github.sha }}
           fetch-depth: 2
           persist-credentials: false
 
-      - name: Recover and execute validated repair patch
+      - name: Type terminal completion state
         shell: bash
         run: |
-          git fetch --no-tags --depth=1 origin a05a130ff218b6f476e42f33c1dd93f9794be5c7
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64
-          import subprocess
-
-          expected_parent = "0c4188e812939dfda4c9916dd365f28c257402a3"
-          actual_parent = subprocess.check_output(["git", "rev-parse", "HEAD^"], text=True).strip()
-          if actual_parent != expected_parent:
-              raise SystemExit(f"repair parent drifted: expected {expected_parent}, got {actual_parent}")
-
-          validated = subprocess.check_output(
-              ["git", "show", "a05a130ff218b6f476e42f33c1dd93f9794be5c7:.github/workflows/repair-command-completion-state.yml"],
-              text=True,
-          )
-          payload_line = next(
-              (line for line in validated.splitlines() if "base64 --decode > /tmp/repair.py" in line),
-              None,
-          )
-          if payload_line is None:
-              raise SystemExit("validated repair payload line not found")
-          parts = payload_line.split("'")
-          if len(parts) < 4:
-              raise SystemExit("validated repair payload quoting changed")
-          payload = base64.b64decode(parts[3]).decode()
-
-          old_parent = "fe38ab0948a5c553d1988733bf54fc0112086edb"
-          if payload.count(old_parent) != 1:
-              raise SystemExit("repair payload parent anchor drifted")
-          payload = payload.replace(old_parent, expected_parent, 1)
-          Path("/tmp/repair.py").write_text(payload)
-          PY
-          python3 /tmp/repair.py
-
-          typo_count="$(grep -o 'ApplicationServiceEror' src/infrastructure/podman.rs | wc -l)"
-          test "$typo_count" -eq 1
-          sed -i 's/ApplicationServiceEror/ApplicationServiceError/' src/infrastructure/podman.rs
-          ! grep -q 'ApplicationServiceEror' src/infrastructure/podman.rs
-
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("src/infrastructure/bounded_command_concrete_tests.rs")
-          text = path.read_text()
-          old_import = "use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};"
-          new_import = "use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};"
-          if text.count(old_import) != 1:
-              raise SystemExit("concrete test import anchor drifted")
-          text = text.replace(old_import, new_import, 1)
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one repair anchor, found {count}")
+              target.write_text(text.replace(old, new, 1))
 
-          old_map = '''        .map(|outcome| {
-            (
-                outcome.status.is_some_and(|status| status.success()),
-                outcome.timed_out,
-                outcome.stdout,
-                outcome.stdout_truncated,
-                outcome.stderr,
-                outcome.stderr_truncated,
-            )
-        });'''
-          new_map = '''        .map(|outcome| {
-            (
-                outcome.completion,
-                outcome.stdout,
-                outcome.stdout_truncated,
-                outcome.stderr,
-                outcome.stderr_truncated,
-            )
-        });'''
-          if text.count(old_map) != 1:
-              raise SystemExit("concrete test completion map anchor drifted")
-          text = text.replace(old_map, new_map, 1)
+          bounded = "src/infrastructure/bounded_command.rs"
+          podman = "src/infrastructure/podman.rs"
+          concrete = "src/infrastructure/bounded_command_concrete_tests.rs"
 
-          old_expected = 'Ok((false, false, b"1234".to_vec(), true, vec![], false))'
-          new_expected = 'Ok((BoundedCompletion::OutputLimit, b"1234".to_vec(), true, vec![], false))'
-          if text.count(old_expected) != 1:
-              raise SystemExit("concrete test expectation anchor drifted")
-          path.write_text(text.replace(old_expected, new_expected, 1))
+          replace_once(
+              bounded,
+              '''#[derive(Clone, Debug, PartialEq, Eq)]
+          pub(crate) struct BoundedRunOutcome {
+              /// The process's own exit status, or `None` when it was killed before
+              /// reporting one (wall-clock timeout or output-budget enforcement).
+              pub(crate) status: Option<ExitStatus>,
+              /// Whether the process was killed for exceeding its wall-clock budget.
+              pub(crate) timed_out: bool,
+          ''',
+              '''/// Mutually exclusive terminal state reported by the bounded supervisor.
+          ///
+          /// Encoding timeout and output-budget termination as variants prevents callers
+          /// from constructing contradictory combinations such as a missing exit status
+          /// without a terminal cause.
+          #[derive(Clone, Debug, PartialEq, Eq)]
+          pub(crate) enum BoundedCompletion {
+              /// The supervised process exited and reported its own status.
+              Exited(ExitStatus),
+              /// The supervised process exceeded its wall-clock budget.
+              TimedOut,
+              /// The supervised process exceeded its retained-output budget.
+              OutputLimit,
+          }
+
+          #[derive(Clone, Debug, PartialEq, Eq)]
+          pub(crate) struct BoundedRunOutcome {
+              /// Mutually exclusive terminal state reported by the supervisor.
+              pub(crate) completion: BoundedCompletion,
+          ''',
+          )
+
+          replace_once(
+              bounded,
+              '''    let (status, timed_out) = classify_completion_status(status_result)?;
+              Ok(BoundedRunOutcome {
+                  status,
+                  timed_out,
+          ''',
+              '''    let completion = classify_completion_status(status_result)?;
+              Ok(BoundedRunOutcome {
+                  completion,
+          ''',
+          )
+
+          replace_once(
+              bounded,
+              '''fn classify_completion_status(
+              status_result: Result<ExitStatus, BoundedCommandError>,
+          ) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
+              match status_result {
+                  Ok(status) => Ok((Some(status), false)),
+                  Err(BoundedCommandError::Timeout) => Ok((None, true)),
+                  Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
+                  Err(other) => Err(other),
+              }
+          }
+          ''',
+              '''fn classify_completion_status(
+              status_result: Result<ExitStatus, BoundedCommandError>,
+          ) -> Result<BoundedCompletion, BoundedCommandError> {
+              match status_result {
+                  Ok(status) => Ok(BoundedCompletion::Exited(status)),
+                  Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
+                  Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
+                  Err(other) => Err(other),
+              }
+          }
+          ''',
+          )
+
+          replace_once(
+              bounded,
+              '''        BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status,
+                  drain_stream, finalize_completion, finalize_output, join_stream, kill_and_reap,
+                  supervise_child,
+          ''',
+              '''        BoundedCommandError, BoundedCompletion, ChildProcess, captured_pipes,
+                  classify_completion_status, drain_stream, finalize_completion, finalize_output,
+                  join_stream, kill_and_reap, supervise_child,
+          ''',
+          )
+
+          replace_once(
+              bounded,
+              '''    #[test]
+              fn completion_status_preserves_supervisor_wait_failure() {
+                  assert_eq!(
+                      classify_completion_status(Err(BoundedCommandError::Wait)),
+                      Err(BoundedCommandError::Wait)
+                  );
+              }
+          ''',
+              '''    #[test]
+              fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {
+                  assert!(matches!(
+                      classify_completion_status(Ok(success_status())),
+                      Ok(BoundedCompletion::Exited(status)) if status.success()
+                  ));
+                  assert_eq!(
+                      classify_completion_status(Err(BoundedCommandError::Timeout)),
+                      Ok(BoundedCompletion::TimedOut)
+                  );
+                  assert_eq!(
+                      classify_completion_status(Err(BoundedCommandError::OutputLimit)),
+                      Ok(BoundedCompletion::OutputLimit)
+                  );
+                  assert_eq!(
+                      classify_completion_status(Err(BoundedCommandError::Wait)),
+                      Err(BoundedCommandError::Wait)
+                  );
+              }
+          ''',
+          )
+
+          replace_once(
+              podman,
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};',
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};',
+          )
+
+          replace_once(
+              podman,
+              '''        if logs_outcome.timed_out {
+                  // The log driver failing to hand back already-written output
+                  // promptly is an infrastructure fault, not a fact about the
+                  // workload (whose own timeout is already captured above).
+                  return Err(self.cleanup_owned_command_container_or_report(
+                      &container_id,
+                      CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
+                          operation: "container_logs",
+                      }),
+                  ));
+              }
+              // A `None` status only occurs on the timeout/output-budget kill
+              // paths already handled above (or by the truncation flags on
+              // success); anything else is `podman logs` itself failing (e.g. the
+              // log driver or container state is broken) and is an infrastructure
+              // fault, not empty workload output.
+              if !logs_outcome.status.is_none_or(|status| status.success()) {
+                  return Err(self.cleanup_owned_command_container_or_report(
+                      &container_id,
+                      CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
+                          operation: "container_logs",
+                      }),
+                  ));
+              }
+          ''',
+              '''        match &logs_outcome.completion {
+                  BoundedCompletion::TimedOut => {
+                      // The log driver failing to hand back already-written output
+                      // promptly is an infrastructure fault, not a fact about the
+                      // workload (whose own timeout is already captured above).
+                      return Err(self.cleanup_owned_command_container_or_report(
+                          &container_id,
+                          CommandExecutionError::Backend(
+                              ApplicationServiceError::BackendCommandTimedOut {
+                                  operation: "container_logs",
+                              },
+                          ),
+                      ));
+                  }
+                  BoundedCompletion::Exited(status) if !status.success() => {
+                      return Err(self.cleanup_owned_command_container_or_report(
+                          &container_id,
+                          CommandExecutionError::Backend(
+                              ApplicationServiceError::BackendCommandFailed {
+                                  operation: "container_logs",
+                              },
+                          ),
+                      ));
+                  }
+                  BoundedCompletion::Exited(_) | BoundedCompletion::OutputLimit => {}
+              }
+          ''',
+          )
+
+          replace_once(
+              podman,
+              '''        if !wait_outcome.timed_out {
+                  if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                      return Err(CommandExecutionError::Backend(
+                          ApplicationServiceError::BackendOutputLimitExceeded {
+                              operation: "command_wait",
+                          },
+                      ));
+                  }
+                  match wait_outcome.status {
+                      Some(status) if status.success() => {
+                          return Ok((
+                              parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                              false,
+                          ));
+                      }
+                      Some(_) => {
+                          return Err(CommandExecutionError::Backend(
+                              ApplicationServiceError::BackendCommandFailed {
+                                  operation: "command_wait",
+                              },
+                          ));
+                      }
+                      None => {
+                          return Err(CommandExecutionError::Backend(
+                              ApplicationServiceError::BackendInvocationFailed {
+                                  operation: "command_wait",
+                              },
+                          ));
+                      }
+                  }
+              }
+
+              self.checked_output(
+          ''',
+              '''        match wait_outcome.completion {
+                  BoundedCompletion::TimedOut => {}
+                  BoundedCompletion::OutputLimit => {
+                      return Err(CommandExecutionError::Backend(
+                          ApplicationServiceError::BackendOutputLimitExceeded {
+                              operation: "command_wait",
+                          },
+                      ));
+                  }
+                  BoundedCompletion::Exited(status) => {
+                      if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                          return Err(CommandExecutionError::Backend(
+                              ApplicationServiceError::BackendOutputLimitExceeded {
+                                  operation: "command_wait",
+                              },
+                          ));
+                      }
+                      if status.success() {
+                          return Ok((
+                              parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                              false,
+                          ));
+                      }
+                      return Err(CommandExecutionError::Backend(
+                          ApplicationServiceError::BackendCommandFailed {
+                              operation: "command_wait",
+                          },
+                      ));
+                  }
+              }
+
+              self.checked_output(
+          ''',
+          )
+
+          text = Path(podman).read_text()
+          typo_count = text.count("ApplicationServiceEror")
+          if typo_count > 1:
+              raise SystemExit(f"{podman}: unexpected repeated ApplicationServiceEror count {typo_count}")
+          if typo_count == 1:
+              Path(podman).write_text(text.replace("ApplicationServiceEror", "ApplicationServiceError", 1))
+
+          replace_once(
+              concrete,
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};',
+              'use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};',
+          )
+          replace_once(
+              concrete,
+              '''        .map(|outcome| {
+                      (
+                          outcome.status.is_some_and(|status| status.success()),
+                          outcome.timed_out,
+                          outcome.stdout,
+                          outcome.stdout_truncated,
+                          outcome.stderr,
+                          outcome.stderr_truncated,
+                      )
+                  });''',
+              '''        .map(|outcome| {
+                      (
+                          outcome.completion,
+                          outcome.stdout,
+                          outcome.stdout_truncated,
+                          outcome.stderr,
+                          outcome.stderr_truncated,
+                      )
+                  });''',
+          )
+          replace_once(
+              concrete,
+              'Ok((false, false, b"1234".to_vec(), true, vec![], false))',
+              'Ok((BoundedCompletion::OutputLimit, b"1234".to_vec(), true, vec![], false))',
+          )
           PY
 
-      - name: Format and validate repair
+      - name: Validate typed repair
         shell: bash
         run: |
           cargo fmt --all
@@ -113,13 +337,14 @@ jobs:
           RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
           git diff --check
 
-      - name: Remove one-shot workflow and publish ordinary descendant
+      - name: Publish ordinary source descendant
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm .github/workflows/repair-command-completion-state.yml
-          git add src/infrastructure/bounded_command.rs src/infrastructure/bounded_command_concrete_tests.rs src/infrastructure/podman.rs .github/workflows/repair-command-completion-state.yml
+          remote_head="$(git ls-remote origin refs/heads/automation/command-chronology-owner-repair | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git add src/infrastructure/bounded_command.rs src/infrastructure/bounded_command_concrete_tests.rs src/infrastructure/podman.rs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(command): type bounded completion state'
