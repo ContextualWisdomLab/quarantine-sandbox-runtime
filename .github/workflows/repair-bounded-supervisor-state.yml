@@ -1,0 +1,140 @@
+name: Repair bounded supervisor completion state
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/repair-bounded-supervisor-state.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Install pinned branch-coverage toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: nightly-2026-07-01
+          components: llvm-tools-preview
+
+      - name: Execute exact branch-coverage RED
+        shell: bash
+        run: |
+          cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6
+          cargo +nightly-2026-07-01 llvm-cov --branch --workspace --lib --tests --json --output-path /tmp/branch-red.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('/tmp/branch-red.json').read_text())
+          target = None
+          for data in report['data']:
+              for file in data['files']:
+                  if file['filename'].endswith('/src/infrastructure/bounded_command.rs'):
+                      target = file
+                      break
+          if target is None:
+              raise SystemExit('bounded_command.rs missing from branch report')
+
+          summary = target['summary']['branches']
+          if (summary['covered'], summary['count']) != (23, 24):
+              raise SystemExit(f"expected exact causal RED 23/24, got {summary['covered']}/{summary['count']}")
+
+          missing = []
+          grouped = {}
+          for branch in target['branches']:
+              coordinate = tuple(branch[:4])
+              grouped.setdefault(coordinate, []).append((branch[4], branch[5]))
+          for coordinate, counts in grouped.items():
+              true_count = sum(pair[0] for pair in counts)
+              false_count = sum(pair[1] for pair in counts)
+              if true_count == 0 or false_count == 0:
+                  missing.append((coordinate, true_count, false_count))
+          if missing != [((450, 54, 450, 70), 1, 0)]:
+              raise SystemExit(f'unexpected bounded-command missing branch coordinates: {missing!r}')
+
+          source = Path('src/infrastructure/bounded_command.rs').read_text()
+          impossible = 'Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),'
+          synthetic = 'classify_completion_status(Err(BoundedCommandError::OutputLimit), false)'
+          if impossible not in source or synthetic not in source:
+              raise SystemExit('supervisor-state RED anchors drifted')
+          print('RED: bounded_command.rs is 23/24 because of the branchy test guard, while a synthetic impossible OutputLimit supervisor state is still used to cover dead classifier control flow.')
+          PY
+
+      - name: Remove impossible supervisor state and test-only branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/infrastructure/bounded_command.rs')
+          text = source.read_text()
+
+          replacements = [
+              (
+                  """/// A wall-clock timeout or output-budget overflow becomes a distinct\n/// [`BoundedCompletion`] variant; an inability to observe or reap the child\n/// remains a hard error because it indicates supervisor failure rather than a\n/// terminal fact about the supervised workload.\n""",
+                  """/// A wall-clock timeout observed by the supervisor becomes a distinct\n/// [`BoundedCompletion`] variant. Retained-output overflow is classified from\n/// the post-drain overflow flag after the child has been observed or reaped.\n/// An inability to observe or reap the child remains a hard supervisor error.\n""",
+              ),
+              (
+                  """        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),\n        Err(other) => Err(other),\n""",
+                  """        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n        Err(other) => Err(other),\n""",
+              ),
+              (
+                  """        assert!(matches!(\n            classify_completion_status(Ok(success_status()), false),\n            Ok(BoundedCompletion::Exited(status)) if status.success()\n        ));\n""",
+                  """        assert_eq!(\n            classify_completion_status(Ok(success_status()), false),\n            Ok(BoundedCompletion::Exited(success_status()))\n        );\n""",
+              ),
+              (
+                  """        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),\n            Ok(BoundedCompletion::OutputLimit)\n        );\n""",
+                  """,
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one source anchor, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          source.write_text(text)
+
+          trace = Path('docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md')
+          trace_text = trace.read_text()
+          marker = '## Release consequences\n'
+          addition = """## Supervisor-state and test-denominator repair\n\nExact branch artifact `10309171287` on source `a5be6a3f25cd3c34e09f30bd041e2d287eb32cd6` (`sha256:c90c02a0267f18149709ea72efbd20b944db0e4115de847db95fe9a71b27fa5f`) measured `bounded_command.rs` at 23/24 branches. The sole missing coordinate was line 450's `matches!` guard inside a unit test, so the remaining branch was test control flow rather than a production decision. The exact source simultaneously retained a synthetic `Err(BoundedCommandError::OutputLimit)` classifier fixture. After the capture-precedence repair, `execute()` forwards the raw `supervise_child()` result and independent post-drain overflow flags. The supervisor can return a successfully observed/reaped status, `Timeout`, or `Wait`; its overflow path kills/reaps and therefore cannot return `Err(OutputLimit)`.\n\nThe causal repair removes that impossible special classifier arm and synthetic fixture. Administrative `run()` still emits `BoundedCommandError::OutputLimit` after successful capture, so its public failure taxonomy is unchanged. Workload completion derives `OutputLimit` only from the post-drain overflow flag on a successfully observed/reaped status. The branchy `matches!` guard is replaced by exact equality against `BoundedCompletion::Exited(success_status())`, removing a test-only branch without excluding coverage or weakening a production condition.\n\n"""
+          if trace_text.count(marker) != 1:
+              raise SystemExit('traceability release marker drifted')
+          trace.write_text(trace_text.replace(marker, addition + marker, 1))
+          PY
+
+      - name: Validate causal GREEN
+        shell: bash
+        run: |
+          cargo fmt --all
+          cargo test --locked completion_status_types_every_terminal_state_and_preserves_wait_failure -- --nocapture
+          cargo test --locked supervision_preserves_exit_timeout_overflow_and_poll_failures -- --nocapture
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Publish ordinary repair and remove fixer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          remote_head="$(git ls-remote origin refs/heads/automation/command-chronology-owner-repair | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git add src/infrastructure/bounded_command.rs docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md
+          git rm .github/workflows/repair-bounded-supervisor-state.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(command): remove impossible supervisor output state'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/command-chronology-owner-repair
