@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 from scripts.check_coverage import (
+    _source_line_counts,
     _source_region_counts,
     _uncovered_lines,
     _uncovered_segment_starts,
@@ -62,6 +63,50 @@ class UncoveredLineAttributionTests(unittest.TestCase):
         }
 
         self.assertEqual(_uncovered_segment_starts(file_record), [(11, 5), (13, 2)])
+
+
+class SourceLineCoverageTests(unittest.TestCase):
+    """Measure one physical source line once across Rust codegen instantiations."""
+
+    @staticmethod
+    def _data(second_count: int = 7) -> dict[str, object]:
+        return {
+            "files": [
+                {
+                    "filename": "/workspace/src/runtime.rs",
+                    "summary": {"lines": {"count": 2, "covered": 1}},
+                    "segments": [
+                        [10, 5, second_count, True, True, False],
+                        [10, 20, 0, False, False, False],
+                    ],
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, second_count, 0, 0, 0, 0]],
+                },
+            ],
+        }
+
+    def test_mixed_instantiations_cover_one_physical_source_line(self) -> None:
+        self.assertEqual(_source_line_counts(self._data()), (1, 1))
+
+    def test_physical_line_is_uncovered_when_every_instance_is_zero(self) -> None:
+        self.assertEqual(_source_line_counts(self._data(second_count=0)), (1, 0))
+
+    def test_line_mapping_must_agree_between_regions_and_segments(self) -> None:
+        data = self._data()
+        data["files"][0]["segments"] = [
+            [11, 5, 7, True, True, False],
+            [11, 20, 0, False, False, False],
+        ]
+        with self.assertRaisesRegex(ValueError, "source line denominator"):
+            _source_line_counts(data)
 
 
 class SourceRegionCoverageTests(unittest.TestCase):
@@ -137,7 +182,7 @@ class CoverageAdmissionTests(unittest.TestCase):
             "data": [
                 {
                     "totals": {
-                        "lines": {"count": 1, "covered": 1},
+                        "lines": {"count": 2, "covered": 1},
                         "functions": {"count": 1, "covered": 1},
                         "regions": {"count": 1, "covered": 0},
                     },
@@ -145,14 +190,17 @@ class CoverageAdmissionTests(unittest.TestCase):
                         {
                             "filename": "/workspace/src/runtime.rs",
                             "summary": {
-                                "lines": {"count": 1, "covered": 1},
+                                "lines": {"count": 2, "covered": 1},
                                 "functions": {"count": 1, "covered": 1},
                                 "regions": {
                                     "count": file_region_count,
                                     "covered": 0,
                                 },
                             },
-                            "segments": [],
+                            "segments": [
+                                [10, 5, 7, True, True, False],
+                                [10, 20, 0, False, False, False],
+                            ],
                         }
                     ],
                     "functions": [
@@ -188,6 +236,8 @@ class CoverageAdmissionTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(stderr, "")
+        self.assertIn("lines (LLVM raw): 1/2", stdout)
+        self.assertIn("lines: 1/1", stdout)
         self.assertIn("regions (LLVM raw): 0/1", stdout)
         self.assertIn("regions: 1/1", stdout)
 

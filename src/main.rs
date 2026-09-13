@@ -646,15 +646,29 @@ case "${1:-}:${2:-}" in
 esac
 "#;
 
+        #[cfg(target_arch = "x86_64")]
+        fn test_elf_machine() -> u16 {
+            62
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        fn test_elf_machine() -> u16 {
+            183
+        }
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        fn test_elf_machine() -> u16 {
+            panic!(
+                "runtime-gate test fixture does not support architecture {}",
+                std::env::consts::ARCH
+            )
+        }
+
         fn write_self_contained_gate(name: &str) -> (PathBuf, String) {
             const ELF_HEADER_BYTES: usize = 64;
             const PROGRAM_HEADER_BYTES: usize = 56;
             const FILE_BYTES: usize = 512;
-            let machine = match std::env::consts::ARCH {
-                "x86_64" => 62_u16,
-                "aarch64" => 183_u16,
-                other => panic!("runtime-gate test fixture does not support architecture {other}"),
-            };
+            let machine = test_elf_machine();
             let mut bytes = vec![0_u8; FILE_BYTES];
             bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
             bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());

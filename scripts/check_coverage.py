@@ -21,6 +21,125 @@ def _metric_counts(metric: dict[str, Any]) -> tuple[int, int]:
     raise ValueError(f"coverage metric has no covered/notcovered count: {metric}")
 
 
+def _source_line_map_from_functions(
+    data: dict[str, Any], production_filenames: set[str]
+) -> dict[tuple[str, int], bool]:
+    """Union physical source-line execution across LLVM function instantiations."""
+
+    source_lines: dict[tuple[str, int], bool] = {}
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        raise ValueError("coverage data has no function regions")
+
+    for function in functions:
+        if not isinstance(function, dict):
+            raise ValueError("coverage function record is malformed")
+        filenames = function.get("filenames")
+        regions = function.get("regions")
+        if not isinstance(filenames, list) or not isinstance(regions, list):
+            raise ValueError("coverage function record is malformed")
+        for region in regions:
+            if not isinstance(region, list) or len(region) < 8:
+                raise ValueError("coverage region record is malformed")
+            file_id = int(region[5])
+            if file_id < 0 or file_id >= len(filenames):
+                raise ValueError("coverage region file id is out of range")
+            filename = str(filenames[file_id])
+            if filename not in production_filenames:
+                continue
+            executed = int(region[4]) > 0
+            for line_number in range(int(region[0]), int(region[2]) + 1):
+                key = (filename, line_number)
+                source_lines[key] = source_lines.get(key, False) or executed
+    return source_lines
+
+
+def _source_line_map_from_segments(
+    file_records: list[dict[str, Any]],
+) -> dict[tuple[str, int], bool]:
+    """Reconstruct physical source-line execution from LLVM file segments."""
+
+    source_lines: dict[tuple[str, int], bool] = {}
+    for file_record in file_records:
+        filename = file_record.get("filename")
+        segments = file_record.get("segments")
+        if not isinstance(filename, str) or not isinstance(segments, list):
+            raise ValueError("coverage file record has no line segments")
+
+        line_regions: dict[int, list[tuple[bool, int]]] = {}
+        for index, segment in enumerate(segments[:-1]):
+            if not isinstance(segment, list) or len(segment) < 6:
+                raise ValueError("coverage segment record is malformed")
+            next_segment = segments[index + 1]
+            if not isinstance(next_segment, list) or len(next_segment) < 2:
+                raise ValueError("coverage segment record is malformed")
+
+            line_start = int(segment[0])
+            column_start = int(segment[1])
+            execution_count = int(segment[2])
+            has_count = bool(segment[3])
+            is_gap_region = bool(segment[5])
+            line_end = int(next_segment[0])
+            column_end = int(next_segment[1])
+            if not has_count or (line_end, column_end) <= (line_start, column_start):
+                continue
+
+            touched_lines = list(range(line_start, line_end))
+            if line_end == line_start or column_end > 1:
+                touched_lines.append(line_end)
+            for line_number in touched_lines:
+                line_regions.setdefault(line_number, []).append(
+                    (is_gap_region, execution_count)
+                )
+
+        for line_number, regions in line_regions.items():
+            non_gap_counts = [count for is_gap, count in regions if not is_gap]
+            counts = non_gap_counts or [count for _is_gap, count in regions]
+            source_lines[(filename, line_number)] = any(count > 0 for count in counts)
+    return source_lines
+
+
+def _source_line_counts(data: dict[str, Any]) -> tuple[int, int]:
+    """Return physical source-line coverage after unioning codegen instantiations."""
+
+    raw_file_records = data.get("files")
+    if not isinstance(raw_file_records, list):
+        raise ValueError("coverage data has no file records")
+
+    file_records: list[dict[str, Any]] = []
+    production_filenames: set[str] = set()
+    for file_record in raw_file_records:
+        if not isinstance(file_record, dict):
+            raise ValueError("coverage file record is malformed")
+        filename = file_record.get("filename")
+        summary = file_record.get("summary")
+        if not isinstance(filename, str) or not isinstance(summary, dict):
+            raise ValueError("coverage file record is malformed")
+        line_metric = summary.get("lines")
+        if not isinstance(line_metric, dict):
+            raise ValueError(f"coverage file has no line summary: {filename}")
+        _metric_counts(line_metric)
+        file_records.append(file_record)
+        production_filenames.add(filename)
+
+    function_lines = _source_line_map_from_functions(data, production_filenames)
+    segment_lines = _source_line_map_from_segments(file_records)
+    if function_lines.keys() != segment_lines.keys():
+        raise ValueError(
+            "source line denominator differs between function regions and file segments"
+        )
+    disagreements = [
+        key
+        for key, executed in function_lines.items()
+        if segment_lines[key] != executed
+    ]
+    if disagreements:
+        raise ValueError(
+            "source line execution differs between function regions and file segments"
+        )
+    return len(function_lines), sum(function_lines.values())
+
+
 def _source_region_counts(data: dict[str, Any]) -> tuple[int, int]:
     """Return source-region total and covered counts across production files."""
 
@@ -192,7 +311,14 @@ def main() -> int:
             failures.append(f"missing coverage metric: {metric_name}")
             continue
         total, covered = _metric_counts(metric)
-        if metric_name == "regions":
+        if metric_name == "lines":
+            print(f"lines (LLVM raw): {covered}/{total}")
+            try:
+                total, covered = _source_line_counts(data)
+            except ValueError as error:
+                failures.append(str(error))
+                continue
+        elif metric_name == "regions":
             print(f"regions (LLVM raw): {covered}/{total}")
             try:
                 total, covered = _source_region_counts(data)
