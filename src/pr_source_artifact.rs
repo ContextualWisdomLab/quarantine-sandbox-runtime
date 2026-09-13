@@ -185,18 +185,6 @@ fn validate_declared_file_length(
     Ok(())
 }
 
-/// Add one declared file length without allowing the source-byte budget to wrap.
-fn checked_source_total_bytes(
-    total_bytes: u64,
-    file_bytes: u64,
-) -> Result<u64, PrSourceArtifactError> {
-    total_bytes
-        .checked_add(file_bytes)
-        .ok_or(PrSourceArtifactError::LimitExceeded {
-            limit_name: "total_bytes",
-        })
-}
-
 fn collect_regular_files(
     directory: &Path,
     relative_directory: &Path,
@@ -269,9 +257,12 @@ pub fn stage_pr_source_artifact(
             limit_name: "regular_file_count",
         });
     }
-    let total_bytes = files.iter().try_fold(0_u64, |total, entry| {
-        checked_source_total_bytes(total, entry.3)
-    })?;
+    // Exact totals above the admission bound are never published. Saturation
+    // preserves the only fact needed here and folds integer overflow into the
+    // same fail-closed oversized-tree decision instead of a duplicate outcome.
+    let total_bytes = files
+        .iter()
+        .fold(0_u64, |total, entry| total.saturating_add(entry.3));
     if total_bytes > MAX_SOURCE_BYTES {
         return Err(PrSourceArtifactError::LimitExceeded {
             limit_name: "total_bytes",
@@ -380,17 +371,6 @@ mod tests {
         assert!(matches!(
             validate_declared_file_length(16, 17),
             Err(PrSourceArtifactError::DigestMismatch)
-        ));
-    }
-
-    #[test]
-    fn source_byte_budget_overflow_fails_closed() {
-        assert_eq!(checked_source_total_bytes(7, 11).unwrap(), 18);
-        assert!(matches!(
-            checked_source_total_bytes(u64::MAX, 1),
-            Err(PrSourceArtifactError::LimitExceeded {
-                limit_name: "total_bytes"
-            })
         ));
     }
 }
