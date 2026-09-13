@@ -923,13 +923,6 @@ impl RootlessPodmanAdapter {
                 ));
             }
             BoundedCompletion::Exited(status) => {
-                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendOutputLimitExceeded {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
                 if status.success() {
                     return Ok((
                         parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
