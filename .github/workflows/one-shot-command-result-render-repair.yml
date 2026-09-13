@@ -1,0 +1,207 @@
+name: One-shot command result render coverage repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/one-shot-command-result-render-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact source-fix trigger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.97.1
+
+      - name: Apply deterministic JSON-render failure seam
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/main.rs")
+          text = source.read_text()
+
+          anchor = '''fn default_request_id() -> String {
+              format!("cli-{}-{}", epoch_seconds(), std::process::id())
+          }
+
+          /// Parse, validate, execute, and report one CLI invocation.
+          '''
+          replacement = '''fn default_request_id() -> String {
+              format!("cli-{}-{}", epoch_seconds(), std::process::id())
+          }
+
+          /// Render one command result as JSON and report serialization failure visibly.
+          ///
+          /// The CLI preserves the sandboxed command's exit code when presentation fails,
+          /// matching the existing transport contract, but the serialization boundary remains
+          /// explicit and independently testable instead of hiding an unexercised inline arm.
+          fn report_result_json<T: serde::Serialize>(value: &T) -> bool {
+              match serde_json::to_string_pretty(value) {
+                  Ok(json) => {
+                      println!("{json}");
+                      true
+                  }
+                  Err(error) => {
+                      eprintln!("warning: failed to render result as JSON: {error}");
+                      false
+                  }
+              }
+          }
+
+          /// Parse, validate, execute, and report one CLI invocation.
+          '''
+          if anchor not in text:
+              raise SystemExit("default_request_id/run anchor no longer matches current source")
+          text = text.replace(anchor, replacement, 1)
+
+          old_inline = '''        Ok(result) => {
+                      match serde_json::to_string_pretty(&result) {
+                          Ok(json) => println!("{json}"),
+                          Err(error) => eprintln!("warning: failed to render result as JSON: {error}"),
+                      }
+                      u8::try_from(result.exit_code().clamp(0, 255)).unwrap_or(255)
+                  }
+          '''
+          new_inline = '''        Ok(result) => {
+                      report_result_json(&result);
+                      u8::try_from(result.exit_code().clamp(0, 255)).unwrap_or(255)
+                  }
+          '''
+          if old_inline not in text:
+              raise SystemExit("inline JSON reporting block no longer matches current source")
+          text = text.replace(old_inline, new_inline, 1)
+
+          old_import = '''        default_policy, default_request_id, epoch_seconds, parse_args, parse_number, print_usage,
+                  run,
+              };
+          '''
+          new_import = '''        default_policy, default_request_id, epoch_seconds, parse_args, parse_number, print_usage,
+                  report_result_json, run,
+              };
+          '''
+          if old_import not in text:
+              raise SystemExit("test import block no longer matches current source")
+          text = text.replace(old_import, new_import, 1)
+
+          test_anchor = '''    fn args(values: &[&str]) -> impl Iterator<Item = String> {
+                  values
+                      .iter()
+                      .map(|value| (*value).to_owned())
+                      .collect::<Vec<_>>()
+                      .into_iter()
+              }
+
+              #[test]
+              fn print_usage_does_not_panic() {
+          '''
+          test_replacement = '''    fn args(values: &[&str]) -> impl Iterator<Item = String> {
+                  values
+                      .iter()
+                      .map(|value| (*value).to_owned())
+                      .collect::<Vec<_>>()
+                      .into_iter()
+              }
+
+              struct AlwaysFailsSerialization;
+
+              impl serde::Serialize for AlwaysFailsSerialization {
+                  fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+                  where
+                      S: serde::Serializer,
+                  {
+                      Err(<S::Error as serde::ser::Error>::custom(
+                          "forced serialization failure",
+                      ))
+                  }
+              }
+
+              #[test]
+              fn result_json_reporting_exercises_success_and_serialization_failure() {
+                  assert!(report_result_json(&serde_json::json!({"status": "ok"})));
+                  assert!(!report_result_json(&AlwaysFailsSerialization));
+              }
+
+              #[test]
+              fn print_usage_does_not_panic() {
+          '''
+          if test_anchor not in text:
+              raise SystemExit("test insertion anchor no longer matches current source")
+          text = text.replace(test_anchor, test_replacement, 1)
+          source.write_text(text)
+
+          trace = Path("docs/doctoring/COMMAND_RESULT_JSON_RENDER_TRACEABILITY.md")
+          if trace.exists():
+              raise SystemExit("traceability file unexpectedly already exists")
+          trace.write_text('''# Command result JSON render traceability
+
+Last reviewed: 2026-09-13
+
+## Problem and exact evidence
+
+PR #112 exact `957f978e8a0aae8eeb5c4c22c8bab54c50266b5b` produced immutable production coverage artifact `10311943614`. Its LLVM JSON records `src/main.rs` at 449/458 covered lines and 622/650 covered regions. The inline `serde_json::to_string_pretty(&result)` error arm is an owned production error boundary but had no deterministic witness; removing the arm, excluding it from measurement, or replacing it with an unwrap would weaken failure observability rather than repair the evidence gap.
+
+## Decision
+
+Extract only JSON presentation into private `report_result_json<T: serde::Serialize>`. Production behavior remains unchanged: successful rendering prints pretty JSON; serialization failure emits the existing warning; the sandboxed command exit code remains authoritative. The generic boundary allows a deterministic test serializer to return `serde::ser::Error`, while a normal JSON value proves the success arm. No provider/backend behavior, public schema, command execution, security policy, timeout, cleanup, or exit-code contract changes.
+
+This is a testability seam for a real transport failure class, not synthetic application data and not a coverage exclusion. A moved head must reacquire exact CI and immutable coverage evidence; the `957f978...` artifact remains historical evidence only after this repair lands.
+
+## Rejected alternatives
+
+- Suppress or delete serialization failure handling: loses operator-visible transport failure evidence.
+- `unwrap`/`expect`: converts a presentation error into a process panic.
+- Coverage exclusion or denominator filtering: hides the owned production edge instead of exercising it.
+- Backend fixtures solely to manufacture serialization failure: couples a presentation concern to the isolation adapter and violates the bounded responsibility of the CLI transport.
+
+## Primary references
+
+Serde Project. (2026). *Serialize in serde*. https://docs.rs/serde/latest/serde/trait.Serialize.html
+
+Serde JSON Project. (2026). *to_string_pretty in serde_json*. https://docs.rs/serde_json/latest/serde_json/fn.to_string_pretty.html
+''')
+          PY
+
+          rm .github/workflows/one-shot-command-result-render-repair.yml
+          cargo fmt --all
+          git diff --check
+
+      - name: Verify focused render test
+        run: cargo test --locked --bin quarantine-sandbox-runtime result_json_reporting_exercises_success_and_serialization_failure
+
+      - name: Verify full workspace
+        run: cargo test --locked --all-targets --no-fail-fast
+
+      - name: Deny Clippy warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Deny rustdoc warnings
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --document-private-items
+
+      - name: Publish ordinary descendant and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .github/workflows/one-shot-command-result-render-repair.yml
+          git config user.name "seonghobae"
+          git config user.email "8172694+seonghobae@users.noreply.github.com"
+          git add src/main.rs docs/doctoring/COMMAND_RESULT_JSON_RENDER_TRACEABILITY.md .github/workflows/one-shot-command-result-render-repair.yml
+          git diff --cached --check
+          git commit -m "test(cli): cover result JSON render failure"
+          git push origin HEAD:automation/command-chronology-owner-repair
