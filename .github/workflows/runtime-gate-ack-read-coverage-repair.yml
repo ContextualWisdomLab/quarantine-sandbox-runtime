@@ -1,0 +1,147 @@
+name: Runtime gate acknowledgement read coverage repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/runtime-gate-ack-read-coverage-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OWNER_BRANCH: automation/command-chronology-owner-repair
+      SOURCE_FILE: src/infrastructure/podman_runtime_gate_binding.rs
+    steps:
+      - name: Checkout exact repair head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert expected predecessor ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 19d2fd78081a95393995fd122e30262a46a45364^{commit}
+          git merge-base --is-ancestor 19d2fd78081a95393995fd122e30262a46a45364 HEAD
+
+      - name: Install Rust toolchains
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.97.1
+
+      - name: Install branch-coverage toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: nightly-2026-07-01
+          components: llvm-tools-preview
+
+      - name: Install exact branch coverage tool
+        shell: bash
+        run: cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6
+
+      - name: Reproduce causal source-region RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-01 llvm-cov --branch --workspace --lib --tests --json --output-path before-branch-coverage.json
+          set +e
+          python3 scripts/check_coverage.py --require-branches before-branch-coverage.json > before-coverage.txt 2>&1
+          admission_status=$?
+          set -e
+          test "$admission_status" -ne 0
+          grep -F "podman_runtime_gate_binding.rs" before-coverage.txt
+          grep -F "246:34" before-coverage.txt
+
+      - name: Add deterministic acknowledgement-read failure witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/infrastructure/podman_runtime_gate_binding.rs")
+          text = path.read_text()
+
+          old_import = "        io::{self, Write},\n"
+          new_import = "        io::{self, Read, Write},\n"
+          if text.count(old_import) != 1:
+              raise SystemExit("expected exactly one test io import seam")
+          text = text.replace(old_import, new_import, 1)
+
+          old_super = (
+              "        complete_release_payload_write, fail_after_release_writer_close, take_release_pipe,\n"
+              "        terminate_release_client, write_release_payload,\n"
+          )
+          new_super = (
+              "        complete_release_payload_write, fail_after_release_writer_close, read_release_ack,\n"
+              "        take_release_pipe, terminate_release_client, write_release_payload,\n"
+          )
+          if text.count(old_super) != 1:
+              raise SystemExit("expected exactly one release helper import seam")
+          text = text.replace(old_super, new_super, 1)
+
+          marker = "    fn release_pipe_guard_preserves_present_handle_and_rejects_missing_handle() {\n"
+          if text.count(marker) != 1:
+              raise SystemExit("expected exactly one release pipe guard test marker")
+          witness = '''    struct FailingAckReader;\n\n    impl Read for FailingAckReader {\n        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {\n            Err(io::Error::other(\n                "scripted release acknowledgement read failure",\n            ))\n        }\n    }\n\n    #[test]\n    fn release_ack_read_failure_is_preserved() {\n        let error = read_release_ack(FailingAckReader)\n            .expect_err("release acknowledgement read failure must fail closed");\n\n        assert_eq!(error.kind(), io::ErrorKind::Other);\n    }\n\n'''
+          text = text.replace(marker, witness + marker, 1)
+          path.write_text(text)
+          PY
+
+      - name: Verify focused and full exact working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo test --locked infrastructure::podman_runtime_gate_binding::tests::release_ack_read_failure_is_preserved
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
+          python3 scripts/validate_repository.py
+          git diff --check
+
+      - name: Prove the causal source-region outcome is covered
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-01 llvm-cov clean --workspace
+          cargo +nightly-2026-07-01 llvm-cov --branch --workspace --lib --tests --json --output-path after-branch-coverage.json
+          set +e
+          python3 scripts/check_coverage.py --require-branches after-branch-coverage.json > after-coverage.txt 2>&1
+          admission_status=$?
+          set -e
+          test "$admission_status" -ne 0
+          grep -F "podman_runtime_gate_binding.rs" after-coverage.txt
+          if grep -F "246:34" after-coverage.txt; then
+            echo "acknowledgement read-error source region remains uncovered" >&2
+            exit 1
+          fi
+
+      - name: Remove purpose-limited repair workflow
+        shell: bash
+        run: rm .github/workflows/runtime-gate-ack-read-coverage-repair.yml
+
+      - name: Publish ordinary non-force descendant
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/infrastructure/podman_runtime_gate_binding.rs .github/workflows/runtime-gate-ack-read-coverage-repair.yml
+          git commit -m "test(runtime): cover release acknowledgement read failure"
+          remote_head="$(git ls-remote origin "refs/heads/$OWNER_BRANCH" | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
+            push origin "HEAD:refs/heads/$OWNER_BRANCH"
