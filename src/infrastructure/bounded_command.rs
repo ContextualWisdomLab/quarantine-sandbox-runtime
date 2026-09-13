@@ -120,12 +120,18 @@ impl BoundedCommandRunner {
         let status_result = supervise_child(&mut child, deadline, terminate_requested.as_ref());
         let stdout_result = join_stream(stdout_handle);
         let stderr_result = join_stream(stderr_handle);
+        let stdout_overflow = stdout_overflow.load(Ordering::Acquire);
+        let stderr_overflow = stderr_overflow.load(Ordering::Acquire);
+        let status_result = match status_result {
+            Ok(_) if stdout_overflow || stderr_overflow => Err(BoundedCommandError::OutputLimit),
+            other => other,
+        };
         Ok((
             status_result,
             stdout_result,
             stderr_result,
-            stdout_overflow.load(Ordering::Acquire),
-            stderr_overflow.load(Ordering::Acquire),
+            stdout_overflow,
+            stderr_overflow,
         ))
     }
 
@@ -139,14 +145,8 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<Output, BoundedCommandError> {
-        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =
-            self.execute(program, args)?;
-        finalize_output(
-            status_result,
-            stdout_result,
-            stderr_result,
-            stdout_overflow || stderr_overflow,
-        )
+        let (status_result, stdout_result, stderr_result, _, _) = self.execute(program, args)?;
+        finalize_output(status_result, stdout_result, stderr_result)
     }
 
     /// Run one workload command to completion, reporting a wall-clock timeout
@@ -193,14 +193,10 @@ fn finalize_output(
     status_result: Result<ExitStatus, BoundedCommandError>,
     stdout_result: Result<Vec<u8>, BoundedCommandError>,
     stderr_result: Result<Vec<u8>, BoundedCommandError>,
-    overflowed: bool,
 ) -> Result<Output, BoundedCommandError> {
     let status = status_result?;
     let stdout = stdout_result?;
     let stderr = stderr_result?;
-    if overflowed {
-        return Err(BoundedCommandError::OutputLimit);
-    }
     Ok(Output {
         status,
         stdout,
@@ -269,8 +265,7 @@ fn supervise_child<P: ChildProcess>(
 ) -> Result<ExitStatus, BoundedCommandError> {
     loop {
         if overflow.load(Ordering::Acquire) {
-            kill_and_reap(child)?;
-            return Err(BoundedCommandError::OutputLimit);
+            return kill_and_reap(child);
         }
         match child.poll() {
             Ok(Some(status)) => return Ok(status),
@@ -504,10 +499,7 @@ mod tests {
 
         let overflow = AtomicBool::new(true);
         let mut noisy = FakeChild::new([]);
-        assert_eq!(
-            supervise_child(&mut noisy, Instant::now(), &overflow),
-            Err(BoundedCommandError::OutputLimit)
-        );
+        assert!(supervise_child(&mut noisy, Instant::now(), &overflow).is_ok());
 
         let overflow = AtomicBool::new(false);
         let mut failed = FakeChild::new([PollOutcome::Failed]);
@@ -544,28 +536,22 @@ mod tests {
     }
 
     #[test]
-    fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {
+    fn finalized_output_preserves_capture_error_precedence() {
         assert_eq!(
             finalize_output(
                 Ok(success_status()),
                 Ok(b"stdout".to_vec()),
                 Ok(b"stderr".to_vec()),
-                false,
             )
             .map(|output| (output.stdout, output.stderr)),
             Ok((b"stdout".to_vec(), b"stderr".to_vec()))
         );
 
         assert_eq!(
-            finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),
-            Err(BoundedCommandError::OutputLimit)
-        );
-        assert_eq!(
             finalize_output(
                 Err(BoundedCommandError::Wait),
                 Ok(Vec::new()),
                 Ok(Vec::new()),
-                false,
             ),
             Err(BoundedCommandError::Wait)
         );
@@ -574,7 +560,6 @@ mod tests {
                 Ok(success_status()),
                 Err(BoundedCommandError::Capture),
                 Ok(Vec::new()),
-                false,
             ),
             Err(BoundedCommandError::Capture)
         );
@@ -583,7 +568,6 @@ mod tests {
                 Ok(success_status()),
                 Ok(Vec::new()),
                 Err(BoundedCommandError::Capture),
-                false,
             ),
             Err(BoundedCommandError::Capture)
         );

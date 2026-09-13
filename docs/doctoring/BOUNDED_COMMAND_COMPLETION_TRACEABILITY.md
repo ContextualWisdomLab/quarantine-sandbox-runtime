@@ -26,9 +26,11 @@ Executable-source authority `343c77a66746b382cfcc1633691d4fa70af3a95a` ran nativ
 
 The typed repair therefore preserves 100% production-function coverage while removing two branch outcomes from the earlier contradictory state product. It does not establish repository-wide line/region/branch completion.
 
-## Remaining command-owner finding
+## Late overflow canonicalization
 
-The exact branch artifact leaves `src/infrastructure/bounded_command.rs` at 365/365 lines, 35/35 functions, 573/574 regions, and 19/20 branches. The uncovered production decision is the late `overflowed` path in `finalize_output`: the supervisor can observe child exit before a pipe-draining worker records retained-output overflow, so the later joined overflow flag is a legitimate race-safety guard. A deterministic repair must not depend on scheduler timing. Preserve the guard and prove its decision through a causal, non-flaky boundary rather than deleting it or using coverage exclusion.
+Exact branch evidence on `343c77a...` left `bounded_command.rs` at 19/20 branches. The missing decision was not an impossible input: a child can exit before the drain worker records retained-output overflow. The repair preserves that race-safety requirement without a scheduler-sensitive test by moving output-limit classification to the point after both drain workers have joined. When the supervisor observes the overflow first it now kills/reaps and returns the reaped status; final classification then uses the retained overflow flag. When child exit wins the race, the same post-drain classification produces the same `OutputLimit`. Timeout and supervisor `Wait` failures keep their existing precedence because only a successful supervised status is reclassified.
+
+The existing concrete oversized-output test therefore exercises the same production decision deterministically regardless of whether child exit or the supervisor overflow observation wins the scheduling race. No sleep tuning, process-global mutation, coverage exclusion, or synthetic impossible state is introduced.
 
 Application-service readiness/lifecycle outcomes and the receipt/exact-ID, independent capability-column, and duplicate network-inspection findings remain canonical #21/#113 work.
 
