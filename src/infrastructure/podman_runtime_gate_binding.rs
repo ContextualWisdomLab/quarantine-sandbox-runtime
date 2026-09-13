@@ -396,7 +396,7 @@ mod tests {
         cell::Cell,
         collections::VecDeque,
         fs,
-        io::{self, Write},
+        io::{self, Read, Write},
         os::unix::process::ExitStatusExt,
         process::ExitStatus,
         rc::Rc,
@@ -407,8 +407,8 @@ mod tests {
     use super::{
         RUNTIME_GATE_RELEASE_ACK_OPERATION, RUNTIME_GATE_RELEASE_DETACH_OPERATION,
         RUNTIME_GATE_RELEASE_WRITE_OPERATION, ReleaseClientProcess, RootlessPodmanAdapter,
-        complete_release_payload_write, fail_after_release_writer_close, take_release_pipe,
-        terminate_release_client, write_release_payload,
+        complete_release_payload_write, fail_after_release_writer_close, read_release_ack,
+        take_release_pipe, terminate_release_client, write_release_payload,
     };
     use crate::{
         ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
@@ -627,6 +627,24 @@ mod tests {
                 tmpfs_bytes: 16 * 1024 * 1024,
             },
         }
+    }
+
+    struct FailingAckReader;
+
+    impl Read for FailingAckReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other(
+                "scripted release acknowledgement read failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn release_ack_read_failure_is_preserved() {
+        let error = read_release_ack(FailingAckReader)
+            .expect_err("release acknowledgement read failure must fail closed");
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
     }
 
     #[test]
