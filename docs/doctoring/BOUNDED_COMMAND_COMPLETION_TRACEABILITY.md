@@ -34,6 +34,12 @@ The existing concrete oversized-output test therefore exercises the same product
 
 Application-service readiness/lifecycle outcomes and the receipt/exact-ID, independent capability-column, and duplicate network-inspection findings remain canonical #21/#113 work.
 
+## Capture-precedence repair
+
+Review of exact source `10c97e5bbdd4f2e1d8e7494ec853e640bc9b788f` found a semantic regression in the first late-overflow canonicalization. That source normalized a successful supervised status into `OutputLimit` before administrative output finalization. A drain worker can first set the overflow flag and then fail a later pipe read; in that state the pre-normalized status masked the harder `Capture` failure that the previous finalizer ordering preserved. The causal RED combines the real overflow supervisor outcome with a capture failure and reaches `Err(OutputLimit)` instead of the required `Err(Capture)`.
+
+The repair keeps overflow detection deterministic after both drain workers join but defers overflow interpretation to each consumer. Administrative `run` preserves supervisor-error precedence, then pipe-capture precedence, then classifies late overflow. `run_to_completion` first preserves pipe-capture failure, then classifies timeout/wait before late overflow, so supervisor malfunction is never rewritten as a workload terminal fact. No sleep tuning, process-global mutation, coverage exclusion, or output-budget weakening is introduced.
+
 ## Release consequences
 
 No predecessor GREEN transfers after a head move. Merge/release still requires exact-current-head native verification, complete owned-production coverage, dedicated positive effective-LSM evidence, qualifying independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback evidence.

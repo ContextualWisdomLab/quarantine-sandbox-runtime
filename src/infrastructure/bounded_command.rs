@@ -122,10 +122,6 @@ impl BoundedCommandRunner {
         let stderr_result = join_stream(stderr_handle);
         let stdout_overflow = stdout_overflow.load(Ordering::Acquire);
         let stderr_overflow = stderr_overflow.load(Ordering::Acquire);
-        let status_result = match status_result {
-            Ok(_) if stdout_overflow || stderr_overflow => Err(BoundedCommandError::OutputLimit),
-            other => other,
-        };
         Ok((
             status_result,
             stdout_result,
@@ -145,8 +141,14 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<Output, BoundedCommandError> {
-        let (status_result, stdout_result, stderr_result, _, _) = self.execute(program, args)?;
-        finalize_output(status_result, stdout_result, stderr_result)
+        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =
+            self.execute(program, args)?;
+        finalize_output(
+            status_result,
+            stdout_result,
+            stderr_result,
+            stdout_overflow || stderr_overflow,
+        )
     }
 
     /// Run one workload command to completion, reporting a wall-clock timeout
@@ -193,10 +195,14 @@ fn finalize_output(
     status_result: Result<ExitStatus, BoundedCommandError>,
     stdout_result: Result<Vec<u8>, BoundedCommandError>,
     stderr_result: Result<Vec<u8>, BoundedCommandError>,
+    overflowed: bool,
 ) -> Result<Output, BoundedCommandError> {
     let status = status_result?;
     let stdout = stdout_result?;
     let stderr = stderr_result?;
+    if overflowed {
+        return Err(BoundedCommandError::OutputLimit);
+    }
     Ok(Output {
         status,
         stdout,
@@ -211,7 +217,7 @@ fn finalize_completion(
 ) -> Result<BoundedRunOutcome, BoundedCommandError> {
     let stdout = stdout_result?;
     let stderr = stderr_result?;
-    let completion = classify_completion_status(status_result)?;
+    let completion = classify_completion_status(status_result, stdout_overflow || stderr_overflow)?;
     Ok(BoundedRunOutcome {
         completion,
         stdout,
@@ -229,12 +235,14 @@ fn finalize_completion(
 /// terminal fact about the supervised workload.
 fn classify_completion_status(
     status_result: Result<ExitStatus, BoundedCommandError>,
+    overflowed: bool,
 ) -> Result<BoundedCompletion, BoundedCommandError> {
     match status_result {
-        Ok(status) => Ok(BoundedCompletion::Exited(status)),
         Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
         Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
         Err(other) => Err(other),
+        Ok(_) if overflowed => Ok(BoundedCompletion::OutputLimit),
+        Ok(status) => Ok(BoundedCompletion::Exited(status)),
     }
 }
 
@@ -438,19 +446,23 @@ mod tests {
     #[test]
     fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {
         assert!(matches!(
-            classify_completion_status(Ok(success_status())),
+            classify_completion_status(Ok(success_status()), false),
             Ok(BoundedCompletion::Exited(status)) if status.success()
         ));
         assert_eq!(
-            classify_completion_status(Err(BoundedCommandError::Timeout)),
-            Ok(BoundedCompletion::TimedOut)
-        );
-        assert_eq!(
-            classify_completion_status(Err(BoundedCommandError::OutputLimit)),
+            classify_completion_status(Ok(success_status()), true),
             Ok(BoundedCompletion::OutputLimit)
         );
         assert_eq!(
-            classify_completion_status(Err(BoundedCommandError::Wait)),
+            classify_completion_status(Err(BoundedCommandError::Timeout), true),
+            Ok(BoundedCompletion::TimedOut)
+        );
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),
+            Ok(BoundedCompletion::OutputLimit)
+        );
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::Wait), true),
             Err(BoundedCommandError::Wait)
         );
     }
@@ -536,22 +548,43 @@ mod tests {
     }
 
     #[test]
-    fn finalized_output_preserves_capture_error_precedence() {
+    fn late_overflow_does_not_mask_capture_failure() {
+        let overflow = AtomicBool::new(true);
+        let mut noisy = FakeChild::new([]);
+        let status_result = supervise_child(&mut noisy, Instant::now(), &overflow);
+        assert_eq!(
+            finalize_output(
+                status_result,
+                Err(BoundedCommandError::Capture),
+                Ok(Vec::new()),
+                true,
+            ),
+            Err(BoundedCommandError::Capture)
+        );
+    }
+
+    #[test]
+    fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {
         assert_eq!(
             finalize_output(
                 Ok(success_status()),
                 Ok(b"stdout".to_vec()),
                 Ok(b"stderr".to_vec()),
+                false,
             )
             .map(|output| (output.stdout, output.stderr)),
             Ok((b"stdout".to_vec(), b"stderr".to_vec()))
         );
-
+        assert_eq!(
+            finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),
+            Err(BoundedCommandError::OutputLimit)
+        );
         assert_eq!(
             finalize_output(
                 Err(BoundedCommandError::Wait),
                 Ok(Vec::new()),
                 Ok(Vec::new()),
+                true,
             ),
             Err(BoundedCommandError::Wait)
         );
@@ -560,6 +593,7 @@ mod tests {
                 Ok(success_status()),
                 Err(BoundedCommandError::Capture),
                 Ok(Vec::new()),
+                true,
             ),
             Err(BoundedCommandError::Capture)
         );
@@ -568,6 +602,7 @@ mod tests {
                 Ok(success_status()),
                 Ok(Vec::new()),
                 Err(BoundedCommandError::Capture),
+                true,
             ),
             Err(BoundedCommandError::Capture)
         );
