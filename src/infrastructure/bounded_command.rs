@@ -41,13 +41,25 @@ pub(crate) enum BoundedCommandError {
 /// legitimate size, and a workload exceeding its wall-clock lease is routine,
 /// so this variant reports both as facts on a successful outcome instead of
 /// discarding the partial evidence collected before termination.
+/// Mutually exclusive terminal state reported by the bounded supervisor.
+///
+/// Encoding timeout and output-budget termination as variants prevents callers
+/// from constructing contradictory combinations such as a missing exit status
+/// without a terminal cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum BoundedCompletion {
+    /// The supervised process exited and reported its own status.
+    Exited(ExitStatus),
+    /// The supervised process exceeded its wall-clock budget.
+    TimedOut,
+    /// The supervised process exceeded its retained-output budget.
+    OutputLimit,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BoundedRunOutcome {
-    /// The process's own exit status, or `None` when it was killed before
-    /// reporting one (wall-clock timeout or output-budget enforcement).
-    pub(crate) status: Option<ExitStatus>,
-    /// Whether the process was killed for exceeding its wall-clock budget.
-    pub(crate) timed_out: bool,
+    /// Mutually exclusive terminal state reported by the supervisor.
+    pub(crate) completion: BoundedCompletion,
     /// Standard output retained up to the configured per-stream budget.
     pub(crate) stdout: Vec<u8>,
     /// Whether standard output was truncated to the configured budget.
@@ -207,10 +219,9 @@ fn finalize_completion(
 ) -> Result<BoundedRunOutcome, BoundedCommandError> {
     let stdout = stdout_result?;
     let stderr = stderr_result?;
-    let (status, timed_out) = classify_completion_status(status_result)?;
+    let completion = classify_completion_status(status_result)?;
     Ok(BoundedRunOutcome {
-        status,
-        timed_out,
+        completion,
         stdout,
         stdout_truncated: stdout_overflow,
         stderr,
@@ -227,11 +238,11 @@ fn finalize_completion(
 /// a fact about the supervised workload.
 fn classify_completion_status(
     status_result: Result<ExitStatus, BoundedCommandError>,
-) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
+) -> Result<BoundedCompletion, BoundedCommandError> {
     match status_result {
-        Ok(status) => Ok((Some(status), false)),
-        Err(BoundedCommandError::Timeout) => Ok((None, true)),
-        Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
+        Ok(status) => Ok(BoundedCompletion::Exited(status)),
+        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
+        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
         Err(other) => Err(other),
     }
 }
@@ -343,9 +354,9 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipes, classify_completion_status,
-        drain_stream, finalize_completion, finalize_output, join_stream, kill_and_reap,
-        supervise_child,
+        BoundedCommandError, BoundedCompletion, ChildProcess, captured_pipes,
+        classify_completion_status, drain_stream, finalize_completion, finalize_output,
+        join_stream, kill_and_reap, supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -435,7 +446,19 @@ mod tests {
     }
 
     #[test]
-    fn completion_status_preserves_supervisor_wait_failure() {
+    fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {
+        assert!(matches!(
+            classify_completion_status(Ok(success_status())),
+            Ok(BoundedCompletion::Exited(status)) if status.success()
+        ));
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::Timeout)),
+            Ok(BoundedCompletion::TimedOut)
+        );
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::OutputLimit)),
+            Ok(BoundedCompletion::OutputLimit)
+        );
         assert_eq!(
             classify_completion_status(Err(BoundedCommandError::Wait)),
             Err(BoundedCommandError::Wait)

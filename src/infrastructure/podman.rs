@@ -12,7 +12,7 @@ use std::{
 use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 
-use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
+use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
     BackendInvocationFailureKind, CleanupReceipt, CommandExecutionError, CommandExecutionRequest,
@@ -830,29 +830,29 @@ impl RootlessPodmanAdapter {
                 ));
             }
         };
-        if logs_outcome.timed_out {
-            // The log driver failing to hand back already-written output
-            // promptly is an infrastructure fault, not a fact about the
-            // workload (whose own timeout is already captured above).
-            return Err(self.cleanup_owned_command_container_or_report(
-                &container_id,
-                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
-                    operation: "container_logs",
-                }),
-            ));
-        }
-        // A `None` status only occurs on the timeout/output-budget kill
-        // paths already handled above (or by the truncation flags on
-        // success); anything else is `podman logs` itself failing (e.g. the
-        // log driver or container state is broken) and is an infrastructure
-        // fault, not empty workload output.
-        if !logs_outcome.status.is_none_or(|status| status.success()) {
-            return Err(self.cleanup_owned_command_container_or_report(
-                &container_id,
-                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
-                    operation: "container_logs",
-                }),
-            ));
+        match &logs_outcome.completion {
+            BoundedCompletion::TimedOut => {
+                // The log driver failing to hand back already-written output
+                // promptly is an infrastructure fault, not a fact about the
+                // workload (whose own timeout is already captured above).
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandTimedOut {
+                            operation: "container_logs",
+                        },
+                    ),
+                ));
+            }
+            BoundedCompletion::Exited(status) if !status.success() => {
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
+                    CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
+                        operation: "container_logs",
+                    }),
+                ));
+            }
+            BoundedCompletion::Exited(_) | BoundedCompletion::OutputLimit => {}
         }
 
         if self.cleanup_owned_command_container(&container_id).is_err() {
@@ -913,35 +913,34 @@ impl RootlessPodmanAdapter {
                 })
             })?;
 
-        if !wait_outcome.timed_out {
-            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+        match wait_outcome.completion {
+            BoundedCompletion::TimedOut => {}
+            BoundedCompletion::OutputLimit => {
                 return Err(CommandExecutionError::Backend(
                     ApplicationServiceError::BackendOutputLimitExceeded {
                         operation: "command_wait",
                     },
                 ));
             }
-            match wait_outcome.status {
-                Some(status) if status.success() => {
+            BoundedCompletion::Exited(status) => {
+                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendOutputLimitExceeded {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                if status.success() {
                     return Ok((
                         parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
                         false,
                     ));
                 }
-                Some(_) => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendCommandFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-                None => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendInvocationFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendCommandFailed {
+                        operation: "command_wait",
+                    },
+                ));
             }
         }
 

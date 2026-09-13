@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, path::Path, time::Duration};
 
-use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
+use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
 
 #[test]
 fn concrete_child_success_preserves_bounded_output() {
@@ -31,8 +31,7 @@ fn concrete_child_completion_tracks_each_truncated_stream() {
         )
         .map(|outcome| {
             (
-                outcome.status.is_some_and(|status| status.success()),
-                outcome.timed_out,
+                outcome.completion,
                 outcome.stdout,
                 outcome.stdout_truncated,
                 outcome.stderr,
@@ -42,7 +41,13 @@ fn concrete_child_completion_tracks_each_truncated_stream() {
 
     assert_eq!(
         outcome,
-        Ok((false, false, b"1234".to_vec(), true, vec![], false))
+        Ok((
+            BoundedCompletion::OutputLimit,
+            b"1234".to_vec(),
+            true,
+            vec![],
+            false
+        ))
     );
 }
 
