@@ -89,7 +89,7 @@ jobs:
               raise SystemExit("expected exactly one release helper import seam")
           text = text.replace(old_super, new_super, 1)
 
-          marker = "    fn release_pipe_guard_preserves_present_handle_and_rejects_missing_handle() {\n"
+          marker = "    #[test]\n    fn release_pipe_guard_preserves_present_handle_and_rejects_missing_handle() {\n"
           if text.count(marker) != 1:
               raise SystemExit("expected exactly one release pipe guard test marker")
           witness = '''    struct FailingAckReader;\n\n    impl Read for FailingAckReader {\n        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {\n            Err(io::Error::other(\n                "scripted release acknowledgement read failure",\n            ))\n        }\n    }\n\n    #[test]\n    fn release_ack_read_failure_is_preserved() {\n        let error = read_release_ack(FailingAckReader)\n            .expect_err("release acknowledgement read failure must fail closed");\n\n        assert_eq!(error.kind(), io::ErrorKind::Other);\n    }\n\n'''
