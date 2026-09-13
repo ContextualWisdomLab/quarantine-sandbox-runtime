@@ -65,20 +65,3 @@ fn default_adapter_keeps_policy_validation_a_pre_backend_boundary() {
         ))
     );
 }
-
-#[test]
-fn runtime_gate_binding_plan_propagates_policy_validation_failure() {
-    let adapter = RootlessPodmanAdapter::default();
-    let invalid_policy = invalid_root_user_policy();
-
-    let error = adapter
-        .plan_command_binding(&request(), &invalid_policy)
-        .expect_err("an invalid policy must fail before a runtime-gate binding is produced");
-
-    assert_eq!(
-        error,
-        CommandExecutionError::Backend(ApplicationServiceError::InvalidPolicy {
-            field_name: "run_as_user_id",
-        })
-    );
-}

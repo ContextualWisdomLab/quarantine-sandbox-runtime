@@ -54,15 +54,16 @@ fn unreadable_source_root_fails_closed_as_host_io() {
         return;
     }
 
-    let error = stage_pr_source_artifact(&valid_input(&source))
-        .expect_err("an unreadable admitted source root must fail closed");
+    let result = stage_pr_source_artifact(&valid_input(&source));
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o700))
+        .expect("restore source permissions");
+
+    let error = result.expect_err("an unreadable admitted source root must fail closed");
     assert!(
         matches!(error, PrSourceArtifactError::Io(_)),
         "host permission denial must remain a typed staging I/O failure: {error:?}"
     );
 
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o700))
-        .expect("restore source permissions");
     fs::remove_dir_all(source).expect("source cleanup");
 }
 
@@ -82,15 +83,16 @@ fn unreadable_regular_file_fails_closed_as_host_io() {
         return;
     }
 
-    let error = stage_pr_source_artifact(&valid_input(&source))
-        .expect_err("an unreadable regular source file must fail closed");
+    let result = stage_pr_source_artifact(&valid_input(&source));
+    fs::set_permissions(&payload, fs::Permissions::from_mode(0o600))
+        .expect("restore source file permissions");
+
+    let error = result.expect_err("an unreadable regular source file must fail closed");
     assert!(
         matches!(error, PrSourceArtifactError::Io(_)),
         "host permission denial must remain a typed staging I/O failure: {error:?}"
     );
 
-    fs::set_permissions(&payload, fs::Permissions::from_mode(0o600))
-        .expect("restore source file permissions");
     fs::remove_dir_all(source).expect("source cleanup");
 }
 
@@ -111,14 +113,16 @@ fn unreadable_nested_directory_fails_closed_as_host_io() {
         return;
     }
 
-    let error = stage_pr_source_artifact(&valid_input(&source))
-        .expect_err("an unreadable admitted nested source directory must fail closed");
+    let result = stage_pr_source_artifact(&valid_input(&source));
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700))
+        .expect("restore nested source permissions");
+
+    let error =
+        result.expect_err("an unreadable admitted nested source directory must fail closed");
     assert!(
         matches!(error, PrSourceArtifactError::Io(_)),
         "nested host permission denial must remain a typed staging I/O failure: {error:?}"
     );
 
-    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700))
-        .expect("restore nested source permissions");
     fs::remove_dir_all(source).expect("source cleanup");
 }
