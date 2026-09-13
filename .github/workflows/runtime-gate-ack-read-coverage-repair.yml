@@ -23,7 +23,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Assert expected predecessor ancestry
         shell: bash
