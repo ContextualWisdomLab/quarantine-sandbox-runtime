@@ -186,7 +186,10 @@ fn validate_declared_file_length(
 }
 
 /// Add one declared file length without allowing the source-byte budget to wrap.
-fn checked_source_total_bytes(total_bytes: u64, file_bytes: u64) -> Result<u64, PrSourceArtifactError> {
+fn checked_source_total_bytes(
+    total_bytes: u64,
+    file_bytes: u64,
+) -> Result<u64, PrSourceArtifactError> {
     total_bytes
         .checked_add(file_bytes)
         .ok_or(PrSourceArtifactError::LimitExceeded {
