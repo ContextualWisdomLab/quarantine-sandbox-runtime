@@ -93,3 +93,32 @@ fn unreadable_regular_file_fails_closed_as_host_io() {
         .expect("restore source file permissions");
     fs::remove_dir_all(source).expect("source cleanup");
 }
+
+#[test]
+fn unreadable_nested_directory_fails_closed_as_host_io() {
+    let source = temporary_path("unreadable-nested-directory");
+    let nested = source.join("nested");
+    fs::create_dir_all(&nested).expect("nested source directory");
+    fs::write(nested.join("payload.txt"), b"host permission boundary\n")
+        .expect("nested source payload");
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o000))
+        .expect("deny nested source traversal");
+
+    if fs::read_dir(&nested).is_ok() {
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o700))
+            .expect("restore nested source permissions");
+        fs::remove_dir_all(source).expect("source cleanup");
+        return;
+    }
+
+    let error = stage_pr_source_artifact(&valid_input(&source))
+        .expect_err("an unreadable admitted nested source directory must fail closed");
+    assert!(
+        matches!(error, PrSourceArtifactError::Io(_)),
+        "nested host permission denial must remain a typed staging I/O failure: {error:?}"
+    );
+
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700))
+        .expect("restore nested source permissions");
+    fs::remove_dir_all(source).expect("source cleanup");
+}
