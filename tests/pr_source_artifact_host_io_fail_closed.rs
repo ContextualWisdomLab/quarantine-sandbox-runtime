@@ -44,10 +44,8 @@ fn valid_input(host_path: &Path) -> PrSourceArtifactInput {
 fn unreadable_source_root_fails_closed_as_host_io() {
     let source = temporary_path("unreadable-root");
     fs::create_dir_all(&source).expect("source directory");
-    fs::write(source.join("payload.txt"), b"host permission boundary\n")
-        .expect("source payload");
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o000))
-        .expect("deny source traversal");
+    fs::write(source.join("payload.txt"), b"host permission boundary\n").expect("source payload");
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).expect("deny source traversal");
 
     if fs::read_dir(&source).is_ok() {
         fs::set_permissions(&source, fs::Permissions::from_mode(0o700))
