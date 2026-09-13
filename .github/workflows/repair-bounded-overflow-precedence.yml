@@ -1,0 +1,143 @@
+name: Repair bounded overflow precedence
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/repair-bounded-overflow-precedence.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Execute causal RED for overflow versus capture precedence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/infrastructure/bounded_command.rs")
+          text = source.read_text()
+          anchor = """    #[test]\n    fn finalized_output_preserves_capture_error_precedence() {\n"""
+          red = """    #[test]\n    fn late_overflow_does_not_mask_capture_failure_red() {\n        let overflow = AtomicBool::new(true);\n        let mut noisy = FakeChild::new([]);\n        let status_result = supervise_child(&mut noisy, Instant::now(), &overflow);\n        let status_result = match status_result {\n            Ok(_) if overflow.load(Ordering::Acquire) => Err(BoundedCommandError::OutputLimit),\n            other => other,\n        };\n        assert_eq!(\n            finalize_output(\n                status_result,\n                Err(BoundedCommandError::Capture),\n                Ok(Vec::new()),\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n    }\n\n"""
+          if text.count(anchor) != 1:
+              raise SystemExit("RED anchor drifted")
+          source.write_text(text.replace(anchor, red + anchor, 1))
+          PY
+
+          set +e
+          cargo test --locked late_overflow_does_not_mask_capture_failure_red -- --nocapture > /tmp/precedence-red.log 2>&1
+          red_rc=$?
+          set -e
+          cat /tmp/precedence-red.log
+          test "$red_rc" -ne 0
+          grep -q 'OutputLimit' /tmp/precedence-red.log
+          grep -q 'Capture' /tmp/precedence-red.log
+
+      - name: Preserve capture failures while canonicalizing late overflow
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/infrastructure/bounded_command.rs")
+          text = source.read_text()
+
+          def replace_once(label, old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one source anchor, found {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "execute normalization",
+              """        let stdout_overflow = stdout_overflow.load(Ordering::Acquire);\n        let stderr_overflow = stderr_overflow.load(Ordering::Acquire);\n        let status_result = match status_result {\n            Ok(_) if stdout_overflow || stderr_overflow => Err(BoundedCommandError::OutputLimit),\n            other => other,\n        };\n        Ok((\n""",
+              """        let stdout_overflow = stdout_overflow.load(Ordering::Acquire);\n        let stderr_overflow = stderr_overflow.load(Ordering::Acquire);\n        Ok((\n""",
+          )
+
+          replace_once(
+              "administrative finalizer call",
+              """        let (status_result, stdout_result, stderr_result, _, _) = self.execute(program, args)?;\n        finalize_output(status_result, stdout_result, stderr_result)\n""",
+              """        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =\n            self.execute(program, args)?;\n        finalize_output(\n            status_result,\n            stdout_result,\n            stderr_result,\n            stdout_overflow || stderr_overflow,\n        )\n""",
+          )
+
+          replace_once(
+              "administrative finalizer",
+              """fn finalize_output(\n    status_result: Result<ExitStatus, BoundedCommandError>,\n    stdout_result: Result<Vec<u8>, BoundedCommandError>,\n    stderr_result: Result<Vec<u8>, BoundedCommandError>,\n) -> Result<Output, BoundedCommandError> {\n    let status = status_result?;\n    let stdout = stdout_result?;\n    let stderr = stderr_result?;\n    Ok(Output {\n        status,\n        stdout,\n        stderr,\n    })\n}\n""",
+              """fn finalize_output(\n    status_result: Result<ExitStatus, BoundedCommandError>,\n    stdout_result: Result<Vec<u8>, BoundedCommandError>,\n    stderr_result: Result<Vec<u8>, BoundedCommandError>,\n    overflowed: bool,\n) -> Result<Output, BoundedCommandError> {\n    let status = status_result?;\n    let stdout = stdout_result?;\n    let stderr = stderr_result?;\n    if overflowed {\n        return Err(BoundedCommandError::OutputLimit);\n    }\n    Ok(Output {\n        status,\n        stdout,\n        stderr,\n    })\n}\n""",
+          )
+
+          replace_once(
+              "completion classification call",
+              """    let completion = classify_completion_status(status_result)?;\n""",
+              """    let completion = classify_completion_status(\n        status_result,\n        stdout_overflow || stderr_overflow,\n    )?;\n""",
+          )
+
+          replace_once(
+              "completion classifier",
+              """fn classify_completion_status(\n    status_result: Result<ExitStatus, BoundedCommandError>,\n) -> Result<BoundedCompletion, BoundedCommandError> {\n    match status_result {\n        Ok(status) => Ok(BoundedCompletion::Exited(status)),\n        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),\n        Err(other) => Err(other),\n    }\n}\n""",
+              """fn classify_completion_status(\n    status_result: Result<ExitStatus, BoundedCommandError>,\n    overflowed: bool,\n) -> Result<BoundedCompletion, BoundedCommandError> {\n    match status_result {\n        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),\n        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),\n        Err(other) => Err(other),\n        Ok(_) if overflowed => Ok(BoundedCompletion::OutputLimit),\n        Ok(status) => Ok(BoundedCompletion::Exited(status)),\n    }\n}\n""",
+          )
+
+          replace_once(
+              "classifier witness",
+              """    #[test]\n    fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {\n        assert!(matches!(\n            classify_completion_status(Ok(success_status())),\n            Ok(BoundedCompletion::Exited(status)) if status.success()\n        ));\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::Timeout)),\n            Ok(BoundedCompletion::TimedOut)\n        );\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::OutputLimit)),\n            Ok(BoundedCompletion::OutputLimit)\n        );\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::Wait)),\n            Err(BoundedCommandError::Wait)\n        );\n    }\n""",
+              """    #[test]\n    fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {\n        assert!(matches!(\n            classify_completion_status(Ok(success_status()), false),\n            Ok(BoundedCompletion::Exited(status)) if status.success()\n        ));\n        assert_eq!(\n            classify_completion_status(Ok(success_status()), true),\n            Ok(BoundedCompletion::OutputLimit)\n        );\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::Timeout), true),\n            Ok(BoundedCompletion::TimedOut)\n        );\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),\n            Ok(BoundedCompletion::OutputLimit)\n        );\n        assert_eq!(\n            classify_completion_status(Err(BoundedCommandError::Wait), true),\n            Err(BoundedCommandError::Wait)\n        );\n    }\n""",
+          )
+
+          red = """    #[test]\n    fn late_overflow_does_not_mask_capture_failure_red() {\n        let overflow = AtomicBool::new(true);\n        let mut noisy = FakeChild::new([]);\n        let status_result = supervise_child(&mut noisy, Instant::now(), &overflow);\n        let status_result = match status_result {\n            Ok(_) if overflow.load(Ordering::Acquire) => Err(BoundedCommandError::OutputLimit),\n            other => other,\n        };\n        assert_eq!(\n            finalize_output(\n                status_result,\n                Err(BoundedCommandError::Capture),\n                Ok(Vec::new()),\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n    }\n\n"""
+          green = """    #[test]\n    fn late_overflow_does_not_mask_capture_failure() {\n        let overflow = AtomicBool::new(true);\n        let mut noisy = FakeChild::new([]);\n        let status_result = supervise_child(&mut noisy, Instant::now(), &overflow);\n        assert_eq!(\n            finalize_output(\n                status_result,\n                Err(BoundedCommandError::Capture),\n                Ok(Vec::new()),\n                true,\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n    }\n\n"""
+          replace_once("RED to GREEN witness", red, green)
+
+          replace_once(
+              "administrative finalizer witness",
+              """    #[test]\n    fn finalized_output_preserves_capture_error_precedence() {\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Ok(b\"stdout\".to_vec()),\n                Ok(b\"stderr\".to_vec()),\n            )\n            .map(|output| (output.stdout, output.stderr)),\n            Ok((b\"stdout\".to_vec(), b\"stderr\".to_vec()))\n        );\n\n        assert_eq!(\n            finalize_output(\n                Err(BoundedCommandError::Wait),\n                Ok(Vec::new()),\n                Ok(Vec::new()),\n            ),\n            Err(BoundedCommandError::Wait)\n        );\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Err(BoundedCommandError::Capture),\n                Ok(Vec::new()),\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Ok(Vec::new()),\n                Err(BoundedCommandError::Capture),\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n    }\n""",
+              """    #[test]\n    fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Ok(b\"stdout\".to_vec()),\n                Ok(b\"stderr\".to_vec()),\n                false,\n            )\n            .map(|output| (output.stdout, output.stderr)),\n            Ok((b\"stdout\".to_vec(), b\"stderr\".to_vec()))\n        );\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Ok(Vec::new()),\n                Ok(Vec::new()),\n                true,\n            ),\n            Err(BoundedCommandError::OutputLimit)\n        );\n        assert_eq!(\n            finalize_output(\n                Err(BoundedCommandError::Wait),\n                Ok(Vec::new()),\n                Ok(Vec::new()),\n                true,\n            ),\n            Err(BoundedCommandError::Wait)\n        );\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Err(BoundedCommandError::Capture),\n                Ok(Vec::new()),\n                true,\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n        assert_eq!(\n            finalize_output(\n                Ok(success_status()),\n                Ok(Vec::new()),\n                Err(BoundedCommandError::Capture),\n                true,\n            ),\n            Err(BoundedCommandError::Capture)\n        );\n    }\n""",
+          )
+
+          source.write_text(text)
+
+          trace = Path("docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md")
+          trace_text = trace.read_text()
+          marker = "## Release consequences\n"
+          addition = """## Capture-precedence repair\n\nReview of exact source `10c97e5bbdd4f2e1d8e7494ec853e640bc9b788f` found a semantic regression in the first late-overflow canonicalization. That source normalized a successful supervised status into `OutputLimit` before administrative output finalization. A drain worker can first set the overflow flag and then fail a later pipe read; in that state the pre-normalized status masked the harder `Capture` failure that the previous finalizer ordering preserved. The causal RED combines the real overflow supervisor outcome with a capture failure and reaches `Err(OutputLimit)` instead of the required `Err(Capture)`.\n\nThe repair keeps overflow detection deterministic after both drain workers join but defers overflow interpretation to each consumer. Administrative `run` preserves supervisor-error precedence, then pipe-capture precedence, then classifies late overflow. `run_to_completion` first preserves pipe-capture failure, then classifies timeout/wait before late overflow, so supervisor malfunction is never rewritten as a workload terminal fact. No sleep tuning, process-global mutation, coverage exclusion, or output-budget weakening is introduced.\n\n"""
+          if trace_text.count(marker) != 1:
+              raise SystemExit("traceability marker drifted")
+          trace.write_text(trace_text.replace(marker, addition + marker, 1))
+          PY
+
+      - name: Validate causal GREEN
+        shell: bash
+        run: |
+          cargo fmt --all
+          cargo test --locked late_overflow_does_not_mask_capture_failure -- --nocapture
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Publish ordinary repair and remove fixer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          remote_head="$(git ls-remote origin refs/heads/automation/command-chronology-owner-repair | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git add src/infrastructure/bounded_command.rs docs/doctoring/BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md
+          git rm .github/workflows/repair-bounded-overflow-precedence.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(command): preserve capture over late overflow'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/command-chronology-owner-repair
