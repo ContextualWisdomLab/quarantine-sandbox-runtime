@@ -29,18 +29,6 @@ pub(crate) enum BoundedCommandError {
     Capture,
 }
 
-/// Terminal facts for a command run to completion under bounded wall-clock and
-/// output budgets, where exceeding either budget is an expected, reportable
-/// outcome rather than a hard error.
-///
-/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
-/// (inspect a JSON payload, create a resource) treat any overflow as an
-/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
-/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
-/// hostile backend. A workload's own stdout/stderr has no such ceiling on
-/// legitimate size, and a workload exceeding its wall-clock lease is routine,
-/// so this variant reports both as facts on a successful outcome instead of
-/// discarding the partial evidence collected before termination.
 /// Mutually exclusive terminal state reported by the bounded supervisor.
 ///
 /// Encoding timeout and output-budget termination as variants prevents callers
@@ -56,6 +44,14 @@ pub(crate) enum BoundedCompletion {
     OutputLimit,
 }
 
+/// Terminal facts for a command run to completion under bounded wall-clock and
+/// output budgets, where exceeding either budget is an expected, reportable
+/// outcome rather than a hard error.
+///
+/// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
+/// treat overflow as a hard backend error. A workload's own stdout/stderr has
+/// no such small administrative ceiling, so completion preserves bounded
+/// partial output together with its typed terminal cause.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BoundedRunOutcome {
     /// Mutually exclusive terminal state reported by the supervisor.
@@ -231,11 +227,10 @@ fn finalize_completion(
 
 /// Interpret the supervisor's terminal status for [`BoundedCommandRunner::run_to_completion`].
 ///
-/// A wall-clock timeout or output-budget overflow become terminal facts
-/// (`None` status, `timed_out` set only for the former); any other
-/// supervision failure (an inability to observe or reap the child) remains a
-/// hard error, since that indicates the supervisor itself malfunctioned, not
-/// a fact about the supervised workload.
+/// A wall-clock timeout or output-budget overflow becomes a distinct
+/// [`BoundedCompletion`] variant; an inability to observe or reap the child
+/// remains a hard error because it indicates supervisor failure rather than a
+/// terminal fact about the supervised workload.
 fn classify_completion_status(
     status_result: Result<ExitStatus, BoundedCommandError>,
 ) -> Result<BoundedCompletion, BoundedCommandError> {
