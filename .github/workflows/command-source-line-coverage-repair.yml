@@ -1,0 +1,83 @@
+name: Command source-line coverage repair
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: command-source-line-coverage-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.ref == 'automation/command-chronology-owner-repair'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify causal predecessor
+        run: |
+          test "$(git rev-parse HEAD:src/main.rs)" = "8728c85a97daab70cf8b21a8953d0c041720d916"
+          test "$(git rev-parse HEAD:scripts/check_coverage.py)" = "e13514b0878bf1b937ea6f9beeff2ab473511502"
+          test -f .github/source_line_patch.py
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt, llvm-tools-preview
+      - name: Apply causal repair
+        run: python3 .github/source_line_patch.py
+      - name: Validate source contracts
+        run: |
+          cargo fmt --all
+          cargo fmt --check
+          python3 -m unittest scripts/test_check_coverage.py scripts/test_ci_test_inventory.py
+      - name: Validate full Rust workspace
+        run: |
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+      - name: Generate branch evidence
+        run: |
+          rustup toolchain install nightly-2026-07-01 --profile minimal --component llvm-tools-preview
+          cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6
+          cargo +nightly-2026-07-01 llvm-cov --branch --workspace --lib --tests --json --output-path branch-coverage.json
+      - name: Verify source-line repair
+        run: |
+          python3 - <<'PY'
+          import json
+          from scripts.check_coverage import _source_line_counts, _uncovered_lines
+
+          data = json.load(open("branch-coverage.json", encoding="utf-8"))["data"][0]
+          total, covered = _source_line_counts(data)
+          print(f"source lines: {covered}/{total}")
+          main_file = next(
+              file_record["filename"]
+              for file_record in data["files"]
+              if file_record["filename"].endswith("/src/main.rs")
+          )
+          missing = _uncovered_lines(data, main_file)
+          assert missing == [], f"main.rs uncovered physical lines: {missing}"
+          PY
+          set +e
+          python3 scripts/check_coverage.py --require-branches branch-coverage.json > coverage-admission.out 2> coverage-admission.err
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -q '^lines (LLVM raw): ' coverage-admission.out
+          grep -q '^lines: ' coverage-admission.out
+          grep -q 'branches coverage is ' coverage-admission.err
+      - name: Publish repair and remove one-shot sources
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          rm .github/source_line_patch.py .github/workflows/command-source-line-coverage-repair.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main.rs scripts/check_coverage.py scripts/test_check_coverage.py docs/doctoring/COVERAGE_SOURCE_LINE_UNION_TRACEABILITY.md .github/source_line_patch.py .github/workflows/command-source-line-coverage-repair.yml
+          git commit -m 'fix(ci): union Rust source-line coverage instances'
+          git push origin "HEAD:${HEAD_BRANCH}"
