@@ -240,6 +240,7 @@ class CoverageAdmissionTests(unittest.TestCase):
         self.assertIn("lines: 1/1", stdout)
         self.assertIn("regions (LLVM raw): 0/1", stdout)
         self.assertIn("regions: 1/1", stdout)
+        self.assertNotIn("incomplete file", stdout)
 
     def test_admission_fails_closed_on_source_region_denominator_mismatch(self) -> None:
         result, _stdout, stderr = self._run_main(self._payload(file_region_count=2))
