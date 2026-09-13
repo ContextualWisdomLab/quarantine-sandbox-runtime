@@ -1,0 +1,73 @@
+name: Repair bounded completion baseline
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/repair-bounded-completion-baseline.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact repair source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Prepend bounded completion authority
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("docs/product-technical-gap-baseline.md")
+          text = path.read_text()
+          marker = "<!-- current-authority-2026-09-13-bounded-completion-state -->"
+          if marker in text:
+              raise SystemExit("bounded completion authority already present")
+
+          section = "\n".join([
+              marker,
+              "## Current authority supersession — bounded command terminal-state invariant (2026-09-13)",
+              "",
+              "Command-owner coverage review isolated a structurally unreachable `command_wait` state rather than a missing hostile-workload specimen. The prior `BoundedRunOutcome` independently encoded `status: Option<ExitStatus>` and `timed_out: bool`: `run_to_completion` produced `status=None` only for timeout or output-budget termination, while `wait_for_command` had already gated timeout and truncation before a later `None => BackendInvocationFailed` arm. Manufacturing a fixture for that arm would contradict the supervisor contract.",
+              "",
+              "Production source `49337a2ffec3edd7492295c7dd8e5144b884fe18` replaces that contradictory product with `BoundedCompletion::{Exited(ExitStatus), TimedOut, OutputLimit}`. Logs and command-wait consumers now match the terminal variants exhaustively: wall-clock timeout remains distinct from output limit; exited non-success remains backend failure; command-wait truncation retains precedence for exited processes; supervisor Wait/Capture remain hard process-boundary errors. No public schema or error vocabulary, retry/fallback, coverage exclusion, or application-service source truth was added. One-shot run `34727202814` validated rustfmt, the full locked workspace/all-target test suite, Clippy with warnings denied, rustdoc with warnings denied, and `git diff --check` before source publication; the completed source fixer was then removed.",
+              "",
+              "Review of that source repair found stale rustdoc still describing the removed `None`/`timed_out` representation and attaching outcome-level semantics to the new enum. The first documentation workflow definition failed before job materialization because its YAML block scalar was malformed. Corrected workflow `f7b6c56df94a9e81cd73156d6c5c4f8ba07e133e` executed as run `34727502889`; exact checkout, the docs-only patch, full locked tests, Clippy, rustdoc, rustfmt, and diff validation were GREEN before publishing `856d91c9b31c7bcdc9f5aae2dd3d0aa6032e4c16`. Purpose-complete repair machinery was removed again at executable-source authority `343c77a66746b382cfcc1633691d4fa70af3a95a`.",
+              "",
+              "Native CI `34727579849` was materialized on exact executable-source authority `343c77a...` before this documentation-only baseline descendant. No predecessor GREEN transfers to a moved head, and this baseline-only descendant must reacquire exact-head CI before merge authority is claimed. Application-service readiness/lifecycle outcomes plus receipt/exact-ID cleanup, independent capability-column evidence, and duplicate network-inspection cardinality remain canonical #21/#113 work and are not duplicated in this command-owner lane. Positive effective-LSM, qualifying independent review/security, #35/#43 real-runtime acceptance, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback remain blockers.",
+              "",
+          ])
+          path.write_text(section + text)
+          PY
+
+      - name: Validate baseline repair
+        shell: bash
+        run: |
+          cargo fmt --all --check
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Publish ordinary documentation descendant
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          remote_head="$(git ls-remote origin refs/heads/automation/command-chronology-owner-repair | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git add docs/product-technical-gap-baseline.md
+          git rm .github/workflows/repair-bounded-completion-baseline.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(gaps): record typed bounded completion authority'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/command-chronology-owner-repair
