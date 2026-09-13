@@ -160,9 +160,8 @@ fn coverage_tool_install_uses_the_job_toolchain_explicitly() {
     let branch_coverage = job_section(&workflow, "branch-coverage");
 
     assert!(
-        production_coverage.contains(
-            "cargo +1.97.1 install cargo-llvm-cov --locked --version 0.8.6",
-        ),
+        production_coverage
+            .contains("cargo +1.97.1 install cargo-llvm-cov --locked --version 0.8.6",),
         "production coverage must install cargo-llvm-cov with the pinned stable toolchain instead of relying on an implicit rustup override"
     );
     assert!(
@@ -170,9 +169,8 @@ fn coverage_tool_install_uses_the_job_toolchain_explicitly() {
         "production coverage must not use an implicit cargo toolchain for the pinned coverage tool"
     );
     assert!(
-        branch_coverage.contains(
-            "cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6",
-        ),
+        branch_coverage
+            .contains("cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6",),
         "branch coverage must install cargo-llvm-cov with the pinned nightly toolchain"
     );
 }
