@@ -279,6 +279,41 @@ def _uncovered_segment_starts(file_record: dict[str, Any]) -> list[tuple[int, in
     return sorted(locations)
 
 
+def _uncovered_source_regions(
+    data: dict[str, Any], filename: str
+) -> list[tuple[int, int, int, int, int]]:
+    """Return physical source regions unexecuted across every codegen instance."""
+
+    source_regions: dict[tuple[int, int, int, int, int], bool] = {}
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        return []
+
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        filenames = function.get("filenames")
+        regions = function.get("regions")
+        if not isinstance(filenames, list) or not isinstance(regions, list):
+            continue
+        for region in regions:
+            if not isinstance(region, list) or len(region) < 8:
+                continue
+            file_id = int(region[5])
+            if file_id < 0 or file_id >= len(filenames) or str(filenames[file_id]) != filename:
+                continue
+            key = (
+                int(region[0]),
+                int(region[1]),
+                int(region[2]),
+                int(region[3]),
+                int(region[7]),
+            )
+            source_regions[key] = source_regions.get(key, False) or int(region[4]) > 0
+
+    return sorted(key for key, executed in source_regions.items() if not executed)
+
+
 def _parse_arguments() -> argparse.Namespace:
     """Parse the coverage evidence path and optional branch requirement."""
 
@@ -335,7 +370,15 @@ def main() -> int:
         filename = str(file_record.get("filename", "<unknown>"))
         summary = file_record.get("summary", {})
         incomplete_metrics: list[str] = []
+        missing_lines = _uncovered_lines(data, filename)
+        missing_regions = _uncovered_source_regions(data, filename)
+        if missing_lines:
+            incomplete_metrics.append(f"source_lines_missing={len(missing_lines)}")
+        if missing_regions:
+            incomplete_metrics.append(f"source_regions_missing={len(missing_regions)}")
         for metric_name in metric_names:
+            if metric_name in {"lines", "regions"}:
+                continue
             metric = summary.get(metric_name)
             if not isinstance(metric, dict):
                 continue
@@ -344,17 +387,16 @@ def main() -> int:
                 incomplete_metrics.append(f"{metric_name}={covered}/{total}")
         if incomplete_metrics:
             print(f"incomplete file: {filename}: {', '.join(incomplete_metrics)}")
-            missing_lines = _uncovered_lines(data, filename)
             if missing_lines:
                 joined_lines = ", ".join(str(line_number) for line_number in missing_lines)
                 print(f"uncovered lines: {filename}: {joined_lines}")
-            segment_starts = _uncovered_segment_starts(file_record)
-            if segment_starts:
+            if missing_regions:
+                region_starts = sorted({(region[0], region[1]) for region in missing_regions})
                 joined_locations = ", ".join(
                     f"{line_number}:{column_number}"
-                    for line_number, column_number in segment_starts
+                    for line_number, column_number in region_starts
                 )
-                print(f"uncovered segment starts: {filename}: {joined_locations}")
+                print(f"uncovered source region starts: {filename}: {joined_locations}")
 
     if failures:
         print("; ".join(failures), file=sys.stderr)
