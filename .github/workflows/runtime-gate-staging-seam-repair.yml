@@ -1,0 +1,90 @@
+name: Runtime gate staging seam repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'chore(automation): stage runtime-gate coverage repair'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: automation/command-chronology-owner-repair
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt, llvm-tools-preview
+      - name: Install pinned coverage tool
+        run: cargo +1.97.1 install cargo-llvm-cov --locked --version 0.8.6
+      - name: Prove current production region RED
+        run: |
+          cargo llvm-cov --workspace --lib --tests --json --output-path before.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('before.json').read_text())['data'][0]['files']
+          target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
+          regions = target['summary']['regions']
+          assert regions['covered'] == 514 and regions['count'] == 518, regions
+          source = Path('src/infrastructure/runtime_gate_artifact.rs').read_text()
+          assert 'fn stage_with_staging_io<S: RuntimeGateStagingIo>(' in source
+          PY
+      - name: Unify production and deterministic staging seam
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('src/infrastructure/runtime_gate_artifact.rs')
+          source = source_path.read_text()
+          old = '''    fn stage_with_staging_io<S: RuntimeGateStagingIo>(
+        source: &Path,
+        expected_sha256: &str,
+        expected_architecture: &str,
+        staging_io: &S,
+    ) -> Result<Self, RuntimeGateArtifactError> {'''
+          new = '''    fn stage_with_staging_io(
+        source: &Path,
+        expected_sha256: &str,
+        expected_architecture: &str,
+        staging_io: &dyn RuntimeGateStagingIo,
+    ) -> Result<Self, RuntimeGateArtifactError> {'''
+          assert source.count(old) == 1, 'expected one generic staging seam'
+          source_path.write_text(source.replace(old, new))
+
+          workflow = Path('.github/workflows/runtime-gate-staging-seam-repair.yml')
+          workflow.unlink()
+          PY
+      - name: Verify deterministic seam covers the production body
+        run: |
+          cargo fmt --check
+          cargo test --locked --workspace --all-targets --no-fail-fast
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          python3 scripts/validate_repository.py
+          cargo llvm-cov --workspace --lib --tests --json --output-path after.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('after.json').read_text())['data'][0]['files']
+          target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
+          regions = target['summary']['regions']
+          assert regions['covered'] == regions['count'] == 514, regions
+          PY
+          git diff --check
+      - name: Publish ordinary descendant
+        run: |
+          rm -f before.json after.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(runtime): unify deterministic staging coverage seam'
+          git push origin HEAD:automation/command-chronology-owner-repair
