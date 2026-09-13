@@ -175,6 +175,9 @@ fn validate_canonical_root_identity(
     Ok(())
 }
 
+type CanonicalRootIdentityValidator =
+    fn(bool, u64, u64, u64, u64) -> Result<(), PrSourceArtifactError>;
+
 fn validate_declared_file_length(
     observed_bytes: usize,
     declared_bytes: u64,
@@ -226,6 +229,17 @@ fn collect_regular_files(
 pub fn stage_pr_source_artifact(
     input: &PrSourceArtifactInput,
 ) -> Result<StagedPrSourceArtifact, PrSourceArtifactError> {
+    stage_pr_source_artifact_with_root_identity_validator(input, validate_canonical_root_identity)
+}
+
+/// Stage one source tree while preserving a deterministic root-identity decision boundary.
+///
+/// The function-pointer seam lets tests prove propagation of a root replacement
+/// contradiction without mutating the process namespace or racing the host filesystem.
+fn stage_pr_source_artifact_with_root_identity_validator(
+    input: &PrSourceArtifactInput,
+    root_identity_validator: CanonicalRootIdentityValidator,
+) -> Result<StagedPrSourceArtifact, PrSourceArtifactError> {
     input.validate_contract()?;
     // `canonicalize` follows a final symlink, so establish the caller-supplied
     // root object's no-follow type and Unix identity before resolving its path.
@@ -237,7 +251,7 @@ pub fn stage_pr_source_artifact(
     }
     let source = fs::canonicalize(&input.host_path).map_err(PrSourceArtifactError::Io)?;
     let canonical_root = fs::metadata(&source).map_err(PrSourceArtifactError::Io)?;
-    validate_canonical_root_identity(
+    root_identity_validator(
         canonical_root.is_dir(),
         source_root.dev(),
         source_root.ino(),
@@ -342,6 +356,18 @@ pub fn stage_pr_source_artifact(
 mod tests {
     use super::*;
 
+    fn reject_root_identity(
+        _: bool,
+        _: u64,
+        _: u64,
+        _: u64,
+        _: u64,
+    ) -> Result<(), PrSourceArtifactError> {
+        Err(PrSourceArtifactError::InvalidInput {
+            field_name: "host_path",
+        })
+    }
+
     #[test]
     fn canonical_root_identity_guard_rejects_each_observed_contradiction() {
         assert!(validate_canonical_root_identity(true, 7, 11, 7, 11).is_ok());
@@ -371,6 +397,23 @@ mod tests {
         assert!(matches!(
             validate_declared_file_length(16, 17),
             Err(PrSourceArtifactError::DigestMismatch)
+        ));
+    }
+
+    #[test]
+    fn staging_propagates_root_identity_rejection() {
+        let host = tempfile::tempdir().unwrap();
+        let input = PrSourceArtifactInput {
+            host_path: host.path().to_path_buf(),
+            revision_sha: "a".repeat(40),
+            expected_tree_sha256: "0".repeat(64),
+        };
+
+        assert!(matches!(
+            stage_pr_source_artifact_with_root_identity_validator(&input, reject_root_identity),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
         ));
     }
 }
