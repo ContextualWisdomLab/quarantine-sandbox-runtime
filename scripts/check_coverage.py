@@ -21,6 +21,81 @@ def _metric_counts(metric: dict[str, Any]) -> tuple[int, int]:
     raise ValueError(f"coverage metric has no covered/notcovered count: {metric}")
 
 
+def _canonical_region_counts(data: dict[str, Any]) -> dict[str, tuple[int, int]]:
+    """Return source-region counts after combining duplicate codegen instances.
+
+    ``llvm-cov export`` may contain multiple function records for the same
+    source region when one Rust function is instantiated into more than one
+    instrumented object. Source coverage is complete when any such instance
+    executes that exact source region. The file-summary region count remains
+    the denominator authority; a coordinate mismatch fails closed rather than
+    silently shrinking it.
+    """
+
+    file_region_totals: dict[str, int] = {}
+    for file_record in data.get("files", []):
+        if not isinstance(file_record, dict):
+            continue
+        filename = str(file_record.get("filename", ""))
+        summary = file_record.get("summary")
+        if not filename or not isinstance(summary, dict):
+            continue
+        region_metric = summary.get("regions")
+        if not isinstance(region_metric, dict):
+            continue
+        total, _ = _metric_counts(region_metric)
+        file_region_totals[filename] = total
+
+    source_regions: dict[str, dict[tuple[int, int, int, int, int], int]] = {
+        filename: {} for filename in file_region_totals
+    }
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        functions = []
+
+    for function in functions:
+        if not isinstance(function, dict):
+            continue
+        filenames = function.get("filenames")
+        regions = function.get("regions")
+        if not isinstance(filenames, list) or not isinstance(regions, list):
+            continue
+        for region in regions:
+            if not isinstance(region, list) or len(region) < 8:
+                continue
+            file_id = int(region[5])
+            if file_id < 0 or file_id >= len(filenames):
+                continue
+            filename = str(filenames[file_id])
+            if filename not in source_regions:
+                continue
+            key = (
+                int(region[0]),
+                int(region[1]),
+                int(region[2]),
+                int(region[3]),
+                int(region[7]),
+            )
+            execution_count = int(region[4])
+            previous_count = source_regions[filename].get(key, 0)
+            source_regions[filename][key] = max(previous_count, execution_count)
+
+    counts: dict[str, tuple[int, int]] = {}
+    for filename, regions_by_coordinate in source_regions.items():
+        canonical_total = len(regions_by_coordinate)
+        raw_total = file_region_totals[filename]
+        if canonical_total != raw_total:
+            raise ValueError(
+                "canonical source-region count disagrees with LLVM file summary: "
+                f"{filename}: canonical={canonical_total}, raw={raw_total}"
+            )
+        canonical_covered = sum(
+            execution_count > 0 for execution_count in regions_by_coordinate.values()
+        )
+        counts[filename] = (canonical_total, canonical_covered)
+    return counts
+
+
 def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     """Return source lines whose function regions are never executed.
 
@@ -117,6 +192,12 @@ def main() -> int:
 
     data = data_sets[0]
     failures: list[str] = []
+    try:
+        canonical_region_counts = _canonical_region_counts(data)
+    except ValueError as error:
+        canonical_region_counts = {}
+        failures.append(str(error))
+
     totals = data.get("totals", {})
     metric_names = ["lines", "functions", "regions"]
     if arguments.require_branches:
@@ -127,7 +208,19 @@ def main() -> int:
         if not isinstance(metric, dict):
             failures.append(f"missing coverage metric: {metric_name}")
             continue
-        total, covered = _metric_counts(metric)
+        raw_total, raw_covered = _metric_counts(metric)
+        if metric_name == "regions" and canonical_region_counts:
+            total = sum(value[0] for value in canonical_region_counts.values())
+            covered = sum(value[1] for value in canonical_region_counts.values())
+            if total != raw_total:
+                failures.append(
+                    "canonical source-region total disagrees with LLVM aggregate: "
+                    f"canonical={total}, raw={raw_total}"
+                )
+            if covered != raw_covered:
+                print(f"regions raw LLVM instances: {raw_covered}/{raw_total}")
+        else:
+            total, covered = raw_total, raw_covered
         print(f"{metric_name}: {covered}/{total}")
         if metric_name == "branches" and total == 0:
             failures.append("branch instrumentation produced zero branches")
@@ -142,7 +235,11 @@ def main() -> int:
             metric = summary.get(metric_name)
             if not isinstance(metric, dict):
                 continue
-            total, covered = _metric_counts(metric)
+            raw_total, raw_covered = _metric_counts(metric)
+            if metric_name == "regions" and filename in canonical_region_counts:
+                total, covered = canonical_region_counts[filename]
+            else:
+                total, covered = raw_total, raw_covered
             if total != covered:
                 incomplete_metrics.append(f"{metric_name}={covered}/{total}")
         if incomplete_metrics:
