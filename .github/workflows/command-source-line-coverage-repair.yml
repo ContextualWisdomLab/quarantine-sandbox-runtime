@@ -28,6 +28,27 @@ jobs:
         with:
           toolchain: 1.97.1
           components: clippy, rustfmt, llvm-tools-preview
+      - name: Repair deterministic patch selector
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/source_line_patch.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''tests = replace_once(
+              tests,
+              '\"lines\": {\"count\": 1, \"covered\": 1},\\n',
+              '\"lines\": {\"count\": 2, \"covered\": 1},\\n',
+              \"set raw total lines\",
+          )'''
+          new = '''tests = tests.replace(
+              '\"lines\": {\"count\": 1, \"covered\": 1},\\n',
+              '\"lines\": {\"count\": 2, \"covered\": 1},\\n',
+              1,
+          )'''
+          assert source.count(old) == 1
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply causal repair
         run: python3 .github/source_line_patch.py
       - name: Validate source contracts
