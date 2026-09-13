@@ -2,7 +2,75 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.check_coverage import _uncovered_lines, _uncovered_segment_starts
+from scripts.check_coverage import (
+    _canonical_region_counts,
+    _uncovered_lines,
+    _uncovered_segment_starts,
+)
+
+
+class CanonicalRegionCountTests(unittest.TestCase):
+    """Treat repeated codegen records as one exact source region."""
+
+    @staticmethod
+    def _payload(second_execution_count: int) -> dict[str, object]:
+        filename = "/workspace/target.rs"
+        return {
+            "files": [
+                {
+                    "filename": filename,
+                    "summary": {"regions": {"count": 1, "covered": 0}},
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": [filename],
+                    "regions": [[10, 3, 10, 8, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": [filename],
+                    "regions": [
+                        [10, 3, 10, 8, second_execution_count, 0, 0, 0]
+                    ],
+                },
+            ],
+        }
+
+    def test_any_executed_codegen_instance_covers_the_source_region(self) -> None:
+        self.assertEqual(
+            _canonical_region_counts(self._payload(second_execution_count=1)),
+            {"/workspace/target.rs": (1, 1)},
+        )
+
+    def test_all_zero_codegen_instances_leave_the_source_region_uncovered(self) -> None:
+        self.assertEqual(
+            _canonical_region_counts(self._payload(second_execution_count=0)),
+            {"/workspace/target.rs": (1, 0)},
+        )
+
+    def test_secondary_filename_id_is_attributed_to_its_source_file(self) -> None:
+        target = "/workspace/target.rs"
+        data = {
+            "files": [
+                {
+                    "filename": target,
+                    "summary": {"regions": {"count": 1, "covered": 0}},
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": ["/workspace/macro.rs", target],
+                    "regions": [[7, 1, 7, 8, 4, 1, 0, 0]],
+                }
+            ],
+        }
+        self.assertEqual(_canonical_region_counts(data), {target: (1, 1)})
+
+    def test_coordinate_count_mismatch_fails_closed(self) -> None:
+        data = self._payload(second_execution_count=1)
+        data["files"][0]["summary"]["regions"]["count"] = 2  # type: ignore[index]
+        with self.assertRaisesRegex(ValueError, "canonical source-region count disagrees"):
+            _canonical_region_counts(data)
 
 
 class UncoveredLineAttributionTests(unittest.TestCase):
