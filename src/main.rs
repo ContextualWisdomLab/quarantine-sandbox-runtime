@@ -183,6 +183,24 @@ fn default_request_id() -> String {
     format!("cli-{}-{}", epoch_seconds(), std::process::id())
 }
 
+/// Render one command result as JSON and report serialization failure visibly.
+///
+/// The CLI preserves the sandboxed command's exit code when presentation fails,
+/// matching the existing transport contract, but the serialization boundary remains
+/// explicit and independently testable instead of hiding an unexercised inline arm.
+fn report_result_json<T: serde::Serialize>(value: &T) -> bool {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            true
+        }
+        Err(error) => {
+            eprintln!("warning: failed to render result as JSON: {error}");
+            false
+        }
+    }
+}
+
 /// Parse, validate, execute, and report one CLI invocation.
 ///
 /// Returns a plain process exit code rather than [`ExitCode`] (which has no
@@ -247,10 +265,7 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         RootlessPodmanAdapter::new(parsed.podman_program).with_runtime_gate_artifact(runtime_gate);
     match execute_command(&adapter, &request, &policy, epoch_seconds()) {
         Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => println!("{json}"),
-                Err(error) => eprintln!("warning: failed to render result as JSON: {error}"),
-            }
+            report_result_json(&result);
             u8::try_from(result.exit_code().clamp(0, 255)).unwrap_or(255)
         }
         Err(error) => {
@@ -268,7 +283,7 @@ fn main() -> ExitCode {
 mod tests {
     use super::{
         default_policy, default_request_id, epoch_seconds, parse_args, parse_number, print_usage,
-        run,
+        report_result_json, run,
     };
 
     fn args(values: &[&str]) -> impl Iterator<Item = String> {
@@ -277,6 +292,25 @@ mod tests {
             .map(|value| (*value).to_owned())
             .collect::<Vec<_>>()
             .into_iter()
+    }
+
+    struct AlwaysFailsSerialization;
+
+    impl serde::Serialize for AlwaysFailsSerialization {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(<S::Error as serde::ser::Error>::custom(
+                "forced serialization failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn result_json_reporting_exercises_success_and_serialization_failure() {
+        assert!(report_result_json(&serde_json::json!({"status": "ok"})));
+        assert!(!report_result_json(&AlwaysFailsSerialization));
     }
 
     #[test]
