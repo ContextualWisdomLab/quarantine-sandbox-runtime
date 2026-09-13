@@ -1,3 +1,8 @@
+//! Public CLI argument-boundary regression coverage.
+//!
+//! These tests execute the shipped binary so every value-bearing flag retains its own
+//! fail-closed missing-value boundary and every numeric resource flag retains its own parse error.
+
 use std::process::Command;
 
 fn run_cli(arguments: &[&str]) -> std::process::Output {
