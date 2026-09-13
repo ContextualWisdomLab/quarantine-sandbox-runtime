@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   repair:
-    if: github.event.head_commit.message == 'chore(automation): stage runtime-gate coverage repair'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,7 +28,6 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           report = json.loads(Path('before.json').read_text())['data'][0]['files']
           target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
           regions = target['summary']['regions']
@@ -41,26 +39,20 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           source_path = Path('src/infrastructure/runtime_gate_artifact.rs')
           source = source_path.read_text()
-          old = '''    fn stage_with_staging_io<S: RuntimeGateStagingIo>(
-        source: &Path,
-        expected_sha256: &str,
-        expected_architecture: &str,
-        staging_io: &S,
-    ) -> Result<Self, RuntimeGateArtifactError> {'''
-          new = '''    fn stage_with_staging_io(
-        source: &Path,
-        expected_sha256: &str,
-        expected_architecture: &str,
-        staging_io: &dyn RuntimeGateStagingIo,
-    ) -> Result<Self, RuntimeGateArtifactError> {'''
-          assert source.count(old) == 1, 'expected one generic staging seam'
-          source_path.write_text(source.replace(old, new))
-
-          workflow = Path('.github/workflows/runtime-gate-staging-seam-repair.yml')
-          workflow.unlink()
+          source, signature_count = source.replace(
+              'fn stage_with_staging_io<S: RuntimeGateStagingIo>(',
+              'fn stage_with_staging_io(',
+          ), source.count('fn stage_with_staging_io<S: RuntimeGateStagingIo>(')
+          assert signature_count == 1, signature_count
+          source, parameter_count = source.replace(
+              'staging_io: &S,',
+              'staging_io: &dyn RuntimeGateStagingIo,',
+          ), source.count('staging_io: &S,')
+          assert parameter_count == 1, parameter_count
+          source_path.write_text(source)
+          Path('.github/workflows/runtime-gate-staging-seam-repair.yml').unlink()
           PY
       - name: Verify deterministic seam covers the production body
         run: |
@@ -73,7 +65,6 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           report = json.loads(Path('after.json').read_text())['data'][0]['files']
           target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
           regions = target['summary']['regions']
