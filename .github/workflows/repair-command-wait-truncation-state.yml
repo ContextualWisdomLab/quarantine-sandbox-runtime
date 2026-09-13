@@ -26,15 +26,17 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          lines = [
+              '                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {',
+              '                    return Err(CommandExecutionError::Backend(',
+              '                        ApplicationServiceError::BackendOutputLimitExceeded {',
+              '                            operation: "command_wait",',
+              '                        },',
+              '                    ));',
+              '                }',
+          ]
+          impossible = '\n'.join(lines) + '\n'
           source = Path('src/infrastructure/podman.rs').read_text()
-          impossible = '''                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendOutputLimitExceeded {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-'''
           if source.count(impossible) != 1:
               raise SystemExit('command-wait exited-truncation anchor drifted')
           classifier = Path('src/infrastructure/bounded_command.rs').read_text()
@@ -53,16 +55,18 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          lines = [
+              '                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {',
+              '                    return Err(CommandExecutionError::Backend(',
+              '                        ApplicationServiceError::BackendOutputLimitExceeded {',
+              '                            operation: "command_wait",',
+              '                        },',
+              '                    ));',
+              '                }',
+          ]
+          old = '\n'.join(lines) + '\n'
           source_path = Path('src/infrastructure/podman.rs')
           source = source_path.read_text()
-          old = '''                if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendOutputLimitExceeded {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-'''
           if source.count(old) != 1:
               raise SystemExit(f'expected one redundant command-wait gate, found {source.count(old)}')
           source_path.write_text(source.replace(old, '', 1))
