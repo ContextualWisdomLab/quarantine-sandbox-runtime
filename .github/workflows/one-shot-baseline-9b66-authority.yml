@@ -1,0 +1,77 @@
+name: one-shot baseline exact authority
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+    paths:
+      - .github/workflows/one-shot-baseline-9b66-authority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact source branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Prepend exact executed authority without transferring GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker='current-authority-2026-09-13-9b66-exact-hosted'
+          baseline='docs/product-technical-gap-baseline.md'
+          if grep -Fq "$marker" "$baseline"; then
+            echo "baseline authority already present"
+          else
+            tmp="$(mktemp)"
+            cat >"$tmp" <<'EOF'
+          <!-- current-authority-2026-09-13-9b66-exact-hosted -->
+          # Current authority supersession — exact hosted evidence and branch-tooling boundary (2026-09-13)
+
+          Exact PR #112 predecessor `9b66da82949072412bb5a6b7f2d144ff3a01e73e` has completed native CI `34737333640`. `verify` job `103670934636` is GREEN through exact checkout, dependency/repository/CI-contract validation, rustfmt, the full workspace/all-target test suite, Clippy with warnings denied, and rustdoc. Hosted negative rootless/AppArmor job `103670934606` is GREEN. Production coverage job `103670934711` and branch coverage job `103670934667` both generated and uploaded immutable exact evidence and failed only their explicit repository-wide complete-coverage admissions; no tool-install, test, or evidence-generation failure remains.
+
+          Production artifact `10310979763` has SHA-256 `d807adb15a016b61b4e5853bdfb71da461b15b13071b95e7ff4199041d05e1e1`; branch artifact `10311720559` has SHA-256 `f871b693d7005be208a7b2e5aabaf08ad30d5aa434694962c9e9b9df5fa93656`. Exact raw totals are **5244/5280 lines, 506/506 functions, 7018/7143 LLVM regions, and 718/726 branches**. Command/runtime-gate branch ownership is closed at `bounded_command.rs` 22/22, `podman_runtime_gate_binding.rs` 24/24, `runtime_gate_artifact.rs` 48/48, `main.rs` 10/10, and `pr_source_artifact.rs` 32/32. The remaining eight branch misses are application-service-owned: `application_service/coordinator.rs` 19/24 and the readiness/lifecycle portion of `infrastructure/podman.rs` 187/190. They remain canonical #21/#113 work and must be inherited through ordinary dependency-safe ancestry rather than duplicated in the command-owner lane.
+
+          The prior implicit rustup override warning is causally repaired on this exact execution: stable coverage installs `cargo-llvm-cov 0.8.6` with `cargo +1.97.1 install ...`, branch coverage installs it with `cargo +nightly-2026-07-01 install ...`, and the repository CI contract covering those explicit toolchains is GREEN. Branch mode still emits upstream `warning: --branch option is unstable`; issue #114 tracks that limitation fail-closed. Current upstream `cargo-llvm-cov` still routes `--branch` through nightly rustc `-Z coverage-options=branch` and Rust tracking issue rust-lang/rust#79649. Do not hide the warning, remove branch evidence, or weaken the 100% admission merely to make the log quiet.
+
+          Dedicated positive effective-LSM job `103670934690` remains **runner-unassigned** on `[self-hosted, linux, cwl-hostile-workload, selinux]`. No submitted `APPROVED` review exists. This section records executed predecessor authority only: the documentation descendant that adds it must reacquire its own exact-head CI, and no `9b66...` GREEN or artifact is transferred to a moved head. Release remains blocked on positive effective-LSM execution, stable application-service owner ancestry, complete owned-production line/region/branch and edge-case evidence, #35/#43 real-runtime acceptance, qualifying independent review/security, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication.
+
+          ---
+
+          EOF
+            cat "$baseline" >>"$tmp"
+            mv "$tmp" "$baseline"
+          fi
+
+      - name: Validate repository after docs-only supersession
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'current-authority-2026-09-13-9b66-exact-hosted' docs/product-technical-gap-baseline.md
+          grep -Fq '5244/5280 lines, 506/506 functions, 7018/7143 LLVM regions, and 718/726 branches' docs/product-technical-gap-baseline.md
+          cargo fmt --all -- --check
+          cargo test --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+          git diff --check
+
+      - name: Remove purpose-complete workflow and publish ordinary descendant
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/one-shot-baseline-9b66-authority.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/product-technical-gap-baseline.md .github/workflows/one-shot-baseline-9b66-authority.yml
+          if git diff --cached --quiet; then
+            echo 'no baseline delta to publish'
+            exit 0
+          fi
+          git commit -m 'docs: supersede gap baseline with exact 9b66 evidence'
+          git push origin HEAD:automation/command-chronology-owner-repair
