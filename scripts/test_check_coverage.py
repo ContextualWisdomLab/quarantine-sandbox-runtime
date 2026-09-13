@@ -1,76 +1,19 @@
 from __future__ import annotations
 
+import io
+import json
+import pathlib
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest.mock import patch
 
 from scripts.check_coverage import (
-    _canonical_region_counts,
+    _source_region_counts,
     _uncovered_lines,
     _uncovered_segment_starts,
+    main,
 )
-
-
-class CanonicalRegionCountTests(unittest.TestCase):
-    """Treat repeated codegen records as one exact source region."""
-
-    @staticmethod
-    def _payload(second_execution_count: int) -> dict[str, object]:
-        filename = "/workspace/target.rs"
-        return {
-            "files": [
-                {
-                    "filename": filename,
-                    "summary": {"regions": {"count": 1, "covered": 0}},
-                }
-            ],
-            "functions": [
-                {
-                    "filenames": [filename],
-                    "regions": [[10, 3, 10, 8, 0, 0, 0, 0]],
-                },
-                {
-                    "filenames": [filename],
-                    "regions": [
-                        [10, 3, 10, 8, second_execution_count, 0, 0, 0]
-                    ],
-                },
-            ],
-        }
-
-    def test_any_executed_codegen_instance_covers_the_source_region(self) -> None:
-        self.assertEqual(
-            _canonical_region_counts(self._payload(second_execution_count=1)),
-            {"/workspace/target.rs": (1, 1)},
-        )
-
-    def test_all_zero_codegen_instances_leave_the_source_region_uncovered(self) -> None:
-        self.assertEqual(
-            _canonical_region_counts(self._payload(second_execution_count=0)),
-            {"/workspace/target.rs": (1, 0)},
-        )
-
-    def test_secondary_filename_id_is_attributed_to_its_source_file(self) -> None:
-        target = "/workspace/target.rs"
-        data = {
-            "files": [
-                {
-                    "filename": target,
-                    "summary": {"regions": {"count": 1, "covered": 0}},
-                }
-            ],
-            "functions": [
-                {
-                    "filenames": ["/workspace/macro.rs", target],
-                    "regions": [[7, 1, 7, 8, 4, 1, 0, 0]],
-                }
-            ],
-        }
-        self.assertEqual(_canonical_region_counts(data), {target: (1, 1)})
-
-    def test_coordinate_count_mismatch_fails_closed(self) -> None:
-        data = self._payload(second_execution_count=1)
-        data["files"][0]["summary"]["regions"]["count"] = 2  # type: ignore[index]
-        with self.assertRaisesRegex(ValueError, "canonical source-region count disagrees"):
-            _canonical_region_counts(data)
 
 
 class UncoveredLineAttributionTests(unittest.TestCase):
@@ -119,6 +62,140 @@ class UncoveredLineAttributionTests(unittest.TestCase):
         }
 
         self.assertEqual(_uncovered_segment_starts(file_record), [(11, 5), (13, 2)])
+
+
+class SourceRegionCoverageTests(unittest.TestCase):
+    """Measure source regions once even when LLVM exports multiple instantiations."""
+
+    @staticmethod
+    def _file_record(region_count: int) -> dict[str, object]:
+        return {
+            "filename": "/workspace/src/runtime.rs",
+            "summary": {"regions": {"count": region_count, "covered": region_count}},
+        }
+
+    def test_mixed_instantiations_cover_one_shared_source_region(self) -> None:
+        data = {
+            "files": [self._file_record(1)],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 10, 20, 7, 0, 0, 0, 0]],
+                },
+            ],
+        }
+
+        self.assertEqual(_source_region_counts(data), (1, 1))
+
+    def test_source_region_is_uncovered_when_every_instance_is_zero(self) -> None:
+        data = {
+            "files": [
+                {
+                    "filename": "/workspace/src/runtime.rs",
+                    "summary": {"regions": {"count": 1, "covered": 0}},
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[20, 3, 20, 18, 0, 0, 0, 0]],
+                },
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[20, 3, 20, 18, 0, 0, 0, 0]],
+                },
+            ],
+        }
+
+        self.assertEqual(_source_region_counts(data), (1, 0))
+
+    def test_region_denominator_must_match_production_file_summaries(self) -> None:
+        data = {
+            "files": [self._file_record(2)],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[30, 1, 30, 9, 1, 0, 0, 0]],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "source region denominator"):
+            _source_region_counts(data)
+
+
+class CoverageAdmissionTests(unittest.TestCase):
+    """Gate source-region coverage without hiding LLVM's raw summary."""
+
+    @staticmethod
+    def _payload(file_region_count: int = 1) -> dict[str, object]:
+        return {
+            "data": [
+                {
+                    "totals": {
+                        "lines": {"count": 1, "covered": 1},
+                        "functions": {"count": 1, "covered": 1},
+                        "regions": {"count": 1, "covered": 0},
+                    },
+                    "files": [
+                        {
+                            "filename": "/workspace/src/runtime.rs",
+                            "summary": {
+                                "lines": {"count": 1, "covered": 1},
+                                "functions": {"count": 1, "covered": 1},
+                                "regions": {
+                                    "count": file_region_count,
+                                    "covered": 0,
+                                },
+                            },
+                            "segments": [],
+                        }
+                    ],
+                    "functions": [
+                        {
+                            "filenames": ["/workspace/src/runtime.rs"],
+                            "regions": [[10, 5, 10, 20, 0, 0, 0, 0]],
+                        },
+                        {
+                            "filenames": ["/workspace/src/runtime.rs"],
+                            "regions": [[10, 5, 10, 20, 7, 0, 0, 0, 0]],
+                        },
+                    ],
+                }
+            ]
+        }
+
+    def _run_main(self, payload: dict[str, object]) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "coverage.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                patch("sys.argv", ["check_coverage.py", str(path)]),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                result = main()
+        return result, stdout.getvalue(), stderr.getvalue()
+
+    def test_admission_uses_source_region_union_and_reports_raw_llvm_summary(self) -> None:
+        result, stdout, stderr = self._run_main(self._payload())
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("regions (LLVM raw): 0/1", stdout)
+        self.assertIn("regions: 1/1", stdout)
+
+    def test_admission_fails_closed_on_source_region_denominator_mismatch(self) -> None:
+        result, _stdout, stderr = self._run_main(self._payload(file_region_count=2))
+
+        self.assertEqual(result, 1)
+        self.assertIn("source region denominator", stderr)
 
 
 if __name__ == "__main__":
