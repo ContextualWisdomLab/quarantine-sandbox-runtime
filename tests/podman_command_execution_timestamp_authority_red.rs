@@ -1,21 +1,22 @@
-//! RED: caller-supplied wall-clock input must not become authoritative execution evidence.
+//! Causal #44 regression: caller-supplied wall-clock input must not become authoritative evidence.
 //!
-//! `run_command_at` currently copies `started_at_epoch_seconds` into the public
-//! result while recording completion from the runtime host clock. An otherwise
-//! successful invocation can therefore emit an impossible chronology when the
-//! supplied start lies in the future. Runtime evidence must either fail closed
-//! or replace the supplied value with a runtime-observed start time; it must not
-//! publish the caller's contradictory timestamp as observed execution evidence.
+//! The executed RED copied `started_at_epoch_seconds` into the public result while recording
+//! completion from the runtime host clock, allowing an otherwise-successful invocation to emit an
+//! impossible chronology when the supplied start lay in the future. The repaired runtime may fail
+//! closed on runtime clock evidence or replace the supplied value with a runtime-observed start,
+//! but it must never publish the caller's timestamp as observed execution evidence.
 
 #![cfg(target_os = "linux")]
 
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    ResourceRequest, RootlessPodmanAdapter,
 };
 use tempfile::TempDir;
 
+const BASELINE_START: u64 = 1_780_000_000;
 const CALLER_SUPPLIED_FUTURE_START: u64 = 1_000_000_000_000;
 
 fn policy() -> IsolationPolicy {
@@ -59,7 +60,7 @@ fn fake_podman() -> (TempDir, PathBuf, PathBuf) {
     let program = directory.path().join("podman");
     let calls = directory.path().join("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
-    let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16}}]"#;
+    let inspect = r#"[{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":30},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}]"#;
     let top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-command-container-id\\n' ;;\n  init:*) : ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  wait:*) printf '0\\n' ;;\n  logs:*) printf 'ok\\n' ;;\n  rm:--force) : ;;\n  *) exit 91 ;;\nesac\n",
@@ -82,28 +83,53 @@ fn future_caller_timestamp_is_not_published_as_observed_runtime_chronology() {
     let (_directory, program, calls_path) = fake_podman();
     let adapter = RootlessPodmanAdapter::new(program).with_command_timeout(Duration::from_secs(2));
 
+    // Prove that the fake runtime is a complete positive isolation/success fixture before using
+    // the same path for the contradictory timestamp. This prevents an unrelated configured-state
+    // rejection from turning the chronology regression into a false pass.
+    let baseline = adapter
+        .run_legacy_command_at_for_test(&request(), &policy(), BASELINE_START)
+        .expect("baseline fake Podman execution must reach successful result construction");
+    assert!(baseline.finished_at_epoch_seconds() >= baseline.started_at_epoch_seconds());
+    fs::write(&calls_path, "").expect("fake Podman call log should reset between control and RED");
+
     let result =
         adapter.run_legacy_command_at_for_test(&request(), &policy(), CALLER_SUPPLIED_FUTURE_START);
     let calls = fs::read_to_string(calls_path).expect("fake Podman calls must be recorded");
 
-    if let Ok(result) = result {
-        assert_ne!(
-            result.started_at_epoch_seconds(),
-            CALLER_SUPPLIED_FUTURE_START,
-            "consumer/test-seam wall-clock input must not be emitted unchanged as runtime-observed start evidence"
-        );
-        assert!(
-            result.finished_at_epoch_seconds() >= result.started_at_epoch_seconds(),
-            "successful execution evidence must have a nondecreasing chronology: started={}, finished={}",
-            result.started_at_epoch_seconds(),
-            result.finished_at_epoch_seconds()
-        );
-    }
-
     assert!(
         calls
             .lines()
-            .any(|line| line.starts_with("rm --force --ignore ")),
-        "the success or fail-closed path must still clean the invocation container: {calls}"
+            .any(|line| line == "logs fake-command-container-id"),
+        "chronology regression must pass configured/live isolation, workload wait, and exact-ID log collection before evidence construction: {calls}"
     );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == "rm --force --ignore fake-command-container-id"),
+        "the chronology path must preserve exact-ID cleanup ownership: {calls}"
+    );
+
+    match result {
+        Ok(result) => {
+            assert_ne!(
+                result.started_at_epoch_seconds(),
+                CALLER_SUPPLIED_FUTURE_START,
+                "consumer/test-seam wall-clock input must not be emitted unchanged as runtime-observed start evidence"
+            );
+            assert!(
+                result.finished_at_epoch_seconds() >= result.started_at_epoch_seconds(),
+                "successful execution evidence must have a nondecreasing chronology: started={}, finished={}",
+                result.started_at_epoch_seconds(),
+                result.finished_at_epoch_seconds()
+            );
+        }
+        Err(CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "command_start_clock" | "command_finish_clock" | "command_chronology",
+        })) => {
+            // Runtime-owned wall-clock acquisition or chronology validation may fail closed.
+        }
+        Err(other) => panic!(
+            "otherwise-positive fake Podman execution must not false-pass chronology authority through an unrelated error: {other:?}"
+        ),
+    }
 }

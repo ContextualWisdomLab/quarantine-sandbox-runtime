@@ -2,7 +2,7 @@
 
 use std::{
     io::{self, Read, Write},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::mpsc::{self, RecvTimeoutError},
     thread,
 };
@@ -110,6 +110,7 @@ impl RuntimeGatePodmanAdapter {
             request,
             policy,
             started_at_epoch_seconds,
+            self.runtime_gate_artifact.path(),
             &binding_args,
             |container_id| self.release_command_gate(container_id, plan),
         )
@@ -188,31 +189,17 @@ impl RuntimeGatePodmanAdapter {
                 })
             })?;
 
-        let Some(stdout) = child.stdout.take() else {
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_ACK_OPERATION);
-            return Err(fail_after_release_client_cleanup(&mut child, original));
-        };
-        let Some(mut stdin) = child.stdin.take() else {
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
-            return Err(fail_after_release_client_cleanup(&mut child, original));
-        };
+        let stdout = take_release_pipe(child.stdout.take(), RUNTIME_GATE_RELEASE_ACK_OPERATION)?;
+        let mut stdin =
+            take_release_pipe(child.stdin.take(), RUNTIME_GATE_RELEASE_WRITE_OPERATION)?;
 
         let (sender, receiver) = mpsc::sync_channel(1);
         let _reader = thread::spawn(move || {
             let _ = sender.send(read_release_ack(stdout));
         });
 
-        let release_payload = format!("{}\n", plan.release_token);
-        if stdin
-            .write_all(release_payload.as_bytes())
-            .and_then(|()| stdin.flush())
-            .is_err()
-        {
-            drop(stdin);
-            let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
-            return Err(fail_after_release_client_cleanup(&mut child, original));
-        }
-        drop(stdin);
+        let release_write = write_release_payload(&mut stdin, &plan.release_token);
+        complete_release_payload_write(release_write, stdin, &mut child)?;
 
         let acknowledgement = receiver.recv_timeout(self._inner.command_timeout());
         terminate_release_client(&mut child)?;
@@ -237,6 +224,18 @@ fn is_exact_container_id(container_id: &str) -> bool {
         && container_id
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Preserve a provider-neutral fail-closed error if the release-client pipe invariant is broken.
+///
+/// `release_command_gate` asks `Command` for piped stdin and stdout before spawning. The standard
+/// library exposes those configured pipes on `Child`; keeping this tiny guard separate avoids a
+/// panic shortcut while making the defensive contradiction path directly testable.
+fn take_release_pipe<T>(
+    pipe: Option<T>,
+    operation: &'static str,
+) -> Result<T, CommandExecutionError> {
+    pipe.ok_or_else(|| release_invocation_error(operation))
 }
 
 /// Read until the trusted gate's exact acknowledgement or the fixed control-byte budget is spent.
@@ -269,11 +268,73 @@ fn release_invocation_error(operation: &'static str) -> CommandExecutionError {
     CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed { operation })
 }
 
+/// Minimal process surface needed to terminate and reap the local release client.
+///
+/// Keeping the OS operations behind this private boundary lets tests deterministically exercise
+/// every lifecycle outcome without scheduler races, sleeps, or weakening the real `Child` path.
+trait ReleaseClientProcess {
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>>;
+    fn kill(&mut self) -> io::Result<()>;
+    fn wait(&mut self) -> io::Result<ExitStatus>;
+}
+
+impl ReleaseClientProcess for Child {
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        Child::try_wait(self)
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        Child::kill(self)
+    }
+
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        Child::wait(self)
+    }
+}
+
+/// Write and flush the one-time release token without owning process cleanup.
+fn write_release_payload(writer: &mut impl Write, release_token: &str) -> io::Result<()> {
+    let release_payload = format!("{release_token}\n");
+    writer
+        .write_all(release_payload.as_bytes())
+        .and_then(|()| writer.flush())
+}
+
+/// Resolve the release-write decision while the writer is still owned by this boundary.
+///
+/// The helper makes the real write-failure branch deterministic under unit test while preserving
+/// the production invariant: stdin is closed before attach-client cleanup can begin, and a
+/// successful write closes stdin before acknowledgement processing continues.
+fn complete_release_payload_write(
+    release_write: io::Result<()>,
+    writer: impl Write,
+    child: &mut impl ReleaseClientProcess,
+) -> Result<(), CommandExecutionError> {
+    if release_write.is_err() {
+        let original = release_invocation_error(RUNTIME_GATE_RELEASE_WRITE_OPERATION);
+        return Err(fail_after_release_writer_close(writer, child, original));
+    }
+    drop(writer);
+    Ok(())
+}
+
+/// Close the release writer before any failed-write cleanup touches the local attach client.
+fn fail_after_release_writer_close(
+    writer: impl Write,
+    child: &mut impl ReleaseClientProcess,
+    original: CommandExecutionError,
+) -> CommandExecutionError {
+    drop(writer);
+    fail_after_release_client_cleanup(child, original)
+}
+
 /// Terminate and reap only the local attach client, never the released container process.
 ///
 /// `release_command_gate` always starts attach with `--sig-proxy=false`; killing this child is
 /// therefore local control-channel cleanup rather than workload termination authority.
-fn terminate_release_client(child: &mut Child) -> Result<(), CommandExecutionError> {
+fn terminate_release_client(
+    child: &mut impl ReleaseClientProcess,
+) -> Result<(), CommandExecutionError> {
     match child.try_wait() {
         Ok(Some(_)) => return Ok(()),
         Ok(None) => {}
@@ -302,42 +363,219 @@ fn terminate_release_client(child: &mut Child) -> Result<(), CommandExecutionErr
 
 /// Preserve cleanup failure precedence when a release-control operation already failed.
 fn fail_after_release_client_cleanup(
-    child: &mut Child,
+    child: &mut impl ReleaseClientProcess,
     original: CommandExecutionError,
 ) -> CommandExecutionError {
     terminate_release_client(child).err().unwrap_or(original)
 }
 
+/// Fill one release-token nonce from the operating-system entropy source.
+fn fill_runtime_gate_nonce(nonce: &mut [u8; 32]) -> bool {
+    getrandom::fill(nonce).is_ok()
+}
+
 /// Generate an unpredictable one-time release token without a deterministic fallback.
 fn runtime_gate_release_token() -> Result<String, CommandExecutionError> {
+    runtime_gate_release_token_with(fill_runtime_gate_nonce)
+}
+
+/// Resolve one entropy attempt behind a deterministic private test seam.
+fn runtime_gate_release_token_with(
+    fill_nonce: fn(&mut [u8; 32]) -> bool,
+) -> Result<String, CommandExecutionError> {
     let mut nonce = [0_u8; 32];
-    getrandom::fill(&mut nonce).map_err(|_| {
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "runtime_gate_release_token",
-        })
-    })?;
+    if !fill_nonce(&mut nonce) {
+        return Err(release_invocation_error("runtime_gate_release_token"));
+    }
     Ok(format!("{:x}", Sha256::digest(nonce)))
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use std::fs;
+    use std::{
+        cell::Cell,
+        collections::VecDeque,
+        fs,
+        io::{self, Write},
+        os::unix::process::ExitStatusExt,
+        process::ExitStatus,
+        rc::Rc,
+    };
 
     use sha2::{Digest, Sha256};
 
-    use super::RootlessPodmanAdapter;
-    use crate::{CommandExecutionRequest, IsolationPolicy, ResourceRequest, RuntimeGateArtifact};
+    use super::{
+        RUNTIME_GATE_RELEASE_ACK_OPERATION, RUNTIME_GATE_RELEASE_DETACH_OPERATION,
+        RUNTIME_GATE_RELEASE_WRITE_OPERATION, ReleaseClientProcess, RootlessPodmanAdapter,
+        complete_release_payload_write, fail_after_release_writer_close, take_release_pipe,
+        terminate_release_client, write_release_payload,
+    };
+    use crate::{
+        ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+        ResourceRequest, RuntimeGateArtifact,
+    };
+
+    #[test]
+    fn release_token_entropy_failure_is_fail_closed() {
+        let error = super::runtime_gate_release_token_with(|_| false)
+            .expect_err("entropy failure must not produce a release token");
+        assert!(matches!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: "runtime_gate_release_token"
+            })
+        ));
+    }
+
+    #[test]
+    fn release_token_entropy_success_hashes_exact_nonce() {
+        let token = super::runtime_gate_release_token_with(|nonce| {
+            nonce.fill(0xa5);
+            true
+        })
+        .expect("deterministic entropy seam should produce a token");
+        assert_eq!(token, format!("{:x}", Sha256::digest([0xa5_u8; 32])));
+    }
 
     const ELF_HEADER_BYTES: usize = 64;
     const PROGRAM_HEADER_BYTES: usize = 56;
     const FILE_BYTES: usize = 512;
+    #[cfg(target_arch = "aarch64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 183;
+    #[cfg(target_arch = "x86_64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 62;
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    compile_error!("runtime-gate test fixture supports only aarch64 and x86_64 hosts");
+
+    struct ScriptedReleaseClient {
+        try_wait_results: VecDeque<io::Result<Option<ExitStatus>>>,
+        kill_results: VecDeque<io::Result<()>>,
+        wait_results: VecDeque<io::Result<ExitStatus>>,
+        writer_closed: Option<Rc<Cell<bool>>>,
+    }
+
+    impl ScriptedReleaseClient {
+        fn new(
+            try_wait_results: Vec<io::Result<Option<ExitStatus>>>,
+            kill_results: Vec<io::Result<()>>,
+            wait_results: Vec<io::Result<ExitStatus>>,
+        ) -> Self {
+            Self {
+                try_wait_results: try_wait_results.into(),
+                kill_results: kill_results.into(),
+                wait_results: wait_results.into(),
+                writer_closed: None,
+            }
+        }
+
+        fn requiring_closed_writer(mut self, writer_closed: Rc<Cell<bool>>) -> Self {
+            self.writer_closed = Some(writer_closed);
+            self
+        }
+
+        fn assert_writer_closed(&self) {
+            if let Some(writer_closed) = &self.writer_closed {
+                assert!(
+                    writer_closed.get(),
+                    "release writer must be closed before cleanup"
+                );
+            }
+        }
+    }
+
+    impl ReleaseClientProcess for ScriptedReleaseClient {
+        fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+            self.assert_writer_closed();
+            self.try_wait_results
+                .pop_front()
+                .expect("scripted try_wait result should exist")
+        }
+
+        fn kill(&mut self) -> io::Result<()> {
+            self.assert_writer_closed();
+            self.kill_results
+                .pop_front()
+                .expect("scripted kill result should exist")
+        }
+
+        fn wait(&mut self) -> io::Result<ExitStatus> {
+            self.assert_writer_closed();
+            self.wait_results
+                .pop_front()
+                .expect("scripted wait result should exist")
+        }
+    }
+
+    enum WriterFailure {
+        None,
+        Write,
+        Flush,
+    }
+
+    struct ScriptedWriter {
+        failure: WriterFailure,
+        bytes: Vec<u8>,
+        closed: Option<Rc<Cell<bool>>>,
+    }
+
+    impl ScriptedWriter {
+        fn new(failure: WriterFailure) -> Self {
+            Self {
+                failure,
+                bytes: Vec::new(),
+                closed: None,
+            }
+        }
+
+        fn with_close_witness(mut self, closed: Rc<Cell<bool>>) -> Self {
+            self.closed = Some(closed);
+            self
+        }
+    }
+
+    impl Drop for ScriptedWriter {
+        fn drop(&mut self) {
+            if let Some(closed) = &self.closed {
+                closed.set(true);
+            }
+        }
+    }
+
+    impl Write for ScriptedWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            if matches!(self.failure, WriterFailure::Write) {
+                return Err(io::Error::other("scripted release write failure"));
+            }
+            self.bytes.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            if matches!(self.failure, WriterFailure::Flush) {
+                return Err(io::Error::other("scripted release flush failure"));
+            }
+            Ok(())
+        }
+    }
+
+    fn exited() -> ExitStatus {
+        ExitStatus::from_raw(0)
+    }
+
+    fn detach_error() -> CommandExecutionError {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: RUNTIME_GATE_RELEASE_DETACH_OPERATION,
+        })
+    }
+
+    fn write_error() -> CommandExecutionError {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: RUNTIME_GATE_RELEASE_WRITE_OPERATION,
+        })
+    }
 
     fn self_contained_gate_bytes() -> Vec<u8> {
-        let machine = match std::env::consts::ARCH {
-            "x86_64" => 62_u16,
-            "aarch64" => 183_u16,
-            other => panic!("runtime-gate test fixture does not support architecture {other}"),
-        };
+        let machine = HOST_TEST_ELF_MACHINE;
         let mut bytes = vec![0_u8; FILE_BYTES];
         bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
         bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
@@ -389,6 +627,132 @@ mod tests {
                 tmpfs_bytes: 16 * 1024 * 1024,
             },
         }
+    }
+
+    #[test]
+    fn release_pipe_guard_preserves_present_handle_and_rejects_missing_handle() {
+        assert_eq!(
+            take_release_pipe(Some(7_u8), RUNTIME_GATE_RELEASE_ACK_OPERATION)
+                .expect("present release pipe should be preserved"),
+            7
+        );
+        let error = take_release_pipe::<u8>(None, RUNTIME_GATE_RELEASE_ACK_OPERATION)
+            .expect_err("missing release pipe should fail closed");
+        assert!(matches!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: RUNTIME_GATE_RELEASE_ACK_OPERATION,
+            })
+        ));
+    }
+
+    #[test]
+    fn release_cleanup_starts_only_after_writer_is_closed() {
+        let writer_closed = Rc::new(Cell::new(false));
+        let mut writer =
+            ScriptedWriter::new(WriterFailure::Write).with_close_witness(writer_closed.clone());
+        let mut child = ScriptedReleaseClient::new(vec![Ok(Some(exited()))], vec![], vec![])
+            .requiring_closed_writer(writer_closed.clone());
+
+        let release_write = write_release_payload(&mut writer, "release-token");
+        let error = complete_release_payload_write(release_write, writer, &mut child)
+            .expect_err("failed release write must fail closed after writer close and cleanup");
+
+        assert_eq!(error, write_error());
+        assert!(writer_closed.get());
+    }
+
+    #[test]
+    fn release_write_success_closes_writer_without_cleanup() {
+        let writer_closed = Rc::new(Cell::new(false));
+        let mut writer =
+            ScriptedWriter::new(WriterFailure::None).with_close_witness(writer_closed.clone());
+        let mut child = ScriptedReleaseClient::new(vec![], vec![], vec![])
+            .requiring_closed_writer(writer_closed.clone());
+
+        let release_write = write_release_payload(&mut writer, "release-token");
+        complete_release_payload_write(release_write, writer, &mut child)
+            .expect("successful release write should close the writer without cleanup");
+
+        assert!(writer_closed.get());
+    }
+
+    #[test]
+    fn release_payload_failure_preserves_write_error_after_successful_cleanup() {
+        let mut writer = ScriptedWriter::new(WriterFailure::Write);
+        let mut child = ScriptedReleaseClient::new(vec![Ok(Some(exited()))], vec![], vec![]);
+
+        let write_result = write_release_payload(&mut writer, "release-token");
+        assert!(write_result.is_err());
+        let error = fail_after_release_writer_close(writer, &mut child, write_error());
+
+        assert_eq!(error, write_error());
+    }
+
+    #[test]
+    fn release_payload_flush_failure_prefers_detach_failure() {
+        let mut writer = ScriptedWriter::new(WriterFailure::Flush);
+        let mut child = ScriptedReleaseClient::new(
+            vec![Err(io::Error::other("scripted try_wait failure"))],
+            vec![Ok(())],
+            vec![Ok(exited())],
+        );
+
+        let write_result = write_release_payload(&mut writer, "release-token");
+        assert!(write_result.is_err());
+        let error = fail_after_release_writer_close(writer, &mut child, write_error());
+
+        assert_eq!(error, detach_error());
+    }
+
+    #[test]
+    fn release_payload_success_writes_exact_token_line_without_cleanup() {
+        let mut writer = ScriptedWriter::new(WriterFailure::None);
+
+        write_release_payload(&mut writer, "release-token")
+            .expect("successful release payload should not require cleanup");
+
+        assert_eq!(writer.bytes, b"release-token\n");
+    }
+
+    #[test]
+    fn release_client_kill_race_accepts_already_exited_process() {
+        let mut child = ScriptedReleaseClient::new(
+            vec![Ok(None), Ok(Some(exited()))],
+            vec![Err(io::Error::other("process already exited"))],
+            vec![],
+        );
+
+        terminate_release_client(&mut child)
+            .expect("a kill race is safe when the exact client is already exited");
+    }
+
+    #[test]
+    fn release_client_kill_failure_without_exit_fails_closed() {
+        let mut child = ScriptedReleaseClient::new(
+            vec![Ok(None), Ok(None)],
+            vec![Err(io::Error::other("scripted kill failure"))],
+            vec![],
+        );
+
+        let error = terminate_release_client(&mut child)
+            .expect_err("unresolved release-client kill failure must fail closed");
+
+        assert_eq!(error, detach_error());
+    }
+
+    #[test]
+    fn release_client_wait_failure_after_kill_fails_closed() {
+        let mut child = ScriptedReleaseClient::new(
+            vec![Ok(None)],
+            vec![Ok(())],
+            vec![Err(io::Error::other("scripted reap failure"))],
+        );
+
+        let error = terminate_release_client(&mut child)
+            .expect_err("release-client reap failure must fail closed");
+
+        assert_eq!(error, detach_error());
     }
 
     #[test]

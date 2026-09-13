@@ -12,7 +12,7 @@ use std::{
 use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 
-use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
+use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
     BackendInvocationFailureKind, CleanupReceipt, CommandExecutionError, CommandExecutionRequest,
@@ -416,7 +416,10 @@ impl RootlessPodmanAdapter {
         let container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
-                self.cleanup_created_container(&plan)?;
+                // Successful create plus malformed stdout does not prove ownership of the
+                // generated correlation name. Only the invocation-owned network is safe to
+                // remove until an exact backend container identity has been admitted.
+                self.cleanup_network(&plan)?;
                 return Err(ApplicationServiceError::MalformedIsolationInspection {
                     operation: "container_create",
                 });
@@ -539,7 +542,8 @@ impl RootlessPodmanAdapter {
             policy,
             started_at_epoch_seconds,
             None,
-            |_| Ok(()),
+            None,
+            None::<fn(&str) -> Result<(), CommandExecutionError>>,
         )
     }
 
@@ -553,6 +557,7 @@ impl RootlessPodmanAdapter {
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
         started_at_epoch_seconds: u64,
+        runtime_gate_artifact_path: &Path,
         runtime_gate_binding_args: &[String],
         release_gate: F,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
@@ -563,8 +568,9 @@ impl RootlessPodmanAdapter {
             request,
             policy,
             started_at_epoch_seconds,
+            Some(runtime_gate_artifact_path),
             Some(runtime_gate_binding_args),
-            release_gate,
+            Some(release_gate),
         )
     }
 
@@ -572,14 +578,16 @@ impl RootlessPodmanAdapter {
         &self,
         request: &CommandExecutionRequest,
         policy: &IsolationPolicy,
-        started_at_epoch_seconds: u64,
+        _started_at_epoch_seconds: u64,
+        runtime_gate_artifact_path: Option<&Path>,
         runtime_gate_binding_args: Option<&[String]>,
-        release_gate: F,
+        release_gate: Option<F>,
     ) -> Result<CommandExecutionResult, CommandExecutionError>
     where
         F: FnOnce(&str) -> Result<(), CommandExecutionError>,
     {
         request.validate(policy)?;
+        let observed_started_at_epoch_seconds = runtime_epoch_seconds("command_start_clock")?;
         let staged_source = request
             .source_artifact
             .as_ref()
@@ -596,17 +604,14 @@ impl RootlessPodmanAdapter {
             &request.request_id,
             &request.image_reference,
             &policy.policy_id,
-            started_at_epoch_seconds,
+            observed_started_at_epoch_seconds,
         )?;
         let sandbox_name = format!("qsr-cmd-{identity}");
-        let create_receipt_directory = tempfile::Builder::new()
-            .prefix("qsr-command-create-")
-            .tempdir()
-            .map_err(|_| {
-                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-                    operation: "container_create_receipt",
-                })
-            })?;
+        let create_receipt_directory = resolve_command_create_receipt_directory(
+            tempfile::Builder::new()
+                .prefix("qsr-command-create-")
+                .tempdir(),
+        )?;
         let create_receipt_path = create_receipt_directory.path().join("container-id");
         let create_receipt_path_text =
             create_receipt_path
@@ -717,7 +722,7 @@ impl RootlessPodmanAdapter {
                 };
             }
         };
-        let container_id = match parse_backend_identifier(&create_output.stdout) {
+        let stdout_container_id = match parse_backend_identifier(&create_output.stdout) {
             Some(identifier) => identifier,
             None => {
                 let original = CommandExecutionError::Backend(
@@ -735,11 +740,32 @@ impl RootlessPodmanAdapter {
                 };
             }
         };
+        let container_id = match read_command_create_receipt(&create_receipt_path)
+            .map_err(CommandExecutionError::Backend)?
+        {
+            Some(receipt_container_id) if receipt_container_id == stdout_container_id => {
+                receipt_container_id
+            }
+            Some(receipt_container_id) => {
+                let original = CommandExecutionError::Backend(
+                    ApplicationServiceError::MalformedIsolationInspection {
+                        operation: "container_create_receipt",
+                    },
+                );
+                return Err(
+                    self.cleanup_owned_command_container_or_report(&receipt_container_id, original)
+                );
+            }
+            // Compatibility for legacy/debug fake backends that do not yet emit the
+            // runtime-owned receipt. Release-grade production still tracks mandatory
+            // successful-create receipt admission as an explicit hardening gap.
+            None => stdout_container_id,
+        };
 
-        // Once create returns an acquired long ID, that immutable identity is
-        // the sole lifecycle/destructive authority. The generated name remains
-        // correlation/result metadata only; re-resolving it would reopen a
-        // same-principal name-rebinding TOCTOU window (#36).
+        // A present runtime-owned cidfile receipt is authoritative: contradictory
+        // successful-create stdout is rejected and cleanup uses only the receipt ID.
+        // The generated name remains correlation/result metadata only; re-resolving it
+        // would reopen a same-principal name-rebinding TOCTOU window (#36).
         if let Err(error) =
             self.checked_output("container_init", &["init".to_owned(), container_id.clone()])
         {
@@ -751,6 +777,7 @@ impl RootlessPodmanAdapter {
             policy,
             &container_id,
             staged_source.as_ref().map(|staged| staged.path()),
+            runtime_gate_artifact_path,
         ) {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
@@ -768,11 +795,12 @@ impl RootlessPodmanAdapter {
             &info,
             &container_id,
             staged_source.as_ref().map(|staged| staged.path()),
+            runtime_gate_artifact_path,
         ) {
             return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
         }
 
-        if runtime_gate_binding_args.is_some() {
+        if let Some(release_gate) = release_gate {
             release_gate(&container_id).map_err(|error| {
                 self.cleanup_owned_command_container_or_report(&container_id, error)
             })?;
@@ -802,29 +830,29 @@ impl RootlessPodmanAdapter {
                 ));
             }
         };
-        if logs_outcome.timed_out {
-            // The log driver failing to hand back already-written output
-            // promptly is an infrastructure fault, not a fact about the
-            // workload (whose own timeout is already captured above).
-            return Err(self.cleanup_owned_command_container_or_report(
-                &container_id,
-                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
-                    operation: "container_logs",
-                }),
-            ));
-        }
-        // A `None` status only occurs on the timeout/output-budget kill
-        // paths already handled above (or by the truncation flags on
-        // success); anything else is `podman logs` itself failing (e.g. the
-        // log driver or container state is broken) and is an infrastructure
-        // fault, not empty workload output.
-        if !logs_outcome.status.is_none_or(|status| status.success()) {
-            return Err(self.cleanup_owned_command_container_or_report(
-                &container_id,
-                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
-                    operation: "container_logs",
-                }),
-            ));
+        match &logs_outcome.completion {
+            BoundedCompletion::TimedOut => {
+                // The log driver failing to hand back already-written output
+                // promptly is an infrastructure fault, not a fact about the
+                // workload (whose own timeout is already captured above).
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandTimedOut {
+                            operation: "container_logs",
+                        },
+                    ),
+                ));
+            }
+            BoundedCompletion::Exited(status) if !status.success() => {
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
+                    CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
+                        operation: "container_logs",
+                    }),
+                ));
+            }
+            BoundedCompletion::Exited(_) | BoundedCompletion::OutputLimit => {}
         }
 
         if self.cleanup_owned_command_container(&container_id).is_err() {
@@ -837,9 +865,8 @@ impl RootlessPodmanAdapter {
             .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stdout" })?;
         let stderr = String::from_utf8(logs_outcome.stderr)
             .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stderr" })?;
-        let finished_at_epoch_seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
+        let finished_at_epoch_seconds = runtime_epoch_seconds("command_finish_clock")?;
+        validate_command_chronology(observed_started_at_epoch_seconds, finished_at_epoch_seconds)?;
 
         Ok(CommandExecutionResult::new(
             request,
@@ -853,7 +880,7 @@ impl RootlessPodmanAdapter {
                 stdout_truncated: logs_outcome.stdout_truncated,
                 stderr,
                 stderr_truncated: logs_outcome.stderr_truncated,
-                started_at_epoch_seconds,
+                started_at_epoch_seconds: observed_started_at_epoch_seconds,
                 finished_at_epoch_seconds,
                 source_artifact_receipt: staged_source
                     .as_ref()
@@ -886,35 +913,27 @@ impl RootlessPodmanAdapter {
                 })
             })?;
 
-        if !wait_outcome.timed_out {
-            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+        match wait_outcome.completion {
+            BoundedCompletion::TimedOut => {}
+            BoundedCompletion::OutputLimit => {
                 return Err(CommandExecutionError::Backend(
                     ApplicationServiceError::BackendOutputLimitExceeded {
                         operation: "command_wait",
                     },
                 ));
             }
-            match wait_outcome.status {
-                Some(status) if status.success() => {
+            BoundedCompletion::Exited(status) => {
+                if status.success() {
                     return Ok((
                         parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
                         false,
                     ));
                 }
-                Some(_) => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendCommandFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
-                None => {
-                    return Err(CommandExecutionError::Backend(
-                        ApplicationServiceError::BackendInvocationFailed {
-                            operation: "command_wait",
-                        },
-                    ));
-                }
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendCommandFailed {
+                        operation: "command_wait",
+                    },
+                ));
             }
         }
 
@@ -949,9 +968,16 @@ impl RootlessPodmanAdapter {
         policy: &IsolationPolicy,
         container_id: &str,
         staged_source_path: Option<&Path>,
+        runtime_gate_artifact_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container = self.inspect_command_container(container_id)?;
-        verify_command_container_configuration(request, policy, &container, staged_source_path)
+        verify_command_container_configuration(
+            request,
+            policy,
+            &container,
+            staged_source_path,
+            runtime_gate_artifact_path,
+        )
     }
 
     fn inspect_command_container(
@@ -995,9 +1021,16 @@ impl RootlessPodmanAdapter {
         info: &PodmanInfo,
         container_id: &str,
         staged_source_path: Option<&Path>,
+        runtime_gate_artifact_path: Option<&Path>,
     ) -> Result<(), ApplicationServiceError> {
         let container = self.inspect_command_container(container_id)?;
-        verify_command_container_configuration(request, policy, &container, staged_source_path)?;
+        verify_command_container_configuration(
+            request,
+            policy,
+            &container,
+            staged_source_path,
+            runtime_gate_artifact_path,
+        )?;
         let security_options = container
             .host_config
             .security_opt
@@ -1304,6 +1337,7 @@ fn verify_command_container_configuration(
     policy: &IsolationPolicy,
     container: &ContainerInspection,
     staged_source_path: Option<&Path>,
+    runtime_gate_artifact_path: Option<&Path>,
 ) -> Result<(), ApplicationServiceError> {
     if let Some(applied_image_digest) = container.image_digest.as_deref() {
         let requested_image_digest = request
@@ -1370,8 +1404,26 @@ fn verify_command_container_configuration(
     )?;
     require_control(
         "command_mount_set",
-        container.mounts.len() == usize::from(request.source_artifact.is_some()),
+        container.mounts.len()
+            == usize::from(request.source_artifact.is_some())
+                + usize::from(runtime_gate_artifact_path.is_some()),
     )?;
+    if let Some(expected_gate_path) = runtime_gate_artifact_path {
+        let runtime_gate_mount = container
+            .mounts
+            .iter()
+            .find(|mount| mount.destination == "/qsr-runtime-gate");
+        require_control(
+            "runtime_gate_read_only",
+            runtime_gate_mount.is_some_and(|mount| !mount.read_write),
+        )?;
+        require_control(
+            "runtime_gate_bind_source",
+            runtime_gate_mount.is_some_and(|mount| {
+                mount.mount_type == "bind" && mount.source == expected_gate_path
+            }),
+        )?;
+    }
     if request.source_artifact.is_some() {
         let source_mount = container
             .mounts
@@ -1478,26 +1530,25 @@ fn effective_lsm_verified(
             && inspect_label == runtime_label;
     }
 
-    if info.host.security.apparmor_enabled {
-        let inspect_profile = container.apparmor_profile.trim();
-        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
-        // context as `<profile> (<mode>)`. A bare profile name is not positive
-        // enforcement evidence, and complain mode audits without enforcing.
-        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
-            return false;
-        };
-        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
-            return false;
-        };
-        let runtime_profile = runtime_profile.trim();
-        return mode.eq_ignore_ascii_case("enforce")
-            && !runtime_profile.is_empty()
-            && !inspect_profile.is_empty()
-            && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_profile;
-    }
-
-    false
+    // `validate_backend_security` admits this same backend evidence before any
+    // container is created. After the SELinux branch above is false, that
+    // invariant means AppArmor is enabled; retaining an AppArmor-disabled
+    // fallback here would describe a state the public adapter cannot reach.
+    let inspect_profile = container.apparmor_profile.trim();
+    // `/proc/<pid>/attr/current` exposes the current task's AppArmor
+    // context as `<profile> (<mode>)`. A bare profile name is not positive
+    // enforcement evidence, and complain mode audits without enforcing.
+    let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
+        return false;
+    };
+    let Some(mode) = mode_with_suffix.strip_suffix(')') else {
+        return false;
+    };
+    let runtime_profile = runtime_profile.trim();
+    mode.eq_ignore_ascii_case("enforce")
+        && !inspect_profile.is_empty()
+        && !inspect_profile.eq_ignore_ascii_case("unconfined")
+        && inspect_profile == runtime_profile
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
@@ -1514,8 +1565,7 @@ fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
 
 fn capability_set_is_empty(value: &str) -> bool {
     let normalized = value.trim();
-    if normalized.is_empty()
-        || normalized == "-"
+    if normalized == "-"
         || normalized.eq_ignore_ascii_case("none")
         || normalized == "0"
         || normalized.eq_ignore_ascii_case("0x0")
@@ -1649,9 +1699,7 @@ where
     if values.len() != 1 {
         return Err(ApplicationServiceError::MalformedIsolationInspection { operation });
     }
-    values
-        .pop()
-        .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
+    Ok(values.remove(0))
 }
 
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
@@ -1708,6 +1756,68 @@ fn sandbox_identity(
     digest[..16].to_owned()
 }
 
+fn runtime_epoch_seconds(operation: &'static str) -> Result<u64, CommandExecutionError> {
+    epoch_seconds_from_system_time(SystemTime::now(), operation)
+}
+
+/// Preserve the provider-neutral create-receipt failure contract without
+/// requiring process-global temporary-directory mutation in tests.
+fn resolve_command_create_receipt_directory(
+    result: std::io::Result<tempfile::TempDir>,
+) -> Result<tempfile::TempDir, CommandExecutionError> {
+    match result {
+        Ok(directory) => Ok(directory),
+        Err(_) => Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            },
+        )),
+    }
+}
+
+/// Reject execution identity construction when the OS entropy source fails.
+fn require_execution_identity_entropy(
+    entropy_available: bool,
+) -> Result<(), CommandExecutionError> {
+    if entropy_available {
+        Ok(())
+    } else {
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "execution_identity",
+            },
+        ))
+    }
+}
+
+fn epoch_seconds_from_system_time(
+    observed: SystemTime,
+    operation: &'static str,
+) -> Result<u64, CommandExecutionError> {
+    observed
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| {
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation,
+            })
+        })
+}
+
+fn validate_command_chronology(
+    started_at_epoch_seconds: u64,
+    finished_at_epoch_seconds: u64,
+) -> Result<(), CommandExecutionError> {
+    if finished_at_epoch_seconds < started_at_epoch_seconds {
+        return Err(CommandExecutionError::Backend(
+            ApplicationServiceError::BackendInvocationFailed {
+                operation: "command_chronology",
+            },
+        ));
+    }
+    Ok(())
+}
+
 fn command_sandbox_identity(
     request_id: &str,
     image_reference: &str,
@@ -1715,11 +1825,7 @@ fn command_sandbox_identity(
     started_at_epoch_seconds: u64,
 ) -> Result<String, CommandExecutionError> {
     let mut execution_nonce = [0_u8; 16];
-    getrandom::fill(&mut execution_nonce).map_err(|_| {
-        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
-            operation: "execution_identity",
-        })
-    })?;
+    require_execution_identity_entropy(getrandom::fill(&mut execution_nonce).is_ok())?;
 
     let mut hasher = Sha256::new();
     for component in [request_id, image_reference, policy_id] {
@@ -1787,10 +1893,85 @@ fn wait_for_readiness(
 
 #[cfg(test)]
 mod tests {
-    use std::io::ErrorKind;
+    use std::{
+        io::ErrorKind,
+        time::{Duration, UNIX_EPOCH},
+    };
 
-    use super::{BoundedCommandError, classify_spawn_failure, map_bounded_command_error};
-    use crate::{ApplicationServiceError, BackendInvocationFailureKind};
+    use super::{
+        BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
+        map_bounded_command_error, validate_command_chronology,
+    };
+    use crate::{ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError};
+
+    #[test]
+    fn command_create_receipt_directory_failure_is_typed() {
+        let error = super::resolve_command_create_receipt_directory(Err(std::io::Error::other(
+            "deterministic receipt directory failure",
+        )))
+        .expect_err("receipt-directory creation failure must fail closed");
+        assert_eq!(
+            error,
+            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            },)
+        );
+    }
+
+    #[test]
+    fn execution_identity_entropy_failure_is_typed() {
+        assert_eq!(super::require_execution_identity_entropy(true), Ok(()));
+        assert_eq!(
+            super::require_execution_identity_entropy(false),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "execution_identity",
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn command_chronology_accepts_equal_and_ordered_runtime_observations() {
+        assert_eq!(validate_command_chronology(10, 10), Ok(()));
+        assert_eq!(validate_command_chronology(10, 11), Ok(()));
+    }
+
+    #[test]
+    fn command_chronology_rejects_runtime_clock_rollback() {
+        assert_eq!(
+            validate_command_chronology(11, 10),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_chronology",
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn epoch_seconds_fail_closed_before_unix_epoch() {
+        let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
+        assert_eq!(
+            epoch_seconds_from_system_time(before_epoch, "command_start_clock"),
+            Err(CommandExecutionError::Backend(
+                ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_start_clock",
+                },
+            ))
+        );
+        assert_eq!(
+            epoch_seconds_from_system_time(UNIX_EPOCH, "command_start_clock"),
+            Ok(0)
+        );
+        assert_eq!(
+            epoch_seconds_from_system_time(
+                UNIX_EPOCH + Duration::from_secs(2),
+                "command_finish_clock",
+            ),
+            Ok(2)
+        );
+    }
 
     #[test]
     fn bounded_command_errors_keep_public_failure_classes() {

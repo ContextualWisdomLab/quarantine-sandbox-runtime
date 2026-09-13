@@ -1,8 +1,8 @@
 //! Immutable host-side staging for the runtime-owned command hold gate.
 
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -31,6 +31,39 @@ enum ElfDataEncoding {
     LittleEndian,
     /// Most-significant byte first.
     BigEndian,
+}
+
+trait RuntimeGateStagingIo {
+    fn create_directory(&self) -> io::Result<TempDir>;
+    fn open_gate(&self, path: &Path) -> io::Result<File>;
+    fn write_gate(&self, staged: &mut File, bytes: &[u8]) -> io::Result<()>;
+    fn sync_gate(&self, staged: &File) -> io::Result<()>;
+}
+
+struct HostRuntimeGateStagingIo;
+
+impl RuntimeGateStagingIo for HostRuntimeGateStagingIo {
+    fn create_directory(&self) -> io::Result<TempDir> {
+        tempfile::Builder::new()
+            .prefix("qsr-runtime-gate-")
+            .tempdir()
+    }
+
+    fn open_gate(&self, path: &Path) -> io::Result<File> {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o555)
+            .open(path)
+    }
+
+    fn write_gate(&self, staged: &mut File, bytes: &[u8]) -> io::Result<()> {
+        staged.write_all(bytes)
+    }
+
+    fn sync_gate(&self, staged: &File) -> io::Result<()> {
+        staged.sync_all()
+    }
 }
 
 /// A digest-bound, architecture-matched runtime gate staged in a private directory.
@@ -76,6 +109,20 @@ impl RuntimeGateArtifact {
         expected_sha256: &str,
         expected_architecture: &str,
     ) -> Result<Self, RuntimeGateArtifactError> {
+        Self::stage_with_staging_io(
+            source,
+            expected_sha256,
+            expected_architecture,
+            &HostRuntimeGateStagingIo,
+        )
+    }
+
+    fn stage_with_staging_io<S: RuntimeGateStagingIo>(
+        source: &Path,
+        expected_sha256: &str,
+        expected_architecture: &str,
+        staging_io: &S,
+    ) -> Result<Self, RuntimeGateArtifactError> {
         validate_expected_digest(expected_sha256)?;
 
         let host_architecture = std::env::consts::ARCH;
@@ -117,23 +164,13 @@ impl RuntimeGateArtifact {
             });
         }
 
-        let staging_directory = tempfile::Builder::new()
-            .prefix("qsr-runtime-gate-")
-            .tempdir()
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
+        let staging_directory = staging_io.create_directory().map_err(map_staging_failure)?;
         let path = staging_directory.path().join(RUNTIME_GATE_FILE_NAME);
-        let mut staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o555)
-            .open(&path)
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
-        staged
-            .write_all(&bytes)
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
-        staged
-            .sync_all()
-            .map_err(|_| RuntimeGateArtifactError::StagingFailed)?;
+        let mut staged = staging_io.open_gate(&path).map_err(map_staging_failure)?;
+        staging_io
+            .write_gate(&mut staged, &bytes)
+            .map_err(map_staging_failure)?;
+        staging_io.sync_gate(&staged).map_err(map_staging_failure)?;
         drop(staged);
 
         Ok(Self {
@@ -192,6 +229,11 @@ pub enum RuntimeGateArtifactError {
     /// The verified bytes could not be materialized into a private read-only executable staging area.
     #[error("runtime gate private staging failed")]
     StagingFailed,
+}
+
+/// Collapse private staging I/O failures into the stable public staging error.
+fn map_staging_failure(_: io::Error) -> RuntimeGateArtifactError {
+    RuntimeGateArtifactError::StagingFailed
 }
 
 /// Require an exact 64-character lowercase hexadecimal SHA-256 release identity.
@@ -328,25 +370,74 @@ fn read_u64(bytes: &[u8], offset: usize, encoding: ElfDataEncoding) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt};
+    use std::{
+        fs::{self, File},
+        io::{self, Write},
+        os::unix::fs::PermissionsExt,
+    };
 
     use sha2::{Digest, Sha256};
 
     use super::{
-        RuntimeGateArtifact, RuntimeGateArtifactError, executable_architecture,
+        RuntimeGateArtifact, RuntimeGateStagingIo, executable_architecture,
         validate_expected_digest,
     };
 
     const ELF_HEADER_BYTES: usize = 64;
     const PROGRAM_HEADER_BYTES: usize = 56;
     const FILE_BYTES: usize = 512;
+    #[cfg(target_arch = "aarch64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 183;
+    #[cfg(target_arch = "x86_64")]
+    const HOST_TEST_ELF_MACHINE: u16 = 62;
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    compile_error!("runtime-gate test fixture supports only aarch64 and x86_64 hosts");
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum StagingFailurePoint {
+        None,
+        Directory,
+        Open,
+        Write,
+        Sync,
+    }
+
+    struct ScriptedStagingIo {
+        failure: StagingFailurePoint,
+    }
+
+    impl RuntimeGateStagingIo for ScriptedStagingIo {
+        fn create_directory(&self) -> io::Result<tempfile::TempDir> {
+            if self.failure == StagingFailurePoint::Directory {
+                return Err(io::Error::other("scripted staging directory failure"));
+            }
+            tempfile::tempdir()
+        }
+
+        fn open_gate(&self, path: &std::path::Path) -> io::Result<File> {
+            if self.failure == StagingFailurePoint::Open {
+                return Err(io::Error::other("scripted staging open failure"));
+            }
+            File::create(path)
+        }
+
+        fn write_gate(&self, staged: &mut File, bytes: &[u8]) -> io::Result<()> {
+            if self.failure == StagingFailurePoint::Write {
+                return Err(io::Error::other("scripted staging write failure"));
+            }
+            staged.write_all(bytes)
+        }
+
+        fn sync_gate(&self, staged: &File) -> io::Result<()> {
+            if self.failure == StagingFailurePoint::Sync {
+                return Err(io::Error::other("scripted staging sync failure"));
+            }
+            staged.sync_all()
+        }
+    }
 
     fn self_contained_gate_bytes() -> Vec<u8> {
-        let machine = match std::env::consts::ARCH {
-            "x86_64" => 62_u16,
-            "aarch64" => 183_u16,
-            other => panic!("runtime-gate test fixture does not support architecture {other}"),
-        };
+        let machine = HOST_TEST_ELF_MACHINE;
         let mut bytes = vec![0_u8; FILE_BYTES];
         bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
         bytes[16..18].copy_from_slice(&2_u16.to_le_bytes());
@@ -367,12 +458,17 @@ mod tests {
         bytes
     }
 
-    fn stage_fixture() -> (tempfile::TempDir, RuntimeGateArtifact, Vec<u8>) {
+    fn source_fixture() -> (tempfile::TempDir, std::path::PathBuf, Vec<u8>, String) {
         let directory = tempfile::tempdir().expect("runtime-gate fixture directory should exist");
         let source = directory.path().join("self-contained-runtime-gate");
         let bytes = self_contained_gate_bytes();
         fs::write(&source, &bytes).expect("runtime-gate fixture should be writable");
         let expected_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        (directory, source, bytes, expected_sha256)
+    }
+
+    fn stage_fixture() -> (tempfile::TempDir, RuntimeGateArtifact, Vec<u8>) {
+        let (directory, source, bytes, expected_sha256) = source_fixture();
         let artifact =
             RuntimeGateArtifact::stage(&source, &expected_sha256, std::env::consts::ARCH)
                 .expect("matching self-contained runtime gate should stage");
@@ -382,14 +478,49 @@ mod tests {
     #[test]
     fn expected_digest_requires_exact_lowercase_sha256_shape() {
         assert!(validate_expected_digest(&"0".repeat(64)).is_ok());
-        assert!(matches!(
-            validate_expected_digest(&"A".repeat(64)),
-            Err(RuntimeGateArtifactError::InvalidExpectedDigest)
-        ));
-        assert!(matches!(
-            validate_expected_digest(&"0".repeat(63)),
-            Err(RuntimeGateArtifactError::InvalidExpectedDigest)
-        ));
+        let uppercase_error = validate_expected_digest(&"A".repeat(64))
+            .expect_err("uppercase digest must fail closed");
+        assert_eq!(
+            uppercase_error.to_string(),
+            "runtime gate expected digest is not canonical SHA-256"
+        );
+        let short_error =
+            validate_expected_digest(&"0".repeat(63)).expect_err("short digest must fail closed");
+        assert_eq!(
+            short_error.to_string(),
+            "runtime gate expected digest is not canonical SHA-256"
+        );
+    }
+
+    #[test]
+    fn staging_failures_are_deterministic_and_fail_closed() {
+        let (_directory, source, _bytes, expected_sha256) = source_fixture();
+        for failure in [
+            StagingFailurePoint::Directory,
+            StagingFailurePoint::Open,
+            StagingFailurePoint::Write,
+            StagingFailurePoint::Sync,
+        ] {
+            let error = RuntimeGateArtifact::stage_with_staging_io(
+                &source,
+                &expected_sha256,
+                std::env::consts::ARCH,
+                &ScriptedStagingIo { failure },
+            )
+            .expect_err("scripted staging failure must fail closed");
+            assert_eq!(error.to_string(), "runtime gate private staging failed");
+        }
+
+        let artifact = RuntimeGateArtifact::stage_with_staging_io(
+            &source,
+            &expected_sha256,
+            std::env::consts::ARCH,
+            &ScriptedStagingIo {
+                failure: StagingFailurePoint::None,
+            },
+        )
+        .expect("scripted staging success must remain available");
+        assert_eq!(artifact.sha256(), expected_sha256);
     }
 
     #[test]

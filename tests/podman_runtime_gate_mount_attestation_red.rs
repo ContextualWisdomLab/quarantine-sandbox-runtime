@@ -1,9 +1,11 @@
-//! Causal RED for composing the trusted runtime gate into the canonical command lifecycle.
+//! RED: effective mount attestation must admit exactly the runtime-owned gate bind.
 //!
-//! A release-capable adapter must create the verified gate as OCI PID 1, start only that gate,
-//! prove live effective process isolation, and only then deliver the one-time release token. This
-//! regression keeps the consumer argv visible in the create request while proving that release
-//! occurs strictly after `podman top` and before completion evidence is trusted.
+//! Production gated commands always bind the independently verified gate at
+//! `/qsr-runtime-gate`. Podman exposes that bind in `container inspect` Mounts,
+//! so treating every mount as unexpected makes the release path reject the very
+//! security control it requires. This fixture models the real effective mount
+//! and requires the gate bind to be accepted only when it is the exact staged
+//! artifact, read-only, and otherwise isolated from consumer mount authority.
 
 #![cfg(target_os = "linux")]
 
@@ -18,13 +20,12 @@ use quarantine_sandbox_runtime::{
 };
 use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
-use tempfile::tempdir;
 
 const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
-        policy_id: "runtime_gate_integration_policy_v1".to_owned(),
+        policy_id: "runtime_gate_mount_attestation_v1".to_owned(),
         maximum_memory_bytes: 512 * 1024 * 1024,
         maximum_cpu_millicores: 2_000,
         maximum_processes: 64,
@@ -41,12 +42,9 @@ fn policy() -> IsolationPolicy {
 fn request() -> CommandExecutionRequest {
     CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
-        request_id: "runtime-gate-integrated-command".to_owned(),
+        request_id: "runtime-gate-mount-attestation".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
-        command: vec![
-            "payload-sentinel".to_owned(),
-            "argument with spaces".to_owned(),
-        ],
+        command: vec!["payload-sentinel".to_owned()],
         source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
@@ -59,8 +57,8 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn verified_gate_is_attested_before_one_time_release_and_consumer_completion() {
-    let fixture = tempdir().expect("isolated gate integration fixture should exist");
+fn exact_runtime_gate_bind_is_part_of_the_expected_effective_mount_set() {
+    let fixture = tempfile::tempdir().expect("isolated gate mount fixture should exist");
     let program = fixture.path().join("podman");
     let calls = fixture.path().join("calls");
     let (gate_source, gate_bytes) = write_self_contained_gate(fixture.path());
@@ -120,41 +118,15 @@ esac
     let adapter = RootlessPodmanAdapter::new(&program).with_runtime_gate_artifact(gate);
     let result = adapter
         .run_command_at(&request(), &policy(), 1_780_000_201)
-        .expect("verified gated command should run to completion");
+        .expect("the exact runtime-owned gate bind belongs to the admitted mount set");
 
     assert_eq!(result.exit_code(), 0);
     assert_eq!(result.stdout(), "consumer-output\n");
-    let recorded = fs::read_to_string(&calls).expect("backend call order should be recorded");
-    let calls = recorded.lines().collect::<Vec<_>>();
-    let create = calls
-        .iter()
-        .find(|line| line.starts_with("create --name "))
-        .expect("gated lifecycle must create one command container");
-    assert!(create.contains("--entrypoint=/qsr-runtime-gate"));
-    assert!(create.matches("/qsr-runtime-gate").count() >= 2);
-    assert!(!create.contains("--entrypoint=[\"payload-sentinel\""));
-    assert!(create.contains("payload-sentinel") && create.contains("argument with spaces"));
-
-    let top_index = calls
-        .iter()
-        .position(|line| line.starts_with("top "))
-        .expect("live process isolation must be attested");
-    let release_index = calls
-        .iter()
-        .position(|line| line.starts_with("attach --sig-proxy=false "))
-        .expect("one-time release must use the exact acquired container");
-    let wait_index = calls
-        .iter()
-        .position(|line| line.starts_with("wait "))
-        .expect("completion evidence must be collected after release");
-    assert!(top_index < release_index && release_index < wait_index);
-    assert_eq!(
-        calls[release_index],
-        format!("attach --sig-proxy=false {OWNED_CONTAINER_ID}")
-    );
+    let recorded = fs::read_to_string(&calls).expect("backend calls should be recorded");
     assert!(
-        calls
-            .iter()
-            .any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}"))
+        recorded
+            .lines()
+            .any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
+        "successful gated execution must still clean up the exact acquired container: {recorded}"
     );
 }

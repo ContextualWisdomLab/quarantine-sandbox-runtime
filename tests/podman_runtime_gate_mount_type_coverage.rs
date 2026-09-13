@@ -1,9 +1,9 @@
-//! Causal RED for composing the trusted runtime gate into the canonical command lifecycle.
+//! Reject a runtime-gate mount that matches the staged source but is not an effective bind mount.
 //!
-//! A release-capable adapter must create the verified gate as OCI PID 1, start only that gate,
-//! prove live effective process isolation, and only then deliver the one-time release token. This
-//! regression keeps the consumer argv visible in the create request while proving that release
-//! occurs strictly after `podman top` and before completion evidence is trusted.
+//! The gate path is controller-owned. Matching only the reported source path is
+//! insufficient evidence because a different mount type can have different
+//! lifecycle and backing-store semantics. This regression exercises that
+//! fail-closed branch through the public command adapter.
 
 #![cfg(target_os = "linux")]
 
@@ -13,18 +13,17 @@ mod runtime_gate_fixture;
 use std::{fs, os::unix::fs::PermissionsExt};
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    RuntimeGateArtifact,
+    ApplicationServiceError, CommandExecutionError, CommandExecutionRequest, IsolationPolicy,
+    ResourceRequest, RootlessPodmanAdapter, RuntimeGateArtifact,
 };
 use runtime_gate_fixture::write_self_contained_gate;
 use sha2::{Digest, Sha256};
-use tempfile::tempdir;
 
 const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
-        policy_id: "runtime_gate_integration_policy_v1".to_owned(),
+        policy_id: "runtime_gate_mount_type_coverage_v1".to_owned(),
         maximum_memory_bytes: 512 * 1024 * 1024,
         maximum_cpu_millicores: 2_000,
         maximum_processes: 64,
@@ -41,12 +40,9 @@ fn policy() -> IsolationPolicy {
 fn request() -> CommandExecutionRequest {
     CommandExecutionRequest {
         schema_version: "1.0.0".to_owned(),
-        request_id: "runtime-gate-integrated-command".to_owned(),
+        request_id: "runtime-gate-mount-type-coverage".to_owned(),
         image_reference: format!("localhost/cwl/tool@sha256:{}", "a".repeat(64)),
-        command: vec![
-            "payload-sentinel".to_owned(),
-            "argument with spaces".to_owned(),
-        ],
+        command: vec!["payload-sentinel".to_owned()],
         source_artifact: None,
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
@@ -59,8 +55,8 @@ fn request() -> CommandExecutionRequest {
 }
 
 #[test]
-fn verified_gate_is_attested_before_one_time_release_and_consumer_completion() {
-    let fixture = tempdir().expect("isolated gate integration fixture should exist");
+fn non_bind_runtime_gate_mount_fails_closed_before_workload_completion() {
+    let fixture = tempfile::tempdir().expect("isolated gate mount fixture should exist");
     let program = fixture.path().join("podman");
     let calls = fixture.path().join("calls");
     let (gate_source, gate_bytes) = write_self_contained_gate(fixture.path());
@@ -69,7 +65,7 @@ fn verified_gate_is_attested_before_one_time_release_and_consumer_completion() {
         .expect("verified self-contained gate should stage");
     let gate_path = gate.path().display().to_string();
     let inspect = format!(
-        "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[{{\"Source\":\"{gate_path}\",\"Destination\":\"/qsr-runtime-gate\",\"Type\":\"bind\",\"Options\":[\"ro\"],\"RW\":false}}]}}]"
+        "[{{\"Id\":\"{OWNED_CONTAINER_ID}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}}}},\"Mounts\":[{{\"Source\":\"{gate_path}\",\"Destination\":\"/qsr-runtime-gate\",\"Type\":\"volume\",\"Options\":[\"ro\"],\"RW\":false}}]}}]"
     );
     let script = format!(
         r#"#!/bin/sh
@@ -118,43 +114,31 @@ esac
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
 
     let adapter = RootlessPodmanAdapter::new(&program).with_runtime_gate_artifact(gate);
-    let result = adapter
-        .run_command_at(&request(), &policy(), 1_780_000_201)
-        .expect("verified gated command should run to completion");
+    let result = adapter.run_command_at(&request(), &policy(), 1_780_000_202);
 
-    assert_eq!(result.exit_code(), 0);
-    assert_eq!(result.stdout(), "consumer-output\n");
-    let recorded = fs::read_to_string(&calls).expect("backend call order should be recorded");
-    let calls = recorded.lines().collect::<Vec<_>>();
-    let create = calls
-        .iter()
-        .find(|line| line.starts_with("create --name "))
-        .expect("gated lifecycle must create one command container");
-    assert!(create.contains("--entrypoint=/qsr-runtime-gate"));
-    assert!(create.matches("/qsr-runtime-gate").count() >= 2);
-    assert!(!create.contains("--entrypoint=[\"payload-sentinel\""));
-    assert!(create.contains("payload-sentinel") && create.contains("argument with spaces"));
-
-    let top_index = calls
-        .iter()
-        .position(|line| line.starts_with("top "))
-        .expect("live process isolation must be attested");
-    let release_index = calls
-        .iter()
-        .position(|line| line.starts_with("attach --sig-proxy=false "))
-        .expect("one-time release must use the exact acquired container");
-    let wait_index = calls
-        .iter()
-        .position(|line| line.starts_with("wait "))
-        .expect("completion evidence must be collected after release");
-    assert!(top_index < release_index && release_index < wait_index);
     assert_eq!(
-        calls[release_index],
-        format!("attach --sig-proxy=false {OWNED_CONTAINER_ID}")
+        result,
+        Err(CommandExecutionError::Backend(
+            ApplicationServiceError::IsolationVerificationFailed {
+                control_name: "runtime_gate_bind_source",
+            },
+        )),
+        "an exact source path must not compensate for a non-bind effective gate mount"
+    );
+
+    let recorded = fs::read_to_string(&calls).expect("backend calls should be recorded");
+    assert!(
+        recorded
+            .lines()
+            .any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}")),
+        "failed mount attestation must clean up the exact acquired container: {recorded}"
     );
     assert!(
-        calls
-            .iter()
-            .any(|line| *line == format!("rm --force --ignore {OWNED_CONTAINER_ID}"))
+        !recorded.lines().any(|line| line.starts_with("attach ")),
+        "a rejected gate mount must not receive the one-time release token: {recorded}"
+    );
+    assert!(
+        !recorded.lines().any(|line| line.starts_with("wait ")),
+        "a rejected gate mount must not reach workload completion evidence: {recorded}"
     );
 }

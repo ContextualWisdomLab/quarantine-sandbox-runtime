@@ -29,25 +29,33 @@ pub(crate) enum BoundedCommandError {
     Capture,
 }
 
+/// Mutually exclusive terminal state reported by the bounded supervisor.
+///
+/// Encoding timeout and output-budget termination as variants prevents callers
+/// from constructing contradictory combinations such as a missing exit status
+/// without a terminal cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum BoundedCompletion {
+    /// The supervised process exited and reported its own status.
+    Exited(ExitStatus),
+    /// The supervised process exceeded its wall-clock budget.
+    TimedOut,
+    /// The supervised process exceeded its retained-output budget.
+    OutputLimit,
+}
+
 /// Terminal facts for a command run to completion under bounded wall-clock and
 /// output budgets, where exceeding either budget is an expected, reportable
 /// outcome rather than a hard error.
 ///
 /// Contrast with [`BoundedCommandRunner::run`], whose administrative CLI calls
-/// (inspect a JSON payload, create a resource) treat any overflow as an
-/// anomaly: a well-behaved Podman CLI never legitimately produces more than a
-/// few kilobytes of JSON, so overflow there indicates a malfunctioning or
-/// hostile backend. A workload's own stdout/stderr has no such ceiling on
-/// legitimate size, and a workload exceeding its wall-clock lease is routine,
-/// so this variant reports both as facts on a successful outcome instead of
-/// discarding the partial evidence collected before termination.
+/// treat overflow as a hard backend error. A workload's own stdout/stderr has
+/// no such small administrative ceiling, so completion preserves bounded
+/// partial output together with its typed terminal cause.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BoundedRunOutcome {
-    /// The process's own exit status, or `None` when it was killed before
-    /// reporting one (wall-clock timeout or output-budget enforcement).
-    pub(crate) status: Option<ExitStatus>,
-    /// Whether the process was killed for exceeding its wall-clock budget.
-    pub(crate) timed_out: bool,
+    /// Mutually exclusive terminal state reported by the supervisor.
+    pub(crate) completion: BoundedCompletion,
     /// Standard output retained up to the configured per-stream budget.
     pub(crate) stdout: Vec<u8>,
     /// Whether standard output was truncated to the configured budget.
@@ -112,12 +120,14 @@ impl BoundedCommandRunner {
         let status_result = supervise_child(&mut child, deadline, terminate_requested.as_ref());
         let stdout_result = join_stream(stdout_handle);
         let stderr_result = join_stream(stderr_handle);
+        let stdout_overflow = stdout_overflow.load(Ordering::Acquire);
+        let stderr_overflow = stderr_overflow.load(Ordering::Acquire);
         Ok((
             status_result,
             stdout_result,
             stderr_result,
-            stdout_overflow.load(Ordering::Acquire),
-            stderr_overflow.load(Ordering::Acquire),
+            stdout_overflow,
+            stderr_overflow,
         ))
     }
 
@@ -153,19 +163,7 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<BoundedRunOutcome, BoundedCommandError> {
-        let (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow) =
-            self.execute(program, args)?;
-        let stdout = stdout_result?;
-        let stderr = stderr_result?;
-        let (status, timed_out) = classify_completion_status(status_result)?;
-        Ok(BoundedRunOutcome {
-            status,
-            timed_out,
-            stdout,
-            stdout_truncated: stdout_overflow,
-            stderr,
-            stderr_truncated: stderr_overflow,
-        })
+        finalize_completion(self.execute(program, args)?)
     }
 }
 
@@ -212,21 +210,38 @@ fn finalize_output(
     })
 }
 
+/// Convert supervisor and pipe results into workload completion facts without
+/// reclassifying capture or wait failures as workload outcomes.
+fn finalize_completion(
+    (status_result, stdout_result, stderr_result, stdout_overflow, stderr_overflow): ExecuteOutcome,
+) -> Result<BoundedRunOutcome, BoundedCommandError> {
+    let stdout = stdout_result?;
+    let stderr = stderr_result?;
+    let completion = classify_completion_status(status_result, stdout_overflow || stderr_overflow)?;
+    Ok(BoundedRunOutcome {
+        completion,
+        stdout,
+        stdout_truncated: stdout_overflow,
+        stderr,
+        stderr_truncated: stderr_overflow,
+    })
+}
+
 /// Interpret the supervisor's terminal status for [`BoundedCommandRunner::run_to_completion`].
 ///
-/// A wall-clock timeout or output-budget overflow become terminal facts
-/// (`None` status, `timed_out` set only for the former); any other
-/// supervision failure (an inability to observe or reap the child) remains a
-/// hard error, since that indicates the supervisor itself malfunctioned, not
-/// a fact about the supervised workload.
+/// A wall-clock timeout observed by the supervisor becomes a distinct
+/// [`BoundedCompletion`] variant. Retained-output overflow is classified from
+/// the post-drain overflow flag after the child has been observed or reaped.
+/// An inability to observe or reap the child remains a hard supervisor error.
 fn classify_completion_status(
     status_result: Result<ExitStatus, BoundedCommandError>,
-) -> Result<(Option<ExitStatus>, bool), BoundedCommandError> {
+    overflowed: bool,
+) -> Result<BoundedCompletion, BoundedCommandError> {
     match status_result {
-        Ok(status) => Ok((Some(status), false)),
-        Err(BoundedCommandError::Timeout) => Ok((None, true)),
-        Err(BoundedCommandError::OutputLimit) => Ok((None, false)),
+        Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
         Err(other) => Err(other),
+        Ok(_) if overflowed => Ok(BoundedCompletion::OutputLimit),
+        Ok(status) => Ok(BoundedCompletion::Exited(status)),
     }
 }
 
@@ -257,8 +272,7 @@ fn supervise_child<P: ChildProcess>(
 ) -> Result<ExitStatus, BoundedCommandError> {
     loop {
         if overflow.load(Ordering::Acquire) {
-            kill_and_reap(child)?;
-            return Err(BoundedCommandError::OutputLimit);
+            return kill_and_reap(child);
         }
         match child.poll() {
             Ok(Some(status)) => return Ok(status),
@@ -337,7 +351,8 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipes, drain_stream, finalize_output,
+        BoundedCommandError, BoundedCompletion, ChildProcess, captured_pipes,
+        classify_completion_status, drain_stream, finalize_completion, finalize_output,
         join_stream, kill_and_reap, supervise_child,
     };
 
@@ -428,6 +443,46 @@ mod tests {
     }
 
     #[test]
+    fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {
+        assert_eq!(
+            classify_completion_status(Ok(success_status()), false),
+            Ok(BoundedCompletion::Exited(success_status()))
+        );
+        assert_eq!(
+            classify_completion_status(Ok(success_status()), true),
+            Ok(BoundedCompletion::OutputLimit)
+        );
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::Timeout), true),
+            Ok(BoundedCompletion::TimedOut)
+        );
+        assert_eq!(
+            classify_completion_status(Err(BoundedCommandError::Wait), true),
+            Err(BoundedCommandError::Wait)
+        );
+    }
+
+    #[test]
+    fn finalized_completion_preserves_pipe_and_supervisor_failure_precedence() {
+        let wait = Err(BoundedCommandError::Wait);
+        let capture = Err(BoundedCommandError::Capture);
+        let empty = Ok(Vec::new());
+
+        assert_eq!(
+            finalize_completion((wait, capture.clone(), empty.clone(), false, false)),
+            Err(BoundedCommandError::Capture)
+        );
+        assert_eq!(
+            finalize_completion((wait, empty.clone(), capture, false, false)),
+            Err(BoundedCommandError::Capture)
+        );
+        assert_eq!(
+            finalize_completion((wait, empty.clone(), empty, false, false)),
+            Err(BoundedCommandError::Wait)
+        );
+    }
+
+    #[test]
     fn supervision_preserves_exit_timeout_overflow_and_poll_failures() {
         let overflow = AtomicBool::new(false);
         let mut exited = FakeChild::new([PollOutcome::Exited]);
@@ -451,10 +506,7 @@ mod tests {
 
         let overflow = AtomicBool::new(true);
         let mut noisy = FakeChild::new([]);
-        assert_eq!(
-            supervise_child(&mut noisy, Instant::now(), &overflow),
-            Err(BoundedCommandError::OutputLimit)
-        );
+        assert!(supervise_child(&mut noisy, Instant::now(), &overflow).is_ok());
 
         let overflow = AtomicBool::new(false);
         let mut failed = FakeChild::new([PollOutcome::Failed]);
@@ -491,6 +543,22 @@ mod tests {
     }
 
     #[test]
+    fn late_overflow_does_not_mask_capture_failure() {
+        let overflow = AtomicBool::new(true);
+        let mut noisy = FakeChild::new([]);
+        let status_result = supervise_child(&mut noisy, Instant::now(), &overflow);
+        assert_eq!(
+            finalize_output(
+                status_result,
+                Err(BoundedCommandError::Capture),
+                Ok(Vec::new()),
+                true,
+            ),
+            Err(BoundedCommandError::Capture)
+        );
+    }
+
+    #[test]
     fn finalized_output_preserves_late_overflow_and_capture_error_precedence() {
         assert_eq!(
             finalize_output(
@@ -502,7 +570,6 @@ mod tests {
             .map(|output| (output.stdout, output.stderr)),
             Ok((b"stdout".to_vec(), b"stderr".to_vec()))
         );
-
         assert_eq!(
             finalize_output(Ok(success_status()), Ok(Vec::new()), Ok(Vec::new()), true,),
             Err(BoundedCommandError::OutputLimit)
@@ -512,7 +579,7 @@ mod tests {
                 Err(BoundedCommandError::Wait),
                 Ok(Vec::new()),
                 Ok(Vec::new()),
-                false,
+                true,
             ),
             Err(BoundedCommandError::Wait)
         );
@@ -521,7 +588,7 @@ mod tests {
                 Ok(success_status()),
                 Err(BoundedCommandError::Capture),
                 Ok(Vec::new()),
-                false,
+                true,
             ),
             Err(BoundedCommandError::Capture)
         );
@@ -530,7 +597,7 @@ mod tests {
                 Ok(success_status()),
                 Ok(Vec::new()),
                 Err(BoundedCommandError::Capture),
-                false,
+                true,
             ),
             Err(BoundedCommandError::Capture)
         );

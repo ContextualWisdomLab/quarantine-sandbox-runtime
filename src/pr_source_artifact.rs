@@ -157,29 +157,54 @@ fn valid_lower_hex(value: &str, lengths: &[usize]) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn validate_canonical_root_identity(
+    canonical_is_directory: bool,
+    source_device: u64,
+    source_inode: u64,
+    canonical_device: u64,
+    canonical_inode: u64,
+) -> Result<(), PrSourceArtifactError> {
+    if !canonical_is_directory
+        || source_device != canonical_device
+        || source_inode != canonical_inode
+    {
+        return Err(PrSourceArtifactError::InvalidInput {
+            field_name: "host_path",
+        });
+    }
+    Ok(())
+}
+
+type CanonicalRootIdentityValidator =
+    fn(bool, u64, u64, u64, u64) -> Result<(), PrSourceArtifactError>;
+
+fn validate_declared_file_length(
+    observed_bytes: usize,
+    declared_bytes: u64,
+) -> Result<(), PrSourceArtifactError> {
+    if observed_bytes as u64 != declared_bytes {
+        return Err(PrSourceArtifactError::DigestMismatch);
+    }
+    Ok(())
+}
+
 fn collect_regular_files(
-    root: &Path,
     directory: &Path,
+    relative_directory: &Path,
     files: &mut Vec<(PathBuf, PathBuf, bool, u64)>,
 ) -> Result<(), PrSourceArtifactError> {
     let entries = fs::read_dir(directory).map_err(PrSourceArtifactError::Io)?;
     for entry in entries {
         let entry = entry.map_err(PrSourceArtifactError::Io)?;
         let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| PrSourceArtifactError::InvalidInput {
-                field_name: "host_path",
-            })?
-            .to_path_buf();
-        if relative.as_os_str().as_bytes().is_empty() {
-            return Err(PrSourceArtifactError::InvalidInput {
-                field_name: "host_path",
-            });
-        }
+        // `read_dir` yields a child name without leading path components. Carry
+        // the already-proven relative traversal state forward instead of
+        // re-deriving it with `strip_prefix` and manufacturing an impossible
+        // error branch after successful rooted traversal.
+        let relative = relative_directory.join(entry.file_name());
         let metadata = fs::symlink_metadata(&path).map_err(PrSourceArtifactError::Io)?;
         if metadata.is_dir() {
-            collect_regular_files(root, &path, files)?;
+            collect_regular_files(&path, &relative, files)?;
         } else if metadata.is_file() {
             files.push((relative, path, metadata.mode() & 0o111 != 0, metadata.len()));
         } else {
@@ -204,6 +229,17 @@ fn collect_regular_files(
 pub fn stage_pr_source_artifact(
     input: &PrSourceArtifactInput,
 ) -> Result<StagedPrSourceArtifact, PrSourceArtifactError> {
+    stage_pr_source_artifact_with_root_identity_validator(input, validate_canonical_root_identity)
+}
+
+/// Stage one source tree while preserving a deterministic root-identity decision boundary.
+///
+/// The function-pointer seam lets tests prove propagation of a root replacement
+/// contradiction without mutating the process namespace or racing the host filesystem.
+fn stage_pr_source_artifact_with_root_identity_validator(
+    input: &PrSourceArtifactInput,
+    root_identity_validator: CanonicalRootIdentityValidator,
+) -> Result<StagedPrSourceArtifact, PrSourceArtifactError> {
     input.validate_contract()?;
     // `canonicalize` follows a final symlink, so establish the caller-supplied
     // root object's no-follow type and Unix identity before resolving its path.
@@ -215,16 +251,15 @@ pub fn stage_pr_source_artifact(
     }
     let source = fs::canonicalize(&input.host_path).map_err(PrSourceArtifactError::Io)?;
     let canonical_root = fs::metadata(&source).map_err(PrSourceArtifactError::Io)?;
-    if !canonical_root.is_dir()
-        || source_root.dev() != canonical_root.dev()
-        || source_root.ino() != canonical_root.ino()
-    {
-        return Err(PrSourceArtifactError::InvalidInput {
-            field_name: "host_path",
-        });
-    }
+    root_identity_validator(
+        canonical_root.is_dir(),
+        source_root.dev(),
+        source_root.ino(),
+        canonical_root.dev(),
+        canonical_root.ino(),
+    )?;
     let mut files = Vec::new();
-    collect_regular_files(&source, &source, &mut files)?;
+    collect_regular_files(&source, Path::new(""), &mut files)?;
     files.sort_by(|left, right| {
         left.0
             .as_os_str()
@@ -236,12 +271,12 @@ pub fn stage_pr_source_artifact(
             limit_name: "regular_file_count",
         });
     }
+    // Exact totals above the admission bound are never published. Saturation
+    // preserves the only fact needed here and folds integer overflow into the
+    // same fail-closed oversized-tree decision instead of a duplicate outcome.
     let total_bytes = files
         .iter()
-        .try_fold(0_u64, |total, entry| total.checked_add(entry.3))
-        .ok_or(PrSourceArtifactError::LimitExceeded {
-            limit_name: "total_bytes",
-        })?;
+        .fold(0_u64, |total, entry| total.saturating_add(entry.3));
     if total_bytes > MAX_SOURCE_BYTES {
         return Err(PrSourceArtifactError::LimitExceeded {
             limit_name: "total_bytes",
@@ -256,18 +291,19 @@ pub fn stage_pr_source_artifact(
     let mut stripped = 0_u64;
     for (relative, source_path, was_executable, declared_len) in &files {
         let destination = directory.path().join(relative);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(PrSourceArtifactError::Io)?;
-        }
+        // `destination` is the staging root joined with one non-empty relative
+        // file path gathered above. Popping the file name therefore always
+        // leaves its staging parent, including the root for a top-level file.
+        let mut destination_parent = destination.clone();
+        let _ = destination_parent.pop();
+        fs::create_dir_all(&destination_parent).map_err(PrSourceArtifactError::Io)?;
         let source_file = File::open(source_path).map_err(PrSourceArtifactError::Io)?;
         let mut bytes = Vec::new();
         source_file
             .take(MAX_SOURCE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(PrSourceArtifactError::Io)?;
-        if bytes.len() as u64 != *declared_len {
-            return Err(PrSourceArtifactError::DigestMismatch);
-        }
+        validate_declared_file_length(bytes.len(), *declared_len)?;
         let relative_bytes = relative.as_os_str().as_bytes();
         hasher.update((relative_bytes.len() as u64).to_be_bytes());
         hasher.update(relative_bytes);
@@ -282,18 +318,15 @@ pub fn stage_pr_source_artifact(
         stripped += u64::from(*was_executable);
     }
     for entry in files.iter().rev() {
-        let mut parent = directory
-            .path()
-            .join(&entry.0)
-            .parent()
-            .map(Path::to_path_buf);
-        while let Some(path) = parent {
-            if path == directory.path() {
-                break;
-            }
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        // The staged file path is guaranteed to be beneath `directory`; walk
+        // upward by mutation and stop at that known root instead of carrying an
+        // unreachable `Option::None` branch before the root can be reached.
+        let mut parent = directory.path().join(&entry.0);
+        let _ = parent.pop();
+        while parent != directory.path() {
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o755))
                 .map_err(PrSourceArtifactError::Io)?;
-            parent = path.parent().map(Path::to_path_buf);
+            let _ = parent.pop();
         }
     }
     // The staging root is host-side security state. Nested directories remain
@@ -317,4 +350,70 @@ pub fn stage_pr_source_artifact(
             mounted_noexec: true,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reject_root_identity(
+        _: bool,
+        _: u64,
+        _: u64,
+        _: u64,
+        _: u64,
+    ) -> Result<(), PrSourceArtifactError> {
+        Err(PrSourceArtifactError::InvalidInput {
+            field_name: "host_path",
+        })
+    }
+
+    #[test]
+    fn canonical_root_identity_guard_rejects_each_observed_contradiction() {
+        assert!(validate_canonical_root_identity(true, 7, 11, 7, 11).is_ok());
+        assert!(matches!(
+            validate_canonical_root_identity(false, 7, 11, 7, 11),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+        assert!(matches!(
+            validate_canonical_root_identity(true, 7, 11, 8, 11),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+        assert!(matches!(
+            validate_canonical_root_identity(true, 7, 11, 7, 12),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+    }
+
+    #[test]
+    fn declared_file_length_guard_rejects_observed_mutation() {
+        assert!(validate_declared_file_length(17, 17).is_ok());
+        assert!(matches!(
+            validate_declared_file_length(16, 17),
+            Err(PrSourceArtifactError::DigestMismatch)
+        ));
+    }
+
+    #[test]
+    fn staging_propagates_root_identity_rejection() {
+        let host = tempfile::tempdir().unwrap();
+        let input = PrSourceArtifactInput {
+            host_path: host.path().to_path_buf(),
+            revision_sha: "a".repeat(40),
+            expected_tree_sha256: "0".repeat(64),
+        };
+
+        assert!(matches!(
+            stage_pr_source_artifact_with_root_identity_validator(&input, reject_root_identity),
+            Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path"
+            })
+        ));
+    }
 }

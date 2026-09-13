@@ -1,0 +1,98 @@
+name: Runtime gate staging seam repair
+
+on:
+  push:
+    branches:
+      - automation/command-chronology-owner-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: automation/command-chronology-owner-repair
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt, llvm-tools-preview
+      - name: Install pinned coverage tool
+        run: cargo +1.97.1 install cargo-llvm-cov --locked --version 0.8.6
+      - name: Prove current production region RED
+        run: |
+          cargo llvm-cov --workspace --lib --tests --json --output-path before.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('before.json').read_text())['data'][0]['files']
+          target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
+          regions = target['summary']['regions']
+          print('before runtime_gate_artifact summary:', json.dumps(target['summary'], sort_keys=True))
+          assert regions['covered'] == 514 and regions['count'] == 518, regions
+          source = Path('src/infrastructure/runtime_gate_artifact.rs').read_text()
+          assert 'fn stage_with_staging_io<S: RuntimeGateStagingIo>(' in source
+          PY
+      - name: Unify production and deterministic staging seam
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source_path = Path('src/infrastructure/runtime_gate_artifact.rs')
+          source = source_path.read_text()
+          source, signature_count = source.replace(
+              'fn stage_with_staging_io<S: RuntimeGateStagingIo>(',
+              'fn stage_with_staging_io(',
+          ), source.count('fn stage_with_staging_io<S: RuntimeGateStagingIo>(')
+          assert signature_count == 1, signature_count
+          source, parameter_count = source.replace(
+              'staging_io: &S,',
+              'staging_io: &dyn RuntimeGateStagingIo,',
+          ), source.count('staging_io: &S,')
+          assert parameter_count == 1, parameter_count
+          source_path.write_text(source)
+          Path('.github/workflows/runtime-gate-staging-seam-repair.yml').unlink()
+          PY
+      - name: Verify formatting
+        run: cargo fmt --check
+      - name: Verify tests
+        run: cargo test --locked --workspace --all-targets --no-fail-fast
+      - name: Verify clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Verify rustdoc
+        run: RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
+      - name: Verify repository policy
+        run: python3 scripts/validate_repository.py
+      - name: Generate post-fix production coverage
+        run: cargo llvm-cov --workspace --lib --tests --json --output-path after.json
+      - name: Inspect post-fix staging coverage
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('after.json').read_text())['data'][0]['files']
+          target = next(item for item in report if item['filename'].endswith('/src/infrastructure/runtime_gate_artifact.rs'))
+          summary = target['summary']
+          print('after runtime_gate_artifact summary:', json.dumps(summary, sort_keys=True))
+          regions = summary['regions']
+          assert regions['covered'] == regions['count'], regions
+          PY
+      - name: Upload post-fix coverage diagnostic
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-gate-staging-seam-${{ github.sha }}
+          path: after.json
+          if-no-files-found: ignore
+      - name: Verify diff hygiene
+        run: git diff --check
+      - name: Publish ordinary descendant
+        run: |
+          rm -f before.json after.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(runtime): unify deterministic staging coverage seam'
+          git push origin HEAD:automation/command-chronology-owner-repair

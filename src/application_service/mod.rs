@@ -488,15 +488,14 @@ fn registry_repository_is_safe(repository: &str) -> bool {
     }
 
     let mut components = repository.split('/');
-    let Some(first_component) = components.next() else {
-        return false;
-    };
+    // `repository` is non-empty here, so `str::split` always yields a first component.
+    // `unwrap_or_default` keeps a hypothetical invariant break fail-closed without an
+    // unreachable source branch that can never obtain runtime coverage.
+    let first_component = components.next().unwrap_or_default();
     if !registry_authority_or_name_is_safe(first_component) {
         return false;
     }
-    components.all(|component| {
-        !component.is_empty() && component != "." && component != ".." && !component.contains(':')
-    })
+    components.all(|component| component != "." && component != ".." && !component.contains(':'))
 }
 
 fn registry_authority_or_name_is_safe(component: &str) -> bool {

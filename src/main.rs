@@ -183,6 +183,24 @@ fn default_request_id() -> String {
     format!("cli-{}-{}", epoch_seconds(), std::process::id())
 }
 
+/// Render one command result as JSON and report serialization failure visibly.
+///
+/// The CLI preserves the sandboxed command's exit code when presentation fails,
+/// matching the existing transport contract, but the serialization boundary remains
+/// explicit and independently testable instead of hiding an unexercised inline arm.
+fn report_result_json<T: serde::Serialize>(value: &T) -> bool {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            true
+        }
+        Err(error) => {
+            eprintln!("warning: failed to render result as JSON: {error}");
+            false
+        }
+    }
+}
+
 /// Parse, validate, execute, and report one CLI invocation.
 ///
 /// Returns a plain process exit code rather than [`ExitCode`] (which has no
@@ -247,10 +265,7 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
         RootlessPodmanAdapter::new(parsed.podman_program).with_runtime_gate_artifact(runtime_gate);
     match execute_command(&adapter, &request, &policy, epoch_seconds()) {
         Ok(result) => {
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => println!("{json}"),
-                Err(error) => eprintln!("warning: failed to render result as JSON: {error}"),
-            }
+            report_result_json(&result);
             u8::try_from(result.exit_code().clamp(0, 255)).unwrap_or(255)
         }
         Err(error) => {
@@ -268,7 +283,7 @@ fn main() -> ExitCode {
 mod tests {
     use super::{
         default_policy, default_request_id, epoch_seconds, parse_args, parse_number, print_usage,
-        run,
+        report_result_json, run,
     };
 
     fn args(values: &[&str]) -> impl Iterator<Item = String> {
@@ -277,6 +292,25 @@ mod tests {
             .map(|value| (*value).to_owned())
             .collect::<Vec<_>>()
             .into_iter()
+    }
+
+    struct AlwaysFailsSerialization;
+
+    impl serde::Serialize for AlwaysFailsSerialization {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(<S::Error as serde::ser::Error>::custom(
+                "forced serialization failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn result_json_reporting_exercises_success_and_serialization_failure() {
+        assert!(report_result_json(&serde_json::json!({"status": "ok"})));
+        assert!(!report_result_json(&AlwaysFailsSerialization));
     }
 
     #[test]
@@ -571,18 +605,46 @@ mod tests {
             program
         }
 
-        const SUCCESS_SCRIPT: &str = "#!/bin/sh\nset -eu\ncase \"${1:-}:${2:-}\" in\n  \
-             info:--format) printf '%s\\n' '{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/x\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}' ;;\n  \
-             create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  \
-             init:*) : ;;\n  \
-             start:*) : ;;\n  \
-             container:inspect) printf '%s\\n' '[{\"Id\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\",\"Timeout\":900},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":1073741824,\"NanoCpus\":4000000000,\"PidsLimit\":256,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=268435456\"}}}]' ;;\n  \
-             top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  \
-             attach:--sig-proxy=false) IFS= read -r token; [ -n \"$token\" ]; printf 'QSR_GATE_RELEASED\\n'; while :; do :; done ;;\n  \
-             wait:*) printf '9\\n' ;;\n  \
-             logs:*) printf 'cli stdout\\n' ;;\n  \
-             rm:--force) : ;;\n  \
-             *) exit 91 ;;\nesac\n";
+        const SUCCESS_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+state="${0}.runtime-gate-source"
+case "${1:-}:${2:-}" in
+  info:--format)
+    printf '%s\n' '{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/x","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}'
+    ;;
+  create:--name)
+    gate_source=''
+    expect_volume_value=0
+    for argument in "$@"; do
+      if [ "$expect_volume_value" -eq 1 ]; then
+        case "$argument" in
+          *:/qsr-runtime-gate:ro)
+            gate_source="${argument%:/qsr-runtime-gate:ro}"
+            ;;
+        esac
+        expect_volume_value=0
+      elif [ "$argument" = "--volume" ]; then
+        expect_volume_value=1
+      fi
+    done
+    [ -n "$gate_source" ] || exit 92
+    printf '%s' "$gate_source" > "$state"
+    printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n'
+    ;;
+  init:*) : ;;
+  start:*) : ;;
+  container:inspect)
+    gate_source="$(cat "$state")"
+    printf '%s\n' '[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532","Timeout":900},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":1073741824,"NanoCpus":4000000000,"PidsLimit":256,"Tmpfs":{"/tmp":"rw,noexec,nosuid,nodev,size=268435456"}},"Mounts":[{"Source":"'"$gate_source"'","Destination":"/qsr-runtime-gate","Type":"bind","Options":["ro"],"RW":false}]}]'
+    ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n' ;;
+  attach:--sig-proxy=false) IFS= read -r token; [ -n "$token" ]; printf 'QSR_GATE_RELEASED\n'; while :; do :; done ;;
+  wait:*) printf '9\n' ;;
+  logs:*) printf 'cli stdout\n' ;;
+  rm:--force) rm -f "$state" ;;
+  *) exit 91 ;;
+esac
+"#;
 
         fn write_self_contained_gate(name: &str) -> (PathBuf, String) {
             const ELF_HEADER_BYTES: usize = 64;
