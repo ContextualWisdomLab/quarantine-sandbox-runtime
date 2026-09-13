@@ -229,17 +229,16 @@ fn finalize_completion(
 
 /// Interpret the supervisor's terminal status for [`BoundedCommandRunner::run_to_completion`].
 ///
-/// A wall-clock timeout or output-budget overflow becomes a distinct
-/// [`BoundedCompletion`] variant; an inability to observe or reap the child
-/// remains a hard error because it indicates supervisor failure rather than a
-/// terminal fact about the supervised workload.
+/// A wall-clock timeout observed by the supervisor becomes a distinct
+/// [`BoundedCompletion`] variant. Retained-output overflow is classified from
+/// the post-drain overflow flag after the child has been observed or reaped.
+/// An inability to observe or reap the child remains a hard supervisor error.
 fn classify_completion_status(
     status_result: Result<ExitStatus, BoundedCommandError>,
     overflowed: bool,
 ) -> Result<BoundedCompletion, BoundedCommandError> {
     match status_result {
         Err(BoundedCommandError::Timeout) => Ok(BoundedCompletion::TimedOut),
-        Err(BoundedCommandError::OutputLimit) => Ok(BoundedCompletion::OutputLimit),
         Err(other) => Err(other),
         Ok(_) if overflowed => Ok(BoundedCompletion::OutputLimit),
         Ok(status) => Ok(BoundedCompletion::Exited(status)),
@@ -445,10 +444,10 @@ mod tests {
 
     #[test]
     fn completion_status_types_every_terminal_state_and_preserves_wait_failure() {
-        assert!(matches!(
+        assert_eq!(
             classify_completion_status(Ok(success_status()), false),
-            Ok(BoundedCompletion::Exited(status)) if status.success()
-        ));
+            Ok(BoundedCompletion::Exited(success_status()))
+        );
         assert_eq!(
             classify_completion_status(Ok(success_status()), true),
             Ok(BoundedCompletion::OutputLimit)
@@ -456,10 +455,6 @@ mod tests {
         assert_eq!(
             classify_completion_status(Err(BoundedCommandError::Timeout), true),
             Ok(BoundedCompletion::TimedOut)
-        );
-        assert_eq!(
-            classify_completion_status(Err(BoundedCommandError::OutputLimit), false),
-            Ok(BoundedCompletion::OutputLimit)
         );
         assert_eq!(
             classify_completion_status(Err(BoundedCommandError::Wait), true),
