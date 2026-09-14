@@ -4,6 +4,8 @@
 //! container ID, later start/inspect/top/port/stop/remove operations and the cleanup receipt must
 //! not re-resolve or misreport that mutable name. Network acquired-ID ownership is intentionally
 //! separate #48 authority; this test preserves the current versioned lease network correlation ID.
+//! The coordinator leg also round-trips the public lease through JSON so transport-visible receipt
+//! equality cannot accidentally depend on runtime-private cleanup authority.
 
 #![cfg(target_os = "linux")]
 
@@ -17,8 +19,8 @@ use std::{
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceRequest, IsolationPolicy, ResourceRequest, RootlessPodmanAdapter,
-    ServiceProtocol,
+    ApplicationServiceCoordinator, ApplicationServiceLease, ApplicationServiceRequest,
+    IsolationPolicy, LeaseOwnerId, ResourceRequest, RootlessPodmanAdapter, ServiceProtocol,
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -140,9 +142,17 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
     let (program, log) = write_fake_podman(ready_port, &foreign_marker);
 
     let adapter = RootlessPodmanAdapter::new(program.clone());
+    let coordinator = ApplicationServiceCoordinator::new(adapter);
+    let lease_owner = LeaseOwnerId::new("urn:cwl:test:post-create-owner")
+        .expect("test owner identity must satisfy the bounded coordinator contract");
     let started_at_epoch_seconds = 1_780_000_100;
-    let lease = adapter
-        .launch_at(&request(), &policy(), started_at_epoch_seconds)
+    let lease = coordinator
+        .launch_at(
+            &lease_owner,
+            &request(),
+            &policy(),
+            started_at_epoch_seconds,
+        )
         .expect("launch must stay on the invocation-owned container ID");
 
     assert!(
@@ -159,9 +169,17 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
         "the current lease network identity remains a generated correlation reference until #48 acquires the Podman network ID"
     );
 
-    let cleanup_receipt = adapter
-        .terminate_at(&lease, started_at_epoch_seconds + 1)
-        .expect("termination must keep using the invocation-owned container ID");
+    let serialized_lease = serde_json::to_vec(&lease)
+        .expect("public application-service lease evidence must serialize for transport");
+    let public_lease: ApplicationServiceLease = serde_json::from_slice(&serialized_lease)
+        .expect("public application-service lease evidence must survive transport round trip");
+    let cleanup_receipt = coordinator
+        .terminate_at(
+            &lease_owner,
+            &public_lease,
+            started_at_epoch_seconds + 1,
+        )
+        .expect("caller-owned public lease receipt must select the registered in-process lease for termination");
     assert_eq!(
         cleanup_receipt.sandbox_id(),
         OWNED_CONTAINER_ID,
