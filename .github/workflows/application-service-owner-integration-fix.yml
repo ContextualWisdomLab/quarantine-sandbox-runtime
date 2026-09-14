@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: application-service-owner-integration-fix-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   repair:
     runs-on: ubuntu-24.04
@@ -50,6 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/application_service_owner_integration_fix.py
+          python3 -c 'from pathlib import Path; p=Path("src/application_service/mod.rs"); t=p.read_text(); old="    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {\n        self.shutdown_grace_seconds\n    }\n\n"; assert t.count(old) == 1; p.write_text(t.replace(old, "", 1))'
           cargo fmt --all
       - name: Prove focused GREEN
         run: |
