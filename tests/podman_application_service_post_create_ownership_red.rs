@@ -10,7 +10,7 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::symlink,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -34,6 +34,14 @@ fn temporary_path(name: &str) -> PathBuf {
         "qsr-application-service-post-create-integration-{name}-{}-{nanos}-{unique_id}",
         std::process::id()
     ))
+}
+
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
 }
 
 fn policy() -> IsolationPolicy {
@@ -79,20 +87,26 @@ fn write_fake_podman(ready_port: u16, foreign_marker: &Path) -> (PathBuf, PathBu
     );
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign='{}'\nowned='{}'\ntouch_foreign() {{ printf 'touched\\n' > \"$foreign\"; }}\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned\" > \"$cidfile\"; fi\n    printf '%s\\n' \"$owned\"\n    ;;\n  start:*) if [ \"${{2:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 93; fi ;;\n  container:inspect) if [ \"${{5:-}}\" = \"$owned\" ]; then printf '%s\\n' '{}'; else touch_foreign; exit 94; fi ;;\n  top:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n'; else touch_foreign; exit 95; fi ;;\n  port:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf '127.0.0.1:{ready_port}\\n'; else touch_foreign; exit 96; fi ;;\n  stop:*) if [ \"${{4:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 97; fi ;;\n  rm:*) if [ \"${{3:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 98; fi ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
+        "foreign='{}'\nowned='{}'\ntouch_foreign() {{ printf 'touched\\n' > \"$foreign\"; }}\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned\" > \"$cidfile\"; fi\n    printf '%s\\n' \"$owned\"\n    ;;\n  start:*) if [ \"${{2:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 93; fi ;;\n  container:inspect) if [ \"${{5:-}}\" = \"$owned\" ]; then printf '%s\\n' '{}'; else touch_foreign; exit 94; fi ;;\n  top:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n'; else touch_foreign; exit 95; fi ;;\n  port:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf '127.0.0.1:{ready_port}\\n'; else touch_foreign; exit 96; fi ;;\n  stop:*) if [ \"${{4:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 97; fi ;;\n  rm:*) if [ \"${{3:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 98; fi ;;\n  *) exit 91 ;;\nesac\n",
         foreign_marker.display(),
         OWNED_CONTAINER_ID,
         info,
         network,
         container,
     );
-    fs::write(&program, script).expect("fake Podman must be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata must exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman must be executable");
+    symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink must be creatable");
+    let script_path = fixture_sidecar(&program, "script");
+    fs::write(&script_path, script).expect("fake Podman scenario data must be writable");
+    fs::write(
+        fixture_sidecar(&program, "config"),
+        format!(
+            "MODE='source_script'\nLOG='{}'\nSCRIPT='{}'\n",
+            log.display(),
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config must be writable");
     (program, log)
 }
 
@@ -194,6 +208,8 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
         "the current cleanup path must target the lease network correlation reference; this is not acquired-ID proof for #48; calls were:\n{calls}"
     );
 
+    let _ = fs::remove_file(fixture_sidecar(&program, "config"));
+    let _ = fs::remove_file(fixture_sidecar(&program, "script"));
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     let _ = fs::remove_file(foreign_marker);
