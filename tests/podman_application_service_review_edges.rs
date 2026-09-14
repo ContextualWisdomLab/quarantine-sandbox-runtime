@@ -86,7 +86,14 @@ if [ "${{1:-}}" = info ]; then
 fi
 case "${{1:-}}:${{2:-}}" in
   network:create) : ;;
-  create:--name) printf '%s\n' '{CONTAINER_ID}' ;;
+  create:--name)
+    cidfile=''
+    for argument in "$@"; do
+      case "$argument" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac
+    done
+    if [ -n "$cidfile" ]; then printf '%s\n' '{CONTAINER_ID}' > "$cidfile"; fi
+    printf '%s\n' '{CONTAINER_ID}'
+    ;;
   start:*) : ;;
   container:inspect) printf '%s\n' '{CONTAINER_INSPECTION}' ;;
   top:*) printf '%b\n' '{process_top}' ;;
@@ -159,6 +166,12 @@ fn each_live_capability_column_fails_closed_independently() {
             "a non-empty {name} column must fail closed"
         );
         assert!(calls.contains(&format!("rm --force {CONTAINER_ID}")));
+        assert!(
+            !calls
+                .lines()
+                .any(|line| line.starts_with("rm --force qsr-app-")),
+            "capability contradiction must never authorize generated-name cleanup: {calls}"
+        );
         assert!(
             !calls.lines().any(|line| line.starts_with("port ")),
             "capability contradiction must fail before port/readiness evidence: {calls}"
