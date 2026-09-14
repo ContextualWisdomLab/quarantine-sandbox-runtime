@@ -96,7 +96,7 @@ fn deserialized_lease_cannot_select_destructive_backend_resources() {
         .expect_err("caller-deserialized evidence must lack runtime cleanup authority");
     assert_eq!(
         error.to_string(),
-        "sandbox cleanup authority unavailable",
+        "application service cleanup authority is unavailable",
         "missing runtime cleanup authority must retain its stable fail-closed error"
     );
     assert_eq!(
