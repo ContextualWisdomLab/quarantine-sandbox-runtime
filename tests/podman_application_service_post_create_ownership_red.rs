@@ -1,8 +1,8 @@
-//! Regression: application-service container lifecycle must stay bound to the acquired Podman ID.
+//! Regression: application-service lifecycle and cleanup evidence stay bound to the acquired ID.
 //!
 //! The generated `qsr-app-*` name is correlation metadata. Once `podman create` returns an exact
-//! container ID, later start/inspect/top/port/stop/remove operations must not re-resolve that
-//! mutable name and risk acting on a foreign container.
+//! container ID, later start/inspect/top/port/stop/remove operations and the cleanup receipt must
+//! not re-resolve or misreport that mutable name.
 
 #![cfg(target_os = "linux")]
 
@@ -137,12 +137,22 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
     assert_ne!(
         lease.sandbox_id(),
         OWNED_CONTAINER_ID,
-        "public sandbox name semantics must remain distinct from destructive cleanup authority"
+        "public lease correlation identity must remain distinct from cleanup authority"
     );
 
-    adapter
+    let cleanup_receipt = adapter
         .terminate_at(&lease, started_at_epoch_seconds + 1)
         .expect("termination must keep using the invocation-owned container ID");
+    assert_eq!(
+        cleanup_receipt.sandbox_id(),
+        OWNED_CONTAINER_ID,
+        "cleanup evidence must name the exact container that destructive operations removed"
+    );
+    assert_eq!(
+        cleanup_receipt.network_id(),
+        lease.network_id(),
+        "cleanup evidence must name the runtime-owned network actually removed"
+    );
 
     assert_eq!(
         fs::read_to_string(&foreign_marker).expect("foreign marker must remain readable"),
