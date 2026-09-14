@@ -146,37 +146,53 @@ fn independent_same_request_plans_use_distinct_runtime_owned_resource_identities
     );
 }
 
-#[test]
-fn each_live_capability_column_fails_closed_independently() {
+fn assert_live_capability_column_fails_closed(name: &str, values: &str) {
     let header = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL";
-    for (name, values) in [
-        ("capeff", "0x1 - - - -"),
-        ("capbnd", "- 0x1 - - -"),
-        ("capinh", "- - 0x1 - -"),
-        ("capprm", "- - - 0x1 -"),
-        ("capamb", "- - - - 0x1"),
-    ] {
-        let process_top = format!("{header}\\n1 filter {values} containers-default (enforce)");
-        let (result, calls) = execute_with_evidence(name, &process_top, SECURE_NETWORK_INSPECTION);
-        assert_eq!(
-            result,
-            Err(ApplicationServiceError::IsolationVerificationFailed {
-                control_name: "all_capabilities_dropped",
-            }),
-            "a non-empty {name} column must fail closed"
-        );
-        assert!(calls.contains(&format!("rm --force {CONTAINER_ID}")));
-        assert!(
-            !calls
-                .lines()
-                .any(|line| line.starts_with("rm --force qsr-app-")),
-            "capability contradiction must never authorize generated-name cleanup: {calls}"
-        );
-        assert!(
-            !calls.lines().any(|line| line.starts_with("port ")),
-            "capability contradiction must fail before port/readiness evidence: {calls}"
-        );
-    }
+    let process_top = format!("{header}\\n1 filter {values} containers-default (enforce)");
+    let (result, calls) = execute_with_evidence(name, &process_top, SECURE_NETWORK_INSPECTION);
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::IsolationVerificationFailed {
+            control_name: "all_capabilities_dropped",
+        }),
+        "a non-empty {name} column must fail closed"
+    );
+    assert!(calls.contains(&format!("rm --force {CONTAINER_ID}")));
+    assert!(
+        !calls
+            .lines()
+            .any(|line| line.starts_with("rm --force qsr-app-")),
+        "capability contradiction must never authorize generated-name cleanup: {calls}"
+    );
+    assert!(
+        !calls.lines().any(|line| line.starts_with("port ")),
+        "capability contradiction must fail before port/readiness evidence: {calls}"
+    );
+}
+
+#[test]
+fn non_empty_capeff_fails_closed() {
+    assert_live_capability_column_fails_closed("capeff", "0x1 - - - -");
+}
+
+#[test]
+fn non_empty_capbnd_fails_closed() {
+    assert_live_capability_column_fails_closed("capbnd", "- 0x1 - - -");
+}
+
+#[test]
+fn non_empty_capinh_fails_closed() {
+    assert_live_capability_column_fails_closed("capinh", "- - 0x1 - -");
+}
+
+#[test]
+fn non_empty_capprm_fails_closed() {
+    assert_live_capability_column_fails_closed("capprm", "- - - 0x1 -");
+}
+
+#[test]
+fn non_empty_capamb_fails_closed() {
+    assert_live_capability_column_fails_closed("capamb", "- - - - 0x1");
 }
 
 #[test]
