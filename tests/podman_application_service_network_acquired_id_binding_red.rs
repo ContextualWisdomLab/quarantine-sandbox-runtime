@@ -98,9 +98,11 @@ fn acquired_network_id_preserves_attachment_mismatch_as_the_causal_failure() {
         r#"[{{"Id":"{OWNED_CONTAINER_ID}","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"bridge"}},"NetworkSettings":{{"Networks":{{"podman":{{}}}}}}}}]"#
     );
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) printf '%s\\n' '{}' ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  create:--name)\n    case \" $* \" in\n      *' --network {} '*) printf '%s\\n' '{}' ;;\n      *) exit 92 ;;\n    esac\n    ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm)\n    if [ \"$*\" = \"network rm {}\" ]; then exit 0; fi\n    exit 93\n    ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create)\n    if [ \"$*\" != \"network create --internal --disable-dns {}\" ]; then exit 94; fi\n    printf '%s\\n' '{}'\n    ;;\n  network:inspect)\n    if [ \"$*\" != \"network inspect --format json {}\" ]; then exit 95; fi\n    printf '%s\\n' '{}'\n    ;;\n  create:--name)\n    case \" $* \" in\n      *' --network {} '*) printf '%s\\n' '{}' ;;\n      *) exit 92 ;;\n    esac\n    ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm)\n    if [ \"$*\" = \"network rm {}\" ]; then exit 0; fi\n    exit 93\n    ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
+        expected_network_name,
+        expected_network_name,
         expected_network_name,
         network,
         OWNED_NETWORK_ID,
@@ -127,14 +129,25 @@ fn acquired_network_id_preserves_attachment_mismatch_as_the_causal_failure() {
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     let lines: Vec<&str> = calls.lines().collect();
+    let network_create_index = lines
+        .iter()
+        .position(|line| {
+            line.starts_with("network create --internal --disable-dns ")
+                && line.ends_with(&expected_network_name)
+        })
+        .expect("owned network must be created before inspection");
+    let identity_inspect_index = lines
+        .iter()
+        .position(|line| *line == format!("network inspect --format json {expected_network_name}"))
+        .expect("created network identity must be inspected by correlation name");
     let create_index = lines
         .iter()
         .position(|line| line.starts_with("create --name "))
         .expect("container create must be exercised");
-    let identity_inspect_index = lines
-        .iter()
-        .position(|line| line.starts_with("network inspect --format json "))
-        .expect("created network identity must be inspected");
+    assert!(
+        network_create_index < identity_inspect_index,
+        "network identity must be acquired from the network created by this invocation; calls were:\n{calls}"
+    );
     assert!(
         identity_inspect_index < create_index,
         "network identity must be acquired before container creation; calls were:\n{calls}"
