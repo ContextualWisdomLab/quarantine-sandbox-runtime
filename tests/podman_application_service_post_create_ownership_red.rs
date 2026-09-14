@@ -1,8 +1,9 @@
-//! Regression: application-service lifecycle and cleanup evidence stay bound to the acquired ID.
+//! Regression: application-service container lifecycle and cleanup evidence stay bound to the acquired ID.
 //!
 //! The generated `qsr-app-*` name is correlation metadata. Once `podman create` returns an exact
 //! container ID, later start/inspect/top/port/stop/remove operations and the cleanup receipt must
-//! not re-resolve or misreport that mutable name.
+//! not re-resolve or misreport that mutable name. Network acquired-ID ownership is intentionally
+//! separate #48 authority; this test preserves the current versioned lease network correlation ID.
 
 #![cfg(target_os = "linux")]
 
@@ -139,6 +140,10 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
         OWNED_CONTAINER_ID,
         "public lease correlation identity must remain distinct from cleanup authority"
     );
+    assert!(
+        lease.network_id().starts_with("qsr-net-"),
+        "the current lease network identity remains a generated correlation reference until #48 acquires the Podman network ID"
+    );
 
     let cleanup_receipt = adapter
         .terminate_at(&lease, started_at_epoch_seconds + 1)
@@ -151,7 +156,7 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
     assert_eq!(
         cleanup_receipt.network_id(),
         lease.network_id(),
-        "cleanup evidence must name the runtime-owned network actually removed"
+        "cleanup receipt must preserve the versioned lease network correlation identity; acquired Podman network-ID authority remains #48"
     );
 
     assert_eq!(
@@ -186,7 +191,7 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
         calls
             .lines()
             .any(|line| line == format!("network rm --force {}", lease.network_id())),
-        "termination must remove the runtime-owned network named by cleanup authority; calls were:\n{calls}"
+        "the current cleanup path must target the lease network correlation reference; this is not acquired-ID proof for #48; calls were:\n{calls}"
     );
 
     let _ = fs::remove_file(program);
