@@ -73,7 +73,7 @@ fn write_fake_podman() -> (PathBuf, PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let foreign_cleanup_marker = temporary_path("foreign-cleanup");
-    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"6.1.0"}}"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign_marker='{}'\nowned_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned_id\" > \"$cidfile\"; fi\n    printf 'bad identifier with spaces\\n'\n    ;;\n  rm:--force)\n    if [ \"${{3:-}}\" = \"$owned_id\" ]; then exit 0; fi\n    printf 'generated-name cleanup attempted\\n' > \"$foreign_marker\"\n    exit 93\n    ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
