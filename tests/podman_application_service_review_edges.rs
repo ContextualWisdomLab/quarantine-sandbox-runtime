@@ -118,6 +118,28 @@ esac
 }
 
 #[test]
+fn independent_same_request_plans_use_distinct_runtime_owned_resource_identities() {
+    let request = request();
+    let policy = policy();
+    let started_at_epoch_seconds = 1_780_001_000;
+    let first = RootlessPodmanAdapter::plan_at(&request, &policy, started_at_epoch_seconds)
+        .expect("first application-service plan must be constructible");
+    let second = RootlessPodmanAdapter::plan_at(&request, &policy, started_at_epoch_seconds)
+        .expect("second application-service plan must be constructible");
+
+    assert_ne!(
+        first.sandbox_name(),
+        second.sandbox_name(),
+        "independent plans must not share a runtime-owned container identity"
+    );
+    assert_ne!(
+        first.network_name(),
+        second.network_name(),
+        "independent plans must not share a runtime-owned network identity"
+    );
+}
+
+#[test]
 fn each_live_capability_column_fails_closed_independently() {
     let header = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL";
     for (name, values) in [
