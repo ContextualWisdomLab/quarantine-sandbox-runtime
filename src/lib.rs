@@ -16,10 +16,8 @@ mod sandbox_execution;
 
 pub use application_service::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
-    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
-    BackendInvocationFailureKind, CleanupReceipt, CommandExecutionBackend, CommandExecutionError,
-    CommandExecutionRequest, CommandExecutionResult, ExpiredLeaseCleanupResult,
-    IsolationAttestation, LeaseOwnerId, ServiceEndpoint, ServiceProtocol, execute_command,
+    ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt, ExpiredLeaseCleanupResult,
+    IsolationAttestation, LeaseOwnerId, ServiceEndpoint, ServiceProtocol,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
@@ -39,19 +37,10 @@ pub use pr_source_artifact::{
     stage_pr_source_artifact,
 };
 pub use sandbox_execution::{
-    IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
-    VerifiedIsolationState,
+    BackendInvocationFailureKind, CommandExecutionBackend, CommandExecutionError,
+    CommandExecutionRequest, CommandExecutionResult, IsolationControlStatus, IsolationPolicy,
+    ResourceRequest, SandboxExecutionError, SandboxRuntimeError, VerifiedIsolationState,
+    execute_command,
 };
-
-impl From<SandboxExecutionError> for ApplicationServiceError {
-    fn from(error: SandboxExecutionError) -> Self {
-        match error {
-            SandboxExecutionError::InvalidPolicy { field_name } => {
-                Self::InvalidPolicy { field_name }
-            }
-            SandboxExecutionError::ResourceLimitExceeded { resource_name } => {
-                Self::ResourceLimitExceeded { resource_name }
-            }
-        }
-    }
-}
+/// Compatibility name retained for the application-service public error contract.
+pub use sandbox_execution::SandboxRuntimeError as ApplicationServiceError;

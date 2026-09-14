@@ -1,33 +1,24 @@
 //! Supporting bounded context for launching an approved application as an isolated service.
 
-mod command_execution;
 mod coordinator;
 
-pub use command_execution::{
-    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
-    CommandExecutionResult, execute_command,
-};
-// Crate-internal only: lets an infrastructure backend adapter (e.g.
-// `infrastructure::podman`) build a `CommandExecutionResult` without
-// exposing the intermediate outcome type as public API.
-pub(crate) use command_execution::CommandExecutionOutcome;
 pub use coordinator::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ExpiredLeaseCleanupResult, LeaseOwnerId,
 };
+pub(crate) use crate::sandbox_execution::CommandExecutionOutcome;
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::{
     CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest,
-    sandbox_execution::{RuntimeLeaseMetadata, VerifiedIsolationState},
+    sandbox_execution::{
+        MAX_COMMAND_ARGUMENT_BYTES, MAX_COMMAND_ARGUMENTS, MAX_REQUEST_IDENTIFIER_BYTES,
+        RuntimeLeaseMetadata, SandboxRuntimeError as ApplicationServiceError,
+        VerifiedIsolationState, is_digest_pinned_image_reference,
+    },
 };
 
-const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
-const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
-const MAX_COMMAND_ARGUMENTS: usize = 64;
-const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
 const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.2.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
@@ -340,167 +331,4 @@ impl CleanupReceipt {
     pub const fn terminated_at_epoch_seconds(&self) -> u64 {
         self.terminated_at_epoch_seconds
     }
-}
-
-/// Stable consumer-visible class for an OS process-spawn failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BackendInvocationFailureKind {
-    /// The configured backend executable does not exist at invocation time.
-    NotFound,
-    /// The operating system denied permission to execute the backend.
-    PermissionDenied,
-    /// Local process or memory pressure prevented process creation.
-    ResourceExhausted,
-    /// Another current or future OS spawn error occurred.
-    Other,
-}
-
-/// Fail-closed application-service validation or runtime error.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum ApplicationServiceError {
-    /// The wire schema is not supported by this runtime.
-    #[error("unsupported application-service schema version: {actual_version}")]
-    UnsupportedSchemaVersion {
-        /// Version supplied by the consumer.
-        actual_version: String,
-    },
-    /// The request identifier is empty, oversized, or contains control text.
-    #[error("invalid application-service request identifier")]
-    InvalidRequestId,
-    /// The image is not pinned to a lower-case SHA-256 digest.
-    #[error("application image must be pinned by sha256 digest")]
-    ImageReferenceNotDigestPinned,
-    /// Container port zero is not a usable TCP service port.
-    #[error("invalid container service port")]
-    InvalidContainerPort,
-    /// The request contains more direct argv entries than the contract permits.
-    #[error("too many application command arguments; maximum {maximum_arguments}")]
-    TooManyCommandArguments {
-        /// Maximum accepted number of direct argv entries.
-        maximum_arguments: usize,
-    },
-    /// A direct argv entry is empty, oversized, or contains control text.
-    #[error("invalid application command argument at index {argument_index}")]
-    InvalidCommandArgument {
-        /// Zero-based argument position.
-        argument_index: usize,
-    },
-    /// The operator isolation policy is internally invalid.
-    #[error("invalid isolation policy field: {field_name}")]
-    InvalidPolicy {
-        /// Invalid policy field.
-        field_name: &'static str,
-    },
-    /// A consumer requested zero or more resource than the policy permits.
-    #[error("application resource request exceeds policy: {resource_name}")]
-    ResourceLimitExceeded {
-        /// Resource that violated the policy.
-        resource_name: &'static str,
-    },
-    /// Adding lease duration to the start timestamp overflowed.
-    #[error("application service lease expiry overflow")]
-    LeaseExpiryOverflow,
-    /// The backend process could not be spawned; the bounded OS failure class is preserved.
-    #[error("backend process spawn failed during {operation}: {failure_kind:?}")]
-    BackendSpawnFailed {
-        /// Stable operation code.
-        operation: &'static str,
-        /// Bounded failure class; raw errno values and host paths are not exposed.
-        failure_kind: BackendInvocationFailureKind,
-    },
-    /// The configured backend could not complete an invocation after process creation.
-    #[error("backend invocation failed during {operation}")]
-    BackendInvocationFailed {
-        /// Stable operation code.
-        operation: &'static str,
-    },
-    /// The sandbox backend exceeded the bounded wall-clock budget for a required operation.
-    #[error("sandbox backend command timed out during {operation}")]
-    BackendCommandTimedOut {
-        /// Stable operation code.
-        operation: &'static str,
-    },
-    /// The sandbox backend exceeded the bounded retained-output budget for a required operation.
-    #[error("sandbox backend command exceeded output limit during {operation}")]
-    BackendOutputLimitExceeded {
-        /// Stable operation code.
-        operation: &'static str,
-    },
-    /// The sandbox backend returned a nonzero exit status for a required operation.
-    #[error("sandbox backend command failed during {operation}")]
-    BackendCommandFailed {
-        /// Stable operation code.
-        operation: &'static str,
-    },
-    /// The backend did not attest that it is running rootless.
-    #[error("sandbox backend is not rootless")]
-    BackendNotRootless,
-    /// A required effective isolation control was not positively verified.
-    #[error("effective isolation verification failed for {control_name}")]
-    IsolationVerificationFailed {
-        /// Stable isolation-control code.
-        control_name: &'static str,
-    },
-    /// Backend inspection output was malformed, contradictory, or bound to another sandbox.
-    #[error("malformed sandbox isolation inspection during {operation}")]
-    MalformedIsolationInspection {
-        /// Stable inspection operation code.
-        operation: &'static str,
-    },
-    /// The backend returned a service publication other than one IPv4 loopback port.
-    #[error("invalid sandbox loopback port mapping")]
-    InvalidPortMapping,
-    /// The service did not become reachable before the bounded readiness deadline.
-    #[error("application service readiness timed out")]
-    ReadinessTimeout,
-    /// Cleanup could not prove removal of all runtime-owned resources.
-    #[error("sandbox cleanup failed")]
-    CleanupFailed,
-}
-
-fn is_digest_pinned_image_reference(value: &str) -> bool {
-    if value.is_empty()
-        || value.len() > MAX_IMAGE_REFERENCE_BYTES
-        || value
-            .chars()
-            .any(|character| character.is_control() || character.is_whitespace())
-    {
-        return false;
-    }
-    let Some((repository, digest)) = value.rsplit_once("@sha256:") else {
-        return false;
-    };
-    registry_repository_is_safe(repository)
-        && digest.len() == 64
-        && digest.bytes().all(|byte| {
-            byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
-        })
-}
-
-fn registry_repository_is_safe(repository: &str) -> bool {
-    if repository.is_empty()
-        || repository.contains('@')
-        || repository.contains("//")
-        || repository.starts_with('/')
-        || repository.ends_with('/')
-    {
-        return false;
-    }
-
-    let mut components = repository.split('/');
-    // `repository` is non-empty here, so `str::split` always yields a first component.
-    // `unwrap_or_default` keeps a hypothetical invariant break fail-closed without an
-    // unreachable source branch that can never obtain runtime coverage.
-    let first_component = components.next().unwrap_or_default();
-    if !registry_authority_or_name_is_safe(first_component) {
-        return false;
-    }
-    components.all(|component| component != "." && component != ".." && !component.contains(':'))
-}
-
-fn registry_authority_or_name_is_safe(component: &str) -> bool {
-    let Some((host, port)) = component.rsplit_once(':') else {
-        return !component.is_empty();
-    };
-    !host.is_empty() && !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())
 }

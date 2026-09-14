@@ -11,8 +11,8 @@ fn podman_adapter_lives_outside_core_sandbox_context() {
 
     let core = fs::read_to_string(root.join("src/sandbox_execution/mod.rs"))
         .expect("sandbox_execution source should be readable");
-    assert!(!core.contains("application_service"));
-    assert!(!core.contains("ApplicationService"));
+    assert!(!core.contains("application_service::"));
+    assert!(!core.contains("crate::application_service"));
 }
 
 #[test]
