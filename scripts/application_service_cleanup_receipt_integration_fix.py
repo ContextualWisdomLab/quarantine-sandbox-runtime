@@ -31,6 +31,12 @@ replace_once(
 )
 
 replace_once(
+    "src/application_service/coordinator.rs",
+    '''            Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))\n''',
+    '''            Ok(CleanupReceipt::complete(\n                lease.sandbox_id(),\n                lease.network_id(),\n                terminated_at_epoch_seconds,\n            ))\n''',
+)
+
+replace_once(
     "docs/product-technical-gap-baseline.md",
     '''generated `qsr-app-*` remains correlation metadata; cleanup authority is crate-private and non-serializable; forged/deserialized public lease evidence cannot recreate destructive authority; all five live capability columns and single-record network evidence remain fail-closed.''',
     '''generated `qsr-app-*` remains correlation metadata; cleanup authority is crate-private and non-serializable; forged/deserialized public lease evidence cannot recreate destructive authority; cleanup receipts identify the exact container/network actually removed rather than the public correlation name; all five live capability columns and single-record network evidence remain fail-closed.''',
