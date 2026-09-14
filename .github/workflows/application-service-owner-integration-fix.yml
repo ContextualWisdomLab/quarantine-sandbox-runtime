@@ -41,7 +41,7 @@ jobs:
         with:
           toolchain: 1.97.1
           components: clippy, rustfmt
-      - name: Prove causal owner RED
+      - name: Prove causal RED and retained capability GREEN
         shell: bash
         run: |
           set -euo pipefail
@@ -66,9 +66,25 @@ jobs:
             -- --exact --nocapture > /tmp/review-identity-red.log 2>&1
           review_identity_status=$?
           cargo test --locked --test podman_application_service_review_edges \
-            each_live_capability_column_fails_closed_independently \
-            -- --exact --nocapture > /tmp/review-capability-red.log 2>&1
-          review_capability_status=$?
+            non_empty_capeff_fails_closed \
+            -- --exact --nocapture > /tmp/review-capeff-green.log 2>&1
+          review_capeff_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            non_empty_capbnd_fails_closed \
+            -- --exact --nocapture > /tmp/review-capbnd-green.log 2>&1
+          review_capbnd_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            non_empty_capinh_fails_closed \
+            -- --exact --nocapture > /tmp/review-capinh-green.log 2>&1
+          review_capinh_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            non_empty_capprm_fails_closed \
+            -- --exact --nocapture > /tmp/review-capprm-green.log 2>&1
+          review_capprm_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            non_empty_capamb_fails_closed \
+            -- --exact --nocapture > /tmp/review-capamb-green.log 2>&1
+          review_capamb_status=$?
           cargo test --locked --test podman_application_service_review_edges \
             duplicate_network_inspection_fails_closed_and_cleans_exact_container \
             -- --exact --nocapture > /tmp/review-network-red.log 2>&1
@@ -86,7 +102,11 @@ jobs:
           for log in \
             /tmp/ddd-error-owner-red.log \
             /tmp/review-identity-red.log \
-            /tmp/review-capability-red.log \
+            /tmp/review-capeff-green.log \
+            /tmp/review-capbnd-green.log \
+            /tmp/review-capinh-green.log \
+            /tmp/review-capprm-green.log \
+            /tmp/review-capamb-green.log \
             /tmp/review-network-red.log \
             /tmp/receipt-red.log \
             /tmp/missing-red.log \
@@ -95,14 +115,18 @@ jobs:
           do
             cat "$log"
             if grep -Fq 'operation: "backend_security_info"' "$log"; then
-              echo "unrelated backend_security_info failure reached causal RED lane: $log" >&2
+              echo "unrelated backend_security_info failure reached owner integration lane: $log" >&2
               exit 1
             fi
           done
 
           test "$ddd_error_owner_status" -ne 0
           test "$review_identity_status" -ne 0
-          test "$review_capability_status" -ne 0
+          test "$review_capeff_status" -eq 0
+          test "$review_capbnd_status" -eq 0
+          test "$review_capinh_status" -eq 0
+          test "$review_capprm_status" -eq 0
+          test "$review_capamb_status" -eq 0
           test "$review_network_status" -ne 0
           test "$receipt_status" -ne 0
           test "$missing_status" -ne 0
@@ -111,7 +135,11 @@ jobs:
 
           grep -F 'Supporting application_service must own its public failure vocabulary' /tmp/ddd-error-owner-red.log
           grep -F 'independent plans must not share a runtime-owned' /tmp/review-identity-red.log
-          grep -F 'all_capabilities_dropped' /tmp/review-capability-red.log
+          grep -F 'test non_empty_capeff_fails_closed ... ok' /tmp/review-capeff-green.log
+          grep -F 'test non_empty_capbnd_fails_closed ... ok' /tmp/review-capbnd-green.log
+          grep -F 'test non_empty_capinh_fails_closed ... ok' /tmp/review-capinh-green.log
+          grep -F 'test non_empty_capprm_fails_closed ... ok' /tmp/review-capprm-green.log
+          grep -F 'test non_empty_capamb_fails_closed ... ok' /tmp/review-capamb-green.log
           grep -F 'network_inspect' /tmp/review-network-red.log
           grep -F 'runtime-owned exact identity receipt' /tmp/receipt-red.log
           grep -F 'malformed_successful_create_without_receipt_never_uses_generated_name_for_cleanup' /tmp/missing-red.log
