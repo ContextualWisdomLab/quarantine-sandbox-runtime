@@ -16,6 +16,50 @@ fn podman_adapter_lives_outside_core_sandbox_context() {
 }
 
 #[test]
+fn bounded_command_contract_is_owned_by_core_sandbox_context() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let core_module_path = root.join("src/sandbox_execution/mod.rs");
+    let core_contract_path = root.join("src/sandbox_execution/bounded_command_execution.rs");
+    let supporting_module_path = root.join("src/application_service/mod.rs");
+    let historical_supporting_contract_path =
+        root.join("src/application_service/command_execution.rs");
+
+    let core_module =
+        fs::read_to_string(core_module_path).expect("sandbox_execution source should be readable");
+    let supporting_module = fs::read_to_string(supporting_module_path)
+        .expect("application_service source should be readable");
+
+    assert!(
+        core_contract_path.is_file(),
+        "bounded command domain truth must live under the sandbox_execution Core context"
+    );
+    assert!(
+        core_module.contains("mod bounded_command_execution;"),
+        "sandbox_execution must own the bounded command module"
+    );
+    assert!(
+        core_module.contains("pub use bounded_command_execution::{"),
+        "sandbox_execution must export the bounded command request/result/backend port"
+    );
+    assert!(
+        !historical_supporting_contract_path.exists(),
+        "application_service must not retain a second bounded command source of truth"
+    );
+    assert!(
+        !supporting_module.contains("mod command_execution;"),
+        "application_service must not define the bounded command module"
+    );
+
+    let core_contract = fs::read_to_string(core_contract_path)
+        .expect("bounded command Core contract should be readable");
+    assert!(
+        !core_contract.contains("application_service")
+            && !core_contract.contains("ApplicationService"),
+        "Core bounded command domain truth must not depend on Supporting application_service types"
+    );
+}
+
+#[test]
 fn accepted_adr_numbers_are_unique() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/adr");
     let mut numbers = BTreeSet::new();
