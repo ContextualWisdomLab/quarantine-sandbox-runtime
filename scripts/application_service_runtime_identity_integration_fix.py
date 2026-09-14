@@ -45,6 +45,18 @@ replace_once(
 
 replace_once(
     "src/infrastructure/podman.rs",
+    '''    /// Return the deterministic sandbox identifier used by the backend adapter.\n''',
+    '''    /// Return the invocation-owned sandbox identifier used by the backend adapter.\n''',
+)
+
+replace_once(
+    "src/infrastructure/podman.rs",
+    '''    /// Return the deterministic per-sandbox network identifier.\n''',
+    '''    /// Return the invocation-owned per-sandbox network identifier.\n''',
+)
+
+replace_once(
+    "src/infrastructure/podman.rs",
     '''    /// Build a deterministic fail-closed Podman launch plan without executing it.\n    ///\n    /// # Errors\n    ///\n    /// Returns [`ApplicationServiceError`] when the request or policy is invalid,\n    /// or when the requested lease cannot be represented as an absolute expiry.\n''',
     '''    /// Build a fail-closed Podman launch plan with a fresh runtime-owned identity.\n    ///\n    /// # Errors\n    ///\n    /// Returns [`ApplicationServiceError`] when the request or policy is invalid,\n    /// the requested lease cannot be represented as an absolute expiry, or the\n    /// operating system cannot provide entropy for the invocation identity.\n''',
 )
@@ -55,9 +67,8 @@ replace_once(
     '''        let identity = runtime_identity()?;\n''',
 )
 
-runtime_identity = '''/// Obtain a fresh unpredictable application-service identity from operating-system entropy.\nfn runtime_identity() -> Result<String, ApplicationServiceError> {\n    runtime_identity_with(|entropy| getrandom::fill(entropy))\n}\n\n/// Encode injected entropy as a fixed-width lowercase runtime identity or fail closed.\nfn runtime_identity_with<E>(\n    fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,\n) -> Result<String, ApplicationServiceError> {\n    let mut entropy = [0_u8; RUNTIME_IDENTITY_ENTROPY_BYTES];\n    fill_entropy(&mut entropy).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;\n\n    let mut identity = String::with_capacity(RUNTIME_IDENTITY_ENTROPY_BYTES * 2);\n    for byte in entropy {\n        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte >> 4)]));\n        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte & 0x0f)]));\n    }\n    Ok(identity)\n}\n\n#[cfg(test)]\nmod runtime_identity_tests {\n    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, runtime_identity_with};\n    use crate::ApplicationServiceError;\n\n    #[test]\n    fn injected_entropy_has_stable_lower_hex_encoding() {\n        let identity = runtime_identity_with(|entropy| {\n            *entropy = [0xab; RUNTIME_IDENTITY_ENTROPY_BYTES];\n            Ok::<(), ()>(())\n        });\n\n        assert_eq!(identity, Ok("ab".repeat(RUNTIME_IDENTITY_ENTROPY_BYTES)));\n    }\n\n    #[test]\n    fn entropy_failure_is_typed_and_fail_closed() {\n        let result = runtime_identity_with(|_| Err::<(), ()>(()));\n        assert_eq!(\n            result,\n            Err(ApplicationServiceError::RuntimeIdentityUnavailable)\n        );\n    }\n}\n\n'''
 replace_once(
     "src/infrastructure/podman.rs",
-    '''fn sandbox_identity(\n''',
-    runtime_identity + '''fn sandbox_identity(\n''',
+    '''fn sandbox_identity(\n    request_id: &str,\n    image_reference: &str,\n    policy_id: &str,\n    started_at_epoch_seconds: u64,\n) -> String {\n    let mut hasher = Sha256::new();\n    for component in [request_id, image_reference, policy_id] {\n        hasher.update(component.as_bytes());\n        hasher.update([0]);\n    }\n    hasher.update(started_at_epoch_seconds.to_be_bytes());\n    let digest = format!("{:x}", hasher.finalize());\n    digest[..16].to_owned()\n}\n''',
+    '''/// Obtain a fresh unpredictable application-service identity from operating-system entropy.\nfn runtime_identity() -> Result<String, ApplicationServiceError> {\n    runtime_identity_with(|entropy| getrandom::fill(entropy))\n}\n\n/// Encode injected entropy as a fixed-width lowercase runtime identity or fail closed.\nfn runtime_identity_with<E>(\n    fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,\n) -> Result<String, ApplicationServiceError> {\n    let mut entropy = [0_u8; RUNTIME_IDENTITY_ENTROPY_BYTES];\n    fill_entropy(&mut entropy).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;\n\n    let mut identity = String::with_capacity(RUNTIME_IDENTITY_ENTROPY_BYTES * 2);\n    for byte in entropy {\n        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte >> 4)]));\n        identity.push(char::from(LOWER_HEX_DIGITS[usize::from(byte & 0x0f)]));\n    }\n    Ok(identity)\n}\n\n#[cfg(test)]\nmod runtime_identity_tests {\n    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, runtime_identity_with};\n    use crate::ApplicationServiceError;\n\n    #[test]\n    fn injected_entropy_has_stable_lower_hex_encoding() {\n        let identity = runtime_identity_with(|entropy| {\n            *entropy = [0xab; RUNTIME_IDENTITY_ENTROPY_BYTES];\n            Ok::<(), ()>(())\n        });\n\n        assert_eq!(identity, Ok("ab".repeat(RUNTIME_IDENTITY_ENTROPY_BYTES)));\n    }\n\n    #[test]\n    fn entropy_failure_is_typed_and_fail_closed() {\n        let result = runtime_identity_with(|_| Err::<(), ()>(()));\n        assert_eq!(\n            result,\n            Err(ApplicationServiceError::RuntimeIdentityUnavailable)\n        );\n    }\n}\n''',
 )
