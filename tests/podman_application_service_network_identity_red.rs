@@ -22,12 +22,9 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_000_600;
-const OWNED_NETWORK_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const FOREIGN_NETWORK_ID: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const OWNED_CONTAINER_ID: &str =
-    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const OWNED_NETWORK_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const FOREIGN_NETWORK_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const OWNED_CONTAINER_ID: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -146,9 +143,9 @@ fn acquired_network_id_is_bound_before_container_creation() {
         .expect("container create must be exercised");
     let identity_inspect_index = lines
         .iter()
-        .position(|line| line.starts_with(&format!(
-            "network inspect --format json {expected_network}"
-        )))
+        .position(|line| {
+            line.starts_with(&format!("network inspect --format json {expected_network}"))
+        })
         .expect("created network identity must be inspected");
     assert!(
         identity_inspect_index < create_index,
