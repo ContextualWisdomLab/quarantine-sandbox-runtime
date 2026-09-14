@@ -10,6 +10,8 @@ on:
       - scripts/application_service_runtime_identity_integration_fix.py
       - scripts/application_service_cleanup_receipt_integration_fix.py
       - scripts/application_service_review_integration_fix.py
+      - scripts/application_service_error_boundary_integration_fix.py
+      - tests/application_service_error_ownership.rs
       - tests/podman_application_service_review_edges.rs
       - tests/podman_application_service_malformed_create_receipt_red.rs
       - tests/podman_application_service_missing_create_receipt_red.rs
@@ -43,6 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           for test_name in \
+            application_service_error_ownership \
             podman_application_service_review_edges \
             podman_application_service_malformed_create_receipt_red \
             podman_application_service_missing_create_receipt_red \
@@ -53,6 +56,10 @@ jobs:
           done
 
           set +e
+          cargo test --locked --test application_service_error_ownership \
+            application_service_error_vocabulary_stays_in_supporting_context \
+            -- --exact --nocapture > /tmp/ddd-error-owner-red.log 2>&1
+          ddd_error_owner_status=$?
           cargo test --locked --test podman_application_service_review_edges \
             independent_same_request_plans_use_distinct_runtime_owned_resource_identities \
             -- --exact --nocapture > /tmp/review-identity-red.log 2>&1
@@ -76,6 +83,7 @@ jobs:
           set -e
 
           for log in \
+            /tmp/ddd-error-owner-red.log \
             /tmp/review-identity-red.log \
             /tmp/review-capability-red.log \
             /tmp/review-network-red.log \
@@ -91,6 +99,7 @@ jobs:
             fi
           done
 
+          test "$ddd_error_owner_status" -ne 0
           test "$review_identity_status" -ne 0
           test "$review_capability_status" -ne 0
           test "$review_network_status" -ne 0
@@ -99,6 +108,7 @@ jobs:
           test "$post_create_status" -ne 0
           test "$forged_status" -ne 0
 
+          grep -F 'Supporting application_service must own its public failure vocabulary' /tmp/ddd-error-owner-red.log
           grep -F 'independent plans must not share a runtime-owned' /tmp/review-identity-red.log
           grep -F 'all_capabilities_dropped' /tmp/review-capability-red.log
           grep -F 'network_inspect' /tmp/review-network-red.log
@@ -113,11 +123,13 @@ jobs:
           python3 scripts/application_service_runtime_identity_integration_fix.py
           python3 scripts/application_service_cleanup_receipt_integration_fix.py
           python3 scripts/application_service_review_integration_fix.py
+          python3 scripts/application_service_error_boundary_integration_fix.py
           python3 -c 'from pathlib import Path; p=Path("src/application_service/mod.rs"); t=p.read_text(); old="    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {\n        self.shutdown_grace_seconds\n    }\n\n    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; new="    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; assert t.count(old) == 1; p.write_text(t.replace(old, new, 1))'
           cargo fmt --all
       - name: Prove focused GREEN
         run: |
           set -euo pipefail
+          cargo test --locked --test application_service_error_ownership -- --nocapture
           cargo test --locked --test podman_application_service_review_edges -- --nocapture
           cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture
           cargo test --locked --test podman_application_service_missing_create_receipt_red -- --nocapture
@@ -130,6 +142,7 @@ jobs:
           rm scripts/application_service_runtime_identity_integration_fix.py
           rm scripts/application_service_cleanup_receipt_integration_fix.py
           rm scripts/application_service_review_integration_fix.py
+          rm scripts/application_service_error_boundary_integration_fix.py
       - name: Validate integrated candidate
         run: |
           set -euo pipefail
