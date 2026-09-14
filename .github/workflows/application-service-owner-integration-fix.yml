@@ -12,6 +12,7 @@ on:
       - scripts/application_service_review_integration_fix.py
       - scripts/application_service_error_boundary_integration_fix.py
       - scripts/application_service_error_boundary_review_fix.py
+      - scripts/application_service_baseline_authority_fix.py
       - tests/application_service_error_ownership.rs
       - tests/podman_application_service_review_edges.rs
       - tests/podman_application_service_malformed_create_receipt_red.rs
@@ -154,6 +155,7 @@ jobs:
           python3 scripts/application_service_review_integration_fix.py
           python3 scripts/application_service_error_boundary_integration_fix.py
           python3 scripts/application_service_error_boundary_review_fix.py
+          python3 scripts/application_service_baseline_authority_fix.py
           python3 -c 'from pathlib import Path; p=Path("src/application_service/mod.rs"); t=p.read_text(); old="    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {\n        self.shutdown_grace_seconds\n    }\n\n    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; new="    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; assert t.count(old) == 1; p.write_text(t.replace(old, new, 1))'
           cargo fmt --all
       - name: Prove focused GREEN
@@ -174,6 +176,7 @@ jobs:
           rm scripts/application_service_review_integration_fix.py
           rm scripts/application_service_error_boundary_integration_fix.py
           rm scripts/application_service_error_boundary_review_fix.py
+          rm scripts/application_service_baseline_authority_fix.py
       - name: Validate integrated candidate
         run: |
           set -euo pipefail
