@@ -8,6 +8,9 @@ on:
       - .github/workflows/application-service-owner-integration-fix.yml
       - scripts/application_service_owner_integration_fix.py
       - scripts/application_service_runtime_identity_integration_fix.py
+      - tests/podman_application_service_review_edges.rs
+      - tests/podman_application_service_malformed_create_receipt_red.rs
+      - tests/podman_application_service_forged_lease_ownership_red.rs
 
 permissions:
   contents: write
@@ -36,22 +39,28 @@ jobs:
           set -euo pipefail
           cargo test --locked --test podman_application_service_review_edges --no-run
           cargo test --locked --test podman_application_service_malformed_create_receipt_red --no-run
+          cargo test --locked --test podman_application_service_forged_lease_ownership_red --no-run
 
           set +e
           cargo test --locked --test podman_application_service_review_edges -- --nocapture > /tmp/review-red.log 2>&1
           review_status=$?
           cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture > /tmp/receipt-red.log 2>&1
           receipt_status=$?
+          cargo test --locked --test podman_application_service_forged_lease_ownership_red -- --nocapture > /tmp/forged-red.log 2>&1
+          forged_status=$?
           set -e
 
           cat /tmp/review-red.log
           cat /tmp/receipt-red.log
+          cat /tmp/forged-red.log
           test "$review_status" -ne 0
           test "$receipt_status" -ne 0
+          test "$forged_status" -ne 0
           ! grep -F 'operation: "backend_security_info"' /tmp/review-red.log
           ! grep -F 'operation: "backend_security_info"' /tmp/receipt-red.log
           grep -F 'independent plans must not share a runtime-owned' /tmp/review-red.log
           grep -F 'runtime-owned exact identity receipt' /tmp/receipt-red.log
+          grep -F 'deserialized_lease_cannot_select_destructive_backend_resources' /tmp/forged-red.log
       - name: Apply minimum application-service owner repair
         run: |
           set -euo pipefail
@@ -64,6 +73,7 @@ jobs:
           set -euo pipefail
           cargo test --locked --test podman_application_service_review_edges -- --nocapture
           cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture
+          cargo test --locked --test podman_application_service_forged_lease_ownership_red -- --nocapture
       - name: Remove purpose-complete source fixer
         run: |
           rm .github/workflows/application-service-owner-integration-fix.yml
