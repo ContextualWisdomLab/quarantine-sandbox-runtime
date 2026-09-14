@@ -26,6 +26,12 @@ replace_once(
 )
 
 replace_once(
+    "src/sandbox_execution/mod.rs",
+    '''    /// Stable identifier included in sandbox receipts and deterministic plans.\n''',
+    '''    /// Stable policy identifier included in sandbox receipts and runtime plans.\n''',
+)
+
+replace_once(
     "src/infrastructure/podman.rs",
     '''const DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES: usize = 1024 * 1024;\n''',
     '''const DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES: usize = 1024 * 1024;\nconst RUNTIME_IDENTITY_ENTROPY_BYTES: usize = 16;\nconst LOWER_HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";\n''',
@@ -33,8 +39,14 @@ replace_once(
 
 replace_once(
     "src/infrastructure/podman.rs",
-    '''    /// Build a deterministic fail-closed Podman launch plan without executing it.\n''',
-    '''    /// Build a fail-closed Podman launch plan with a fresh runtime-owned identity.\n''',
+    '''/// Deterministic, auditable rootless Podman command plan.\n''',
+    '''/// Auditable rootless Podman command plan with invocation-owned resource identity.\n''',
+)
+
+replace_once(
+    "src/infrastructure/podman.rs",
+    '''    /// Build a deterministic fail-closed Podman launch plan without executing it.\n    ///\n    /// # Errors\n    ///\n    /// Returns [`ApplicationServiceError`] when the request or policy is invalid,\n    /// or when the requested lease cannot be represented as an absolute expiry.\n''',
+    '''    /// Build a fail-closed Podman launch plan with a fresh runtime-owned identity.\n    ///\n    /// # Errors\n    ///\n    /// Returns [`ApplicationServiceError`] when the request or policy is invalid,\n    /// the requested lease cannot be represented as an absolute expiry, or the\n    /// operating system cannot provide entropy for the invocation identity.\n''',
 )
 
 replace_once(
