@@ -198,8 +198,34 @@ jobs:
           set -euo pipefail
           git add -A
           git diff --cached --check
+          actual_manifest="$(git diff --cached --name-status --no-renames | LC_ALL=C sort)"
+          expected_manifest="$(cat <<'EOF' | LC_ALL=C sort
+          D	.github/workflows/application-service-owner-integration-fix.yml
+          M	docs/ARCHITECTURE.md
+          M	docs/product-technical-gap-baseline.md
+          D	scripts/application_service_baseline_authority_fix.py
+          D	scripts/application_service_cleanup_receipt_integration_fix.py
+          D	scripts/application_service_error_boundary_integration_fix.py
+          D	scripts/application_service_error_boundary_review_fix.py
+          D	scripts/application_service_owner_integration_fix.py
+          D	scripts/application_service_review_integration_fix.py
+          D	scripts/application_service_runtime_identity_integration_fix.py
+          M	src/application_service/coordinator.rs
+          M	src/application_service/mod.rs
+          M	src/infrastructure/podman.rs
+          M	src/infrastructure/podman_runtime_gate_binding.rs
+          M	src/lib.rs
+          M	src/sandbox_execution/mod.rs
+          EOF
+          )"
+          if [[ "$actual_manifest" != "$expected_manifest" ]]; then
+            echo 'validated candidate changed an unexpected path or omitted an owned repair path' >&2
+            printf '%s\n' '--- expected manifest ---' "$expected_manifest" >&2
+            printf '%s\n' '--- actual manifest ---' "$actual_manifest" >&2
+            exit 1
+          fi
           patch_file="$RUNNER_TEMP/application-service-owner-repair.patch"
-          git diff --cached --binary --full-index --no-ext-diff > "$patch_file"
+          git diff --cached --binary --full-index --no-ext-diff --no-renames > "$patch_file"
           test -s "$patch_file"
           candidate_tree="$(git write-tree)"
           patch_sha256="$(sha256sum "$patch_file" | cut -d' ' -f1)"
