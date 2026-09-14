@@ -78,7 +78,7 @@ fn write_fake_podman(ready_port: u16, foreign_marker: &Path) -> (PathBuf, PathBu
     );
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign='{}'\nowned='{}'\ntouch_foreign() {{ printf 'touched\\n' > \"$foreign\"; }}\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' \"$owned\" ;;\n  start:*) if [ \"${{2:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 93; fi ;;\n  container:inspect) if [ \"${{5:-}}\" = \"$owned\" ]; then printf '%s\\n' '{}'; else touch_foreign; exit 94; fi ;;\n  top:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n'; else touch_foreign; exit 95; fi ;;\n  port:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf '127.0.0.1:{ready_port}\\n'; else touch_foreign; exit 96; fi ;;\n  stop:*) if [ \"${{4:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 97; fi ;;\n  rm:*) if [ \"${{3:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 98; fi ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign='{}'\nowned='{}'\ntouch_foreign() {{ printf 'touched\\n' > \"$foreign\"; }}\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned\" > \"$cidfile\"; fi\n    printf '%s\\n' \"$owned\"\n    ;;\n  start:*) if [ \"${{2:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 93; fi ;;\n  container:inspect) if [ \"${{5:-}}\" = \"$owned\" ]; then printf '%s\\n' '{}'; else touch_foreign; exit 94; fi ;;\n  top:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n'; else touch_foreign; exit 95; fi ;;\n  port:*) if [ \"${{2:-}}\" = \"$owned\" ]; then printf '127.0.0.1:{ready_port}\\n'; else touch_foreign; exit 96; fi ;;\n  stop:*) if [ \"${{4:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 97; fi ;;\n  rm:*) if [ \"${{3:-}}\" = \"$owned\" ]; then :; else touch_foreign; exit 98; fi ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         foreign_marker.display(),
         OWNED_CONTAINER_ID,
@@ -169,6 +169,24 @@ fn service_container_lifecycle_uses_acquired_id_after_create() {
     assert!(
         targets.iter().all(|target| *target == OWNED_CONTAINER_ID),
         "every post-create container lifecycle operation must target the exact acquired ID; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("stop --time 1 {OWNED_CONTAINER_ID}")),
+        "termination must stop the exact acquired container ID; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {OWNED_CONTAINER_ID}")),
+        "termination must remove the exact acquired container ID; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network rm --force {}", lease.network_id())),
+        "termination must remove the runtime-owned network named by cleanup authority; calls were:\n{calls}"
     );
 
     let _ = fs::remove_file(program);
