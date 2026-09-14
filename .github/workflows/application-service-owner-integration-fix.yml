@@ -113,23 +113,7 @@ jobs:
           python3 scripts/application_service_runtime_identity_integration_fix.py
           python3 scripts/application_service_cleanup_receipt_integration_fix.py
           python3 scripts/application_service_review_integration_fix.py
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/application_service/mod.rs")
-          text = path.read_text()
-          old = '''    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
-              self.shutdown_grace_seconds
-          }
-
-          /// Return runtime-private cleanup authority when this lease originated in this process.
-          '''
-          new = '''    /// Return runtime-private cleanup authority when this lease originated in this process.
-          '''
-          if text.count(old) != 1:
-              raise SystemExit("application-service lease grace getter repair lost its unique source coordinate")
-          path.write_text(text.replace(old, new, 1))
-          PY
+          python3 -c 'from pathlib import Path; p=Path("src/application_service/mod.rs"); t=p.read_text(); old="    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {\n        self.shutdown_grace_seconds\n    }\n\n    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; new="    /// Return runtime-private cleanup authority when this lease originated in this process.\n"; assert t.count(old) == 1; p.write_text(t.replace(old, new, 1))'
           cargo fmt --all
       - name: Prove focused GREEN
         run: |
