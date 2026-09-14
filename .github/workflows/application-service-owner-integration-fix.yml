@@ -9,6 +9,7 @@ on:
       - scripts/application_service_owner_integration_fix.py
       - scripts/application_service_runtime_identity_integration_fix.py
       - scripts/application_service_cleanup_receipt_integration_fix.py
+      - scripts/application_service_review_integration_fix.py
       - tests/podman_application_service_review_edges.rs
       - tests/podman_application_service_malformed_create_receipt_red.rs
       - tests/podman_application_service_missing_create_receipt_red.rs
@@ -30,6 +31,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Verify exact source-fix checkout
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
@@ -51,8 +53,18 @@ jobs:
           done
 
           set +e
-          cargo test --locked --test podman_application_service_review_edges -- --nocapture > /tmp/review-red.log 2>&1
-          review_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            independent_same_request_plans_use_distinct_runtime_owned_resource_identities \
+            -- --exact --nocapture > /tmp/review-identity-red.log 2>&1
+          review_identity_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            each_live_capability_column_fails_closed_independently \
+            -- --exact --nocapture > /tmp/review-capability-red.log 2>&1
+          review_capability_status=$?
+          cargo test --locked --test podman_application_service_review_edges \
+            duplicate_network_inspection_fails_closed_and_cleans_exact_container \
+            -- --exact --nocapture > /tmp/review-network-red.log 2>&1
+          review_network_status=$?
           cargo test --locked --test podman_application_service_malformed_create_receipt_red -- --nocapture > /tmp/receipt-red.log 2>&1
           receipt_status=$?
           cargo test --locked --test podman_application_service_missing_create_receipt_red -- --nocapture > /tmp/missing-red.log 2>&1
@@ -63,21 +75,33 @@ jobs:
           forged_status=$?
           set -e
 
-          cat /tmp/review-red.log
-          cat /tmp/receipt-red.log
-          cat /tmp/missing-red.log
-          cat /tmp/post-create-red.log
-          cat /tmp/forged-red.log
-          test "$review_status" -ne 0
+          for log in \
+            /tmp/review-identity-red.log \
+            /tmp/review-capability-red.log \
+            /tmp/review-network-red.log \
+            /tmp/receipt-red.log \
+            /tmp/missing-red.log \
+            /tmp/post-create-red.log \
+            /tmp/forged-red.log
+          do
+            cat "$log"
+            if grep -Fq 'operation: "backend_security_info"' "$log"; then
+              echo "unrelated backend_security_info failure reached causal RED lane: $log" >&2
+              exit 1
+            fi
+          done
+
+          test "$review_identity_status" -ne 0
+          test "$review_capability_status" -ne 0
+          test "$review_network_status" -ne 0
           test "$receipt_status" -ne 0
           test "$missing_status" -ne 0
           test "$post_create_status" -ne 0
           test "$forged_status" -ne 0
-          ! grep -F 'operation: "backend_security_info"' /tmp/review-red.log
-          ! grep -F 'operation: "backend_security_info"' /tmp/receipt-red.log
-          ! grep -F 'operation: "backend_security_info"' /tmp/missing-red.log
-          ! grep -F 'operation: "backend_security_info"' /tmp/post-create-red.log
-          grep -F 'independent plans must not share a runtime-owned' /tmp/review-red.log
+
+          grep -F 'independent plans must not share a runtime-owned' /tmp/review-identity-red.log
+          grep -F 'all_capabilities_dropped' /tmp/review-capability-red.log
+          grep -F 'network_inspect' /tmp/review-network-red.log
           grep -F 'runtime-owned exact identity receipt' /tmp/receipt-red.log
           grep -F 'malformed_successful_create_without_receipt_never_uses_generated_name_for_cleanup' /tmp/missing-red.log
           grep -F 'service_container_lifecycle_uses_acquired_id_after_create' /tmp/post-create-red.log
@@ -88,7 +112,24 @@ jobs:
           python3 scripts/application_service_owner_integration_fix.py
           python3 scripts/application_service_runtime_identity_integration_fix.py
           python3 scripts/application_service_cleanup_receipt_integration_fix.py
-          python3 -c 'from pathlib import Path; p=Path("src/application_service/mod.rs"); t=p.read_text(); old="    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {\n        self.shutdown_grace_seconds\n    }\n\n"; assert t.count(old) == 1; p.write_text(t.replace(old, "", 1))'
+          python3 scripts/application_service_review_integration_fix.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/application_service/mod.rs")
+          text = path.read_text()
+          old = '''    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
+              self.shutdown_grace_seconds
+          }
+
+          /// Return runtime-private cleanup authority when this lease originated in this process.
+          '''
+          new = '''    /// Return runtime-private cleanup authority when this lease originated in this process.
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("application-service lease grace getter repair lost its unique source coordinate")
+          path.write_text(text.replace(old, new, 1))
+          PY
           cargo fmt --all
       - name: Prove focused GREEN
         run: |
@@ -104,6 +145,7 @@ jobs:
           rm scripts/application_service_owner_integration_fix.py
           rm scripts/application_service_runtime_identity_integration_fix.py
           rm scripts/application_service_cleanup_receipt_integration_fix.py
+          rm scripts/application_service_review_integration_fix.py
       - name: Validate integrated candidate
         run: |
           set -euo pipefail
@@ -117,6 +159,7 @@ jobs:
           git diff --check
       - name: Publish ordinary repaired descendant
         env:
+          GH_TOKEN: ${{ github.token }}
           TARGET_BRANCH: integration/application-service-owner-into-command-runtime
         run: |
           set -euo pipefail
@@ -125,4 +168,5 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m 'fix(application-service): adopt complete runtime ownership'
+          gh auth setup-git
           git push origin "HEAD:${TARGET_BRANCH}"
