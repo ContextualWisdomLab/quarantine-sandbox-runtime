@@ -112,7 +112,9 @@ fn failed_launch_never_force_removes_foreign_network_members() {
         "the intended cleanup path must be exercised; calls were:\n{calls}"
     );
     assert!(
-        !calls.lines().any(|line| line.starts_with("network rm --force ")),
+        !calls
+            .lines()
+            .any(|line| line.starts_with("network rm --force ")),
         "network cleanup must not delegate foreign-container deletion to `podman network rm --force`; calls were:\n{calls}"
     );
 
