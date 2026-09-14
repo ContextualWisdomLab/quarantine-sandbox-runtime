@@ -4,7 +4,8 @@
 The canonical application-service owner (#21) proved that consumer correlation fields and
 wall-clock time cannot safely name destructive runtime resources. This temporary fixer adapts
 that owner contract onto the current command-runtime architecture and is removed by the source-fix
-workflow after exact RED/GREEN validation.
+workflow after exact RED/GREEN validation. Application-service error ownership is repaired by the
+bounded-context fixer in the same workflow rather than adding service-specific errors to Core.
 """
 
 from pathlib import Path
@@ -18,12 +19,6 @@ def replace_once(path: str, old: str, new: str) -> None:
         raise SystemExit(f"{path}: expected exactly one literal match, found {count}")
     target.write_text(text.replace(old, new, 1))
 
-
-replace_once(
-    "src/sandbox_execution/mod.rs",
-    '''    /// Adding lease duration to the start timestamp overflowed.\n    #[error("application service lease expiry overflow")]\n    LeaseExpiryOverflow,\n''',
-    '''    /// Adding lease duration to the start timestamp overflowed.\n    #[error("application service lease expiry overflow")]\n    LeaseExpiryOverflow,\n    /// The runtime could not obtain operating-system entropy for an invocation identity.\n    #[error("application service runtime identity entropy is unavailable")]\n    RuntimeIdentityUnavailable,\n''',
-)
 
 replace_once(
     "src/sandbox_execution/mod.rs",
