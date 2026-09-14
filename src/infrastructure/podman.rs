@@ -13,12 +13,12 @@ use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
+use crate::sandbox_execution::{CommandExecutionOutcome, RuntimeLeaseMetadata};
 use crate::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
     BackendInvocationFailureKind, CleanupReceipt, CommandExecutionError, CommandExecutionRequest,
     CommandExecutionResult, IsolationControlStatus, IsolationPolicy, ResourceRequest,
-    ServiceEndpoint, VerifiedIsolationState, application_service::CommandExecutionOutcome,
-    sandbox_execution::RuntimeLeaseMetadata, stage_pr_source_artifact,
+    ServiceEndpoint, VerifiedIsolationState, stage_pr_source_artifact,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";

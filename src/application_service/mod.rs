@@ -6,7 +6,6 @@ pub use coordinator::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ExpiredLeaseCleanupResult, LeaseOwnerId,
 };
-pub(crate) use crate::sandbox_execution::CommandExecutionOutcome;
 
 use serde::{Deserialize, Serialize};
 
