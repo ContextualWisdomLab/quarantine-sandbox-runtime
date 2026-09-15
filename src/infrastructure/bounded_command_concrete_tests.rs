@@ -76,6 +76,37 @@ fn descendant_holding_output_pipe_cannot_outlive_command_deadline() {
 }
 
 #[test]
+fn descendant_holding_pipe_preserves_output_limit_precedence() {
+    // The direct shell exits after starting a descendant that first exceeds the
+    // retained-output budget and then keeps the inherited pipe open. OutputLimit
+    // must abort the owned process group immediately instead of being converted
+    // into a later wall-clock Timeout while capture waits for EOF.
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker = thread::spawn(move || {
+        let args = vec![
+            "-c".to_owned(),
+            "(printf 'overflow'; sleep 2) & exit 0".to_owned(),
+        ];
+        let started = Instant::now();
+        let error = BoundedCommandRunner::new(Duration::from_millis(200), 4)
+            .run(Path::new("/bin/sh"), &args)
+            .err();
+        let _ = sender.send((error, started.elapsed()));
+    });
+
+    let (error, elapsed) = receiver
+        .recv_timeout(Duration::from_secs(3))
+        .expect("bounded command did not return inside the outer deadline envelope");
+    worker.join().expect("bounded command worker panicked");
+
+    assert_eq!(error, Some(BoundedCommandError::OutputLimit));
+    assert!(
+        elapsed < Duration::from_millis(150),
+        "output overflow was not surfaced before the command deadline: {elapsed:?}"
+    );
+}
+
+#[test]
 fn concrete_child_output_overflow_is_killed_and_reaped() {
     let args = vec!["-c".to_owned(), "printf 'overflow'".to_owned()];
 
