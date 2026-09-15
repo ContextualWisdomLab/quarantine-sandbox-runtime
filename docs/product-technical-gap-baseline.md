@@ -1,6 +1,36 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-15 KST against protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`, root Draft #1 exact `5c6a44bb2b35eb17d0315d72db242f4488c3c426`, canonical network baseline #119 exact `ccfbcd4ed4e70f95b547b4fb3bc76a8276ca0efd`, current process-repair prerequisite #124 exact `4745358366d8d9a3193ea5f1c665d1f6d46071c8`, explicit-termination RED descendant #120 exact `14803233e9e763fa60d3d4ade9887c0ba45be7ac`, acquired-ID attachment RED descendant #122 exact `113122281ea67a3c7dedd6158d08cf0a15ce3b3b`, blocked application-service integration #118 exact `ddf3981b2a0ed312316228d935231699a9316b6c`, and final #21 ancestry-reconciliation lane #117. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, executed causal evidence, backend-applied configuration evidence, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
+Last reviewed on 2026-09-16 KST against protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`, canonical application-service owner #21 exact `65f69de6eb1cf78b316b38424f8c35c316cd0672`, current canonical network-owner successor #127 exact `dc1e3cd467c690e1e870e70806c95e52fd385a21`, independent process-lifecycle owner #125 exact `c4933fd3c5c990bcdf9d440b6e465a4ea6f89b61`, and the retained historical #124/#119/#120/#122 network/process evidence below. This ledger distinguishes protected truth, active-PR implementation, checked-in RED evidence, executed causal evidence, backend-applied configuration evidence, live effective-runtime proof, queued/cancelled checks, and post-integration protected-head evidence. Predecessor evidence never transfers to a moved head.
+
+## Current owner supersession — 2026-09-16
+
+This section is the current authority. The 2026-09-15 sections below remain causal history and must not be read as present-tense ordering where they conflict with this section.
+
+### Canonical network lifecycle
+
+Network lifecycle work has moved onto canonical application-service owner ancestry. Draft #127 is an ordinary descendant of #21 exact `65f69de6eb1cf78b316b38424f8c35c316cd0672`; current exact head is `dc1e3cd467c690e1e870e70806c95e52fd385a21`. The latest commit is rustfmt-only over `6ff0b4480e5bde696ce7769f151d7aad52e8891d`; production Rust/API/schema/runtime behavior remains unchanged. The branch stages three owner-local RED contracts: acquire the created `qsr-net-*` correlation by exact-name inspection and obtain the stable Podman network `.ID` before container creation; bind the container to that acquired ID and reject different/missing/additional effective attachment sets as `sandbox_network_binding` before readiness; and preserve exact container/network cleanup authority so explicit termination with a foreign network member fails closed as `CleanupFailed` without `podman network rm --force` deleting foreign resources.
+
+Current exact CI is `34988833452`: positive SELinux `104447870162`, coverage `104447870454`, branch coverage `104447870476`, verify `104447870560`, and hosted negative rootless/AppArmor `104447870625` are all queued with `runner_id=0` and no executed steps. Therefore #127 is checked-in RED source, not executed causal RED or GREEN.
+
+Current review exposes one still-valid causality problem in the explicit-termination fixture: the witness can fail at launch readiness before reaching `terminate_at`, so it does not yet prove the intended foreign-member cleanup cause. The suggested remedy of marking the intentional RED tests `#[ignore]` is rejected because it would remove them from the repository's normal causal execution path rather than repair the witness. The owner lane must instead make the readiness setup reach successful lease publication while preserving the foreign-member insertion boundary, then let exact-head execution prove the cleanup RED. Do not add network production GREEN before that causal execution. #120 and #122 remain open until #127 demonstrates complete succession of their valid tests/evidence/TRACEABILITY.
+
+The minimum admissible network GREEN remains: acquire the exact Podman network `.ID` before container creation; bind `--network` to that ID; verify the exact exclusive effective attachment set on the acquired container before readiness publication; retain `qsr-net-*` only as public correlation metadata; keep exact destructive authority private; remove only exact owned resources; and use non-force network cleanup so foreign membership fails closed rather than broadening deletion authority.
+
+### Independent bounded-command process lifecycle
+
+Issue #74 / Draft #125 is independent from the network owner. Predecessor exact `806aecd62a6f764446cdf2b753b7d4bed6cc0999` executed the descendant-held-pipe causal RED in native CI `34940220051`: verify `104286972480` passed repository policy, coverage-parser tests and rustfmt, then a 100 ms command budget returned only after roughly two seconds with `None` instead of `Some(BoundedCommandError::Timeout)` because a descendant retained inherited stdout/stderr.
+
+The first minimum production repair `2f9da0007465084a65aae7d22d186706bb0f8b2d` put each Unix invocation in its own process group and applied the original deadline to capture completion. Review then found that overflow raised after direct-child exit could be overwritten by a later capture timeout. Checked-in RED `215abaacacc6f92392a52152bfe096f9d53621ac` preserves that case; production repair `9a39f9bbe07f3bdf00171e4e9926d01cd00c42f7` carries overflow into the capture-wait phase and preserves `OutputLimit` while terminating only the owned process group. Current exact `c4933fd3c5c990bcdf9d440b6e465a4ea6f89b61` changes only the regression timing margin, not production semantics.
+
+Current #125 CI `34987717952` has coverage `104444034867`, hosted negative rootless/AppArmor `104444034986`, positive SELinux `104444035039`, verify `104444035047`, and branch coverage `104444035247`, all queued with zero steps and no runner assignment. No exact-head GREEN transfers from the executed RED or intermediate repair heads.
+
+### Current bounded actions
+
+1. Repair #127's explicit-termination witness so successful launch/readiness occurs before the foreign member is introduced and `terminate_at` is the first failing boundary; do not hide the RED with `#[ignore]`.
+2. Execute #127 unchanged exact head through the attachment, acquired-ID, and explicit-termination hostile causes. Only then implement the minimum acquired-ID/exclusive-attachment/non-force-cleanup production GREEN on the same #21 owner lineage.
+3. Execute #125 exact `c4933fd3c5c990bcdf9d440b6e465a4ea6f89b61`; if the descendant-held-pipe and post-child overflow cases are GREEN on the same head, continue owner integration without transferring predecessor status.
+4. Keep #124/#119/#120/#122 as causal history and succession evidence rather than present-tense implementation order. Do not close #120/#122 until #127 has demonstrably adopted their valid deltas, tests, fixtures, contracts, and evidence.
+5. Merge/release only from an unchanged dependency-safe candidate that also satisfies review/thread/security, 100% owned-production rustdoc and statement/function/region/branch/edge coverage, positive effective isolation, real runtime acceptance, protected-head central workflows, immutable package/SBOM/provenance/reproducibility/rollback evidence.
 
 ## Current process-boundary supersession — 2026-09-15
 
