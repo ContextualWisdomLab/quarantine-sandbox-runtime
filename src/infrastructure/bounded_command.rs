@@ -490,7 +490,9 @@ mod tests {
             ),
             Ok(false)
         );
-        sender.send(()).expect("blocked stdout worker must be released");
+        sender
+            .send(())
+            .expect("blocked stdout worker must be released");
         blocked_stdout
             .join()
             .expect("stdout worker must finish")
@@ -510,7 +512,9 @@ mod tests {
             ),
             Err(BoundedCommandError::OutputLimit)
         );
-        sender.send(()).expect("blocked stdout worker must be released");
+        sender
+            .send(())
+            .expect("blocked stdout worker must be released");
         blocked_stdout
             .join()
             .expect("stdout worker must finish")
@@ -570,7 +574,9 @@ mod tests {
             ),
             Err(BoundedCommandError::Timeout)
         );
-        sender.send(()).expect("blocked stdout worker must be released");
+        sender
+            .send(())
+            .expect("blocked stdout worker must be released");
         blocked_stdout
             .join()
             .expect("stdout worker must finish")
@@ -593,7 +599,9 @@ mod tests {
             ),
             Err(BoundedCommandError::OutputLimit)
         );
-        sender.send(()).expect("blocked stdout worker must be released");
+        sender
+            .send(())
+            .expect("blocked stdout worker must be released");
         blocked_stdout
             .join()
             .expect("stdout worker must finish")
@@ -616,7 +624,9 @@ mod tests {
             ),
             Err(BoundedCommandError::Wait)
         );
-        sender.send(()).expect("blocked stdout worker must be released");
+        sender
+            .send(())
+            .expect("blocked stdout worker must be released");
         blocked_stdout
             .join()
             .expect("stdout worker must finish")
