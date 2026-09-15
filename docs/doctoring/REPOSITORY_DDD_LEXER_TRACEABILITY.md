@@ -51,6 +51,16 @@ Checked-in regression `be6e8f0927f5e5e43a1abad51787618174536690` adds direct des
 
 Commit `c64353cebbc5f3e479947415a08c383e266aa7b3` changes the focused detector to evaluate the complete `sandbox_execution::` use-tree segment through its terminating semicolon and reject any `*` leaf in that segment. Because `*` has glob meaning inside a Rust `UseTree`, this covers direct, grouped, mixed and arbitrarily descendant glob leaves while leaving named descendant imports accepted. Production runtime Rust, public contracts and domain ownership are unchanged.
 
+### Non-code wildcard lexical follow-up
+
+Fresh review of exact `4cfbebf8c9d511d3ac1b07ffeb825be0a334a19c` found that the descendant-glob detector still compacted the entire source before searching for `sandbox_execution::` and `*`. A comment, diagnostic string, or raw string containing example text such as `use crate::sandbox_execution::*;` was therefore indistinguishable from an executable `use` declaration and could reject a valid Supporting-context source file.
+
+Checked-in regression `826e7d918bd8ee5499240e819c915d9865f54d43` adds line-comment, ordinary-string, raw-string, and nested-block-comment negative controls. The pre-repair helper classifies those examples as wildcard imports because whitespace compaction preserves their path and `*` tokens. Native CI `35011914210` materialized for that exact head but all five jobs were cancelled with `runner_id=0`, `steps=[]`; this is checked-in deterministic RED source, not hosted executed causal RED.
+
+Commit `3c379187bcd03768819447ebd7253f1a9c569939` makes the Rust architecture fitness helper apply the same lexical boundary already used by `scripts/validate_repository.py`: nested block comments, line comments, ordinary quoted strings, and `r`/`br`/`cr` raw strings are masked before use-tree inspection, while newlines are preserved. The wildcard detector then operates only on remaining Rust code. Direct, grouped, descendant, and nested executable glob controls stay positive. This is a test/fitness-rule repair only; production runtime Rust, public APIs, schemas, isolation semantics, and coverage thresholds are unchanged.
+
+Rust treats non-doc comments as whitespace and permits nested block comments. The `UseTree` grammar assigns glob semantics to `*` only inside a `use` declaration. Treating comment/literal payload as import syntax therefore creates a policy false positive rather than additional DDD enforcement.
+
 These changes are repository-policy and architecture-test repairs only. Hosted exact-head evidence remains required after every descendant commit; no predecessor GREEN transfers.
 
 ## Alternatives rejected
@@ -73,4 +83,6 @@ Rust Project Developers. (n.d.). *Tokens*. The Rust Reference. Retrieved Septemb
 
 Rust Project Developers. (n.d.). *Use declarations*. The Rust Reference. Retrieved September 16, 2026, from https://doc.rust-lang.org/reference/items/use-declarations.html
 
-The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator. The use-declaration grammar defines recursive brace-grouped use trees and glob leaves, including descendant-path and nested glob imports.
+Rust Project Developers. (n.d.). *Comments*. The Rust Reference. Retrieved September 16, 2026, from https://doc.rust-lang.org/reference/comments.html
+
+The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator. The use-declaration grammar defines recursive brace-grouped use trees and glob leaves, including descendant-path and nested glob imports; non-doc comments are whitespace and nested block comments are supported.
