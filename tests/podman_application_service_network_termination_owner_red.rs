@@ -190,9 +190,22 @@ fn explicit_termination_preserves_foreign_network_member() {
     );
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
-    let lease = adapter
-        .launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS)
-        .expect("service must launch before the foreign member appears");
+    let launch_result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
+    let lease = match launch_result {
+        Ok(lease) => lease,
+        Err(error) => {
+            let calls = fs::read_to_string(&log).unwrap_or_default();
+            let _ = fs::remove_file(&program);
+            let _ = fs::remove_file(&log);
+            let _ = fs::remove_file(&foreign_marker);
+            let _ = fs::remove_file(&created_network_name);
+            let _ = fs::remove_file(&selected_network);
+            drop(listener);
+            panic!(
+                "service must launch before the foreign member appears; got {error:?}; calls were:\n{calls}"
+            );
+        }
+    };
     fs::write(&foreign_marker, "safe\n").expect("foreign marker must be writable");
 
     let result = adapter.terminate_at(&lease, TERMINATED_AT_EPOCH_SECONDS);
