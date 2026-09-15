@@ -35,6 +35,14 @@ First, Rust lifetime and loop-label syntax uses a leading single quote. The depe
 
 Second, the Rust architectural fitness test previously inspected only `src/application_service/mod.rs`. That left a structural loophole: a Supporting-context submodule could import a Core-private `CommandExecutionOutcome`, and the parent module could expose it indirectly. Commit `0b6c6f72ea12c2f1a25faebff3c0135646a476fa` changes the test to recursively inspect every Rust source under `src/application_service/`. It rejects any `CommandExecutionOutcome` occurrence in that bounded context and also rejects a whitespace-normalized `sandbox_execution::*` wildcard import. The existing infrastructure rule requiring bounded-command domain truth to come directly from `sandbox_execution` remains in place.
 
+## 2026-09-16 review repair: grouped and nested glob use trees
+
+Review of exact `82c15a5d20c2eab710f59785e291836c48b2d176` found that the Supporting-context wildcard fitness rule recognized only the direct normalized form `sandbox_execution::*`. Rust also permits brace-grouped and nested use trees, including `use crate::sandbox_execution::{*};`, `use crate::sandbox_execution::{CommandExecutionRequest, *};`, and nested forms such as `use crate::sandbox_execution::{nested::{Thing}, *};`. Those forms could therefore bypass the architecture test while importing the full Core export surface.
+
+Commit `e5a2be3ca26245f3d48295fa72e78d716a7c84ae` replaces the single substring check with a focused `imports_sandbox_execution_glob` use-tree detector and adds regressions for direct, grouped, mixed named-plus-glob, and nested grouped forms. Named imports remain allowed. The helper follows brace depth so the wildcard cannot be hidden behind a nested group. This is a test/fitness-rule repair only; production runtime Rust and the bounded-command public contract are unchanged.
+
+The Rust Reference defines `UseTree` recursively: a use tree may be `*`, a brace-delimited list of use trees, or a named path, and brace groups may nest. It explicitly gives a nested glob example equivalent in shape to `use a::b::{self as ab, c, d::{*, e::f}};`. The fitness rule therefore has to recognize wildcard leaves in the whole use tree rather than only the direct `path::*` spelling.
+
 These changes are repository-policy and architecture-test repairs only. They do not modify production runtime Rust or move domain ownership. Hosted exact-head evidence remains required after every descendant commit; no predecessor GREEN transfers.
 
 ## Alternatives rejected
@@ -43,14 +51,17 @@ These changes are repository-policy and architecture-test repairs only. They do 
 - Whitelisting specific messages or files: converts a structural rule into mutable exceptions.
 - Removing the `ApplicationService*` / `application_service` fitness rule: weakens the DDD boundary rather than fixing lexical classification.
 - Scanning only the Supporting-context root module: does not protect the bounded context when implementation is split across submodules.
-- Adding a full Rust parser solely for this rule: materially increases repository-policy dependency and maintenance surface for a bounded lexical requirement. Revisit only if future Rust token classes make the local lexer materially incomplete.
+- Checking only `sandbox_execution::*` and `sandbox_execution::{*}` as literal strings: still misses mixed and nested brace use trees that Rust permits.
+- Adding a full Rust parser solely for this rule: materially increases repository-policy dependency and maintenance surface for a bounded lexical requirement. Revisit only if future Rust token classes or use-tree forms make the local detector materially incomplete.
 
 ## Verification and remaining gate
 
-The repair candidate must pass the focused repository-validator regressions and the normal exact-head repository policy, rustfmt, full workspace tests, Clippy with warnings denied, public/private rustdoc with warnings denied, owned-production coverage, security/review gates, and applicable real isolation evidence. No predecessor GREEN transfers after the head moves.
+The repair candidate must pass the focused architecture regression and the normal exact-head repository policy, rustfmt, full workspace tests, Clippy with warnings denied, public/private rustdoc with warnings denied, owned-production coverage, security/review gates, and applicable real isolation evidence. No predecessor GREEN transfers after the head moves.
 
-## Reference
+## References
 
 Rust Project Developers. (n.d.). *Tokens*. The Rust Reference. Retrieved September 15, 2026, from https://doc.rust-lang.org/reference/tokens.html
 
-The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator.
+Rust Project Developers. (n.d.). *Use declarations*. The Rust Reference. Retrieved September 16, 2026, from https://doc.rust-lang.org/reference/items/use-declarations.html
+
+The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator. The use-declaration grammar defines recursive brace-grouped use trees and glob leaves, including nested glob imports.
