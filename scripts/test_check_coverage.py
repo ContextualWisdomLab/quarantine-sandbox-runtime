@@ -108,6 +108,28 @@ class SourceLineCoverageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source line denominator"):
             _source_line_counts(data)
 
+    def test_multiline_region_ending_at_column_one_excludes_terminal_line(self) -> None:
+        data = {
+            "files": [
+                {
+                    "filename": "/workspace/src/runtime.rs",
+                    "summary": {"lines": {"count": 1, "covered": 1}},
+                    "segments": [
+                        [10, 5, 7, True, True, False],
+                        [11, 1, 0, False, False, False],
+                    ],
+                }
+            ],
+            "functions": [
+                {
+                    "filenames": ["/workspace/src/runtime.rs"],
+                    "regions": [[10, 5, 11, 1, 7, 0, 0, 0]],
+                }
+            ],
+        }
+
+        self.assertEqual(_source_line_counts(data), (1, 1))
+
 
 class SourceRegionCoverageTests(unittest.TestCase):
     """Measure source regions once even when LLVM exports multiple instantiations."""
