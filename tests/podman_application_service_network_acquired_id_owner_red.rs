@@ -125,7 +125,9 @@ case "${{1:-}}:${{2:-}}" in
     ;;
   port:*) printf '127.0.0.1:{ready_port}\n' ;;
   stop:*) : ;;
-  rm:*) : ;;
+  rm:--force)
+    [ "${{3:-}}" = "$container_id" ] || exit 96
+    ;;
   network:rm) : ;;
   *) exit 91 ;;
 esac
@@ -178,9 +180,7 @@ fn acquired_network_identity_precedes_create_and_preserves_attachment_red() {
         .expect("network create must include the correlation name");
     let identity_inspect_index = lines
         .iter()
-        .position(|line| {
-            *line == format!("network inspect --format json {created_network_name}")
-        })
+        .position(|line| *line == format!("network inspect --format json {created_network_name}"))
         .expect("created network identity must be inspected by its exact correlation name");
     let container_create_index = lines
         .iter()
@@ -208,15 +208,27 @@ fn acquired_network_identity_precedes_create_and_preserves_attachment_red() {
         "acquired-ID binding must not erase the hostile effective-attachment mismatch"
     );
     assert!(
-        calls.lines().any(|line| line == format!("stop --time 1 {OWNED_CONTAINER_ID}")),
+        calls
+            .lines()
+            .any(|line| line == format!("stop --time 1 {OWNED_CONTAINER_ID}")),
         "started-container cleanup must stay bound to the exact acquired container ID; calls were:\n{calls}"
     );
     assert!(
-        calls.lines().any(|line| line == format!("network rm {OWNED_NETWORK_ID}")),
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {OWNED_CONTAINER_ID}")),
+        "container cleanup must remove only the exact acquired container ID; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network rm {OWNED_NETWORK_ID}")),
         "network cleanup must use exact acquired authority without force; calls were:\n{calls}"
     );
     assert!(
-        !calls.lines().any(|line| line.starts_with("network rm --force ")),
+        !calls
+            .lines()
+            .any(|line| line.starts_with("network rm --force ")),
         "network-level force cleanup must never be used; calls were:\n{calls}"
     );
     assert!(
