@@ -3,7 +3,7 @@ use std::{
     path::Path,
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
@@ -50,23 +50,29 @@ fn concrete_child_timeout_is_killed_and_reaped() {
 #[test]
 fn descendant_holding_output_pipe_cannot_outlive_command_deadline() {
     // The direct shell exits immediately while the background descendant keeps
-    // stdout/stderr open. Run the invocation on a worker so this test has its
-    // own outer bound even if capture never closes.
+    // stdout/stderr open. The descendant has a finite lifetime shorter than the
+    // harness envelope, so the current bug returns a wrong result instead of
+    // leaving a detached Rust worker behind after the expected RED.
     let (sender, receiver) = mpsc::sync_channel(1);
     let worker = thread::spawn(move || {
         let args = vec!["-c".to_owned(), "sleep 2 & exit 0".to_owned()];
+        let started = Instant::now();
         let error = BoundedCommandRunner::new(Duration::from_millis(100), 64)
             .run(Path::new("/bin/sh"), &args)
             .err();
-        let _ = sender.send(error);
+        let _ = sender.send((error, started.elapsed()));
     });
 
-    let error = receiver
-        .recv_timeout(Duration::from_secs(1))
+    let (error, elapsed) = receiver
+        .recv_timeout(Duration::from_secs(3))
         .expect("bounded command did not return inside the outer deadline envelope");
     worker.join().expect("bounded command worker panicked");
 
     assert_eq!(error, Some(BoundedCommandError::Timeout));
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "bounded command returned after its deadline: {elapsed:?}"
+    );
 }
 
 #[test]
