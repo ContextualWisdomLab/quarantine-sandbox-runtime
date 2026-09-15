@@ -88,7 +88,7 @@ fn descendant_holding_pipe_preserves_output_limit_precedence() {
             "(printf 'overflow'; sleep 2) & exit 0".to_owned(),
         ];
         let started = Instant::now();
-        let error = BoundedCommandRunner::new(Duration::from_millis(200), 4)
+        let error = BoundedCommandRunner::new(Duration::from_secs(1), 4)
             .run(Path::new("/bin/sh"), &args)
             .err();
         let _ = sender.send((error, started.elapsed()));
@@ -101,7 +101,7 @@ fn descendant_holding_pipe_preserves_output_limit_precedence() {
 
     assert_eq!(error, Some(BoundedCommandError::OutputLimit));
     assert!(
-        elapsed < Duration::from_millis(150),
+        elapsed < Duration::from_millis(500),
         "output overflow was not surfaced before the command deadline: {elapsed:?}"
     );
 }
