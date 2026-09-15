@@ -34,7 +34,7 @@ REQUIRED_FILES = (
     "src/artifact_analysis/ingestion.rs",
     "src/artifact_analysis/runtime.rs",
     "src/application_service/mod.rs",
-    "src/application_service/command_execution.rs",
+    "src/sandbox_execution/bounded_command_execution.rs",
     "src/sandbox_execution/mod.rs",
     "src/infrastructure/mod.rs",
     "src/infrastructure/podman.rs",
