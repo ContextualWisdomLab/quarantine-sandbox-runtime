@@ -136,7 +136,9 @@ case "${{1:-}}:${{2:-}}" in
     ;;
   port:*) printf '127.0.0.1:{ready_port}\n' ;;
   stop:*) : ;;
-  rm:*) : ;;
+  rm:--force)
+    [ "${{3:-}}" = "$container_id" ] || exit 96
+    ;;
   network:rm)
     if [ -e "$foreign" ]; then
       case " $* " in
@@ -218,6 +220,12 @@ fn explicit_termination_preserves_foreign_network_member() {
             .lines()
             .any(|line| line == format!("stop --time 1 {OWNED_CONTAINER_ID}")),
         "termination must stay bound to the exact acquired container ID; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("rm --force {OWNED_CONTAINER_ID}")),
+        "termination must remove only the exact acquired container ID; calls were:\n{calls}"
     );
     assert!(
         calls
