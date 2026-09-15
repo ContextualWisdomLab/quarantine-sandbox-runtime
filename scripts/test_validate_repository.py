@@ -37,6 +37,11 @@ use crate::application_service::ApplicationServiceRequest;
 
         self.assertTrue(core_depends_on_application_service(source))
 
+    def test_raw_string_literal_with_embedded_quote_does_not_create_false_dependency(self) -> None:
+        source = 'const MESSAGE: &str = r#"compatibility " ApplicationServiceError text"#;\n'
+
+        self.assertFalse(core_depends_on_application_service(source))
+
 
 if __name__ == "__main__":
     unittest.main()
