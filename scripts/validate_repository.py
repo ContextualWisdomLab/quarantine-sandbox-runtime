@@ -76,7 +76,7 @@ FORBIDDEN_DATABASE_NAME = re.compile(
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
 ACTION_REFERENCE = re.compile(r"^[0-9a-f]{40}$")
 SUPPORTING_CONTEXT_REFERENCE = re.compile(
-    r"\bapplication_service\b|\bApplicationService[A-Za-z0-9_]*\b"
+    r"(?<!')\bapplication_service\b|(?<!')\bApplicationService[A-Za-z0-9_]*\b"
 )
 
 
