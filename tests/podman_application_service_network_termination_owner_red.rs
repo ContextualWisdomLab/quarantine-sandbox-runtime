@@ -2,6 +2,8 @@
 //!
 //! This fixture is compatible with both the current correlation-name binding and the intended
 //! acquired-network-ID binding so the failure cause stays on destructive cleanup authority.
+//! Podman container inspection reports `NetworkSettings.Networks` as a map keyed by network name,
+//! while `NetworkID` carries the stable network identity; the fixture preserves that distinction.
 
 #![cfg(target_os = "linux")]
 
@@ -129,7 +131,8 @@ case "${{1:-}}:${{2:-}}" in
   start:*) : ;;
   container:inspect)
     network=$(cat "$selected_network_file")
-    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"%s"}},"NetworkSettings":{{"Networks":{{"%s":{{"NetworkID":"%s"}}}}}}}}]\n' "$container_id" "$network" "$network" "$network_id"
+    network_name=$(cat "$network_name_file")
+    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"%s"}},"NetworkSettings":{{"Networks":{{"%s":{{"NetworkID":"%s"}}}}}}}}]\n' "$container_id" "$network" "$network_name" "$network_id"
     ;;
   top:*)
     printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n'
