@@ -37,13 +37,21 @@ Second, the Rust architectural fitness test previously inspected only `src/appli
 
 ## 2026-09-16 review repair: grouped and nested glob use trees
 
-Review of exact `82c15a5d20c2eab710f59785e291836c48b2d176` found that the Supporting-context wildcard fitness rule recognized only the direct normalized form `sandbox_execution::*`. Rust also permits brace-grouped and nested use trees, including `use crate::sandbox_execution::{*};`, `use crate::sandbox_execution::{CommandExecutionRequest, *};`, and nested forms such as `use crate::sandbox_execution::{nested::{Thing}, *};`. Those forms could therefore bypass the architecture test while importing the full Core export surface.
+Review of exact `82c15a5d20c2eab710f59785e291836c48b2d176` found that the Supporting-context wildcard fitness rule recognized only the direct normalized form `sandbox_execution::*`. Rust also permits brace-grouped use trees, including `use crate::sandbox_execution::{*};`, `use crate::sandbox_execution::{CommandExecutionRequest, *};`, and nested forms such as `use crate::sandbox_execution::{nested::{Thing}, *};`. Those forms could therefore bypass the architecture test while importing the full Core export surface.
 
-Commit `e5a2be3ca26245f3d48295fa72e78d716a7c84ae` replaces the single substring check with a focused `imports_sandbox_execution_glob` use-tree detector and adds regressions for direct, grouped, mixed named-plus-glob, and nested grouped forms. Named imports remain allowed. The helper follows brace depth so the wildcard cannot be hidden behind a nested group. This is a test/fitness-rule repair only; production runtime Rust and the bounded-command public contract are unchanged.
+Commit `e5a2be3ca26245f3d48295fa72e78d716a7c84ae` replaced the single substring check with the first `imports_sandbox_execution_glob` use-tree detector and added regressions for direct, grouped, mixed named-plus-glob, and root-grouped forms. Named imports remained allowed. This closed the root-grouped loophole but, as the next exact-head review demonstrated, the helper still assumed the tail immediately after `sandbox_execution::` began with either `*` or `{` and therefore did not yet cover a descendant path before the glob leaf.
 
 The Rust Reference defines `UseTree` recursively: a use tree may be `*`, a brace-delimited list of use trees, or a named path, and brace groups may nest. It explicitly gives a nested glob example equivalent in shape to `use a::b::{self as ab, c, d::{*, e::f}};`. The fitness rule therefore has to recognize wildcard leaves in the whole use tree rather than only the direct `path::*` spelling.
 
-These changes are repository-policy and architecture-test repairs only. They do not modify production runtime Rust or move domain ownership. Hosted exact-head evidence remains required after every descendant commit; no predecessor GREEN transfers.
+### Descendant-path glob follow-up
+
+Fresh review of exact `363a822a8f8e2b967f418d28e5992b24121264f5` found the remaining structural hole. The helper rejected `sandbox_execution::*` and root brace groups, but returned false for legal descendant-path forms such as `use crate::sandbox_execution::nested::*;` because the tail begins with `nested::`. The same invariant must also cover brace-grouped descendant leaves such as `use crate::sandbox_execution::{nested::*};` and deeper groups such as `use crate::sandbox_execution::nested::{Thing, *};`.
+
+Checked-in regression `be6e8f0927f5e5e43a1abad51787618174536690` adds direct descendant, root-grouped descendant, and descendant brace-group glob witnesses, plus named descendant imports as negative controls. This is source RED derived from a verified exact-head review finding; no hosted execution is claimed for that intermediate head.
+
+Commit `c64353cebbc5f3e479947415a08c383e266aa7b3` changes the focused detector to evaluate the complete `sandbox_execution::` use-tree segment through its terminating semicolon and reject any `*` leaf in that segment. Because `*` has glob meaning inside a Rust `UseTree`, this covers direct, grouped, mixed and arbitrarily descendant glob leaves while leaving named descendant imports accepted. Production runtime Rust, public contracts and domain ownership are unchanged.
+
+These changes are repository-policy and architecture-test repairs only. Hosted exact-head evidence remains required after every descendant commit; no predecessor GREEN transfers.
 
 ## Alternatives rejected
 
@@ -51,7 +59,8 @@ These changes are repository-policy and architecture-test repairs only. They do 
 - Whitelisting specific messages or files: converts a structural rule into mutable exceptions.
 - Removing the `ApplicationService*` / `application_service` fitness rule: weakens the DDD boundary rather than fixing lexical classification.
 - Scanning only the Supporting-context root module: does not protect the bounded context when implementation is split across submodules.
-- Checking only `sandbox_execution::*` and `sandbox_execution::{*}` as literal strings: still misses mixed and nested brace use trees that Rust permits.
+- Checking only `sandbox_execution::*` and `sandbox_execution::{*}` as literal strings: misses mixed, descendant-path and nested brace use trees that Rust permits.
+- Stopping use-tree inspection after the first descendant identifier: misses legal `path::*` and `path::{..., *}` forms below the Core context root.
 - Adding a full Rust parser solely for this rule: materially increases repository-policy dependency and maintenance surface for a bounded lexical requirement. Revisit only if future Rust token classes or use-tree forms make the local detector materially incomplete.
 
 ## Verification and remaining gate
@@ -64,4 +73,4 @@ Rust Project Developers. (n.d.). *Tokens*. The Rust Reference. Retrieved Septemb
 
 Rust Project Developers. (n.d.). *Use declarations*. The Rust Reference. Retrieved September 16, 2026, from https://doc.rust-lang.org/reference/items/use-declarations.html
 
-The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator. The use-declaration grammar defines recursive brace-grouped use trees and glob leaves, including nested glob imports.
+The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator. The use-declaration grammar defines recursive brace-grouped use trees and glob leaves, including descendant-path and nested glob imports.
