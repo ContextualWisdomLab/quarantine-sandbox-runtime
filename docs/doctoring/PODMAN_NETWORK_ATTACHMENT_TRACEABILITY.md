@@ -12,6 +12,8 @@ The explicit-termination hostile fixture must launch successfully under both the
 
 Predecessor exact `96d31affabc21b5915e3438f3de8ba1b62ef0e1d` recorded the selected `--network` argument and reused that value as both `HostConfig.NetworkMode` and the key of `NetworkSettings.Networks`. That is realistic while the selector is the generated `qsr-net-*` name, but it becomes structurally wrong when the selector is the full Podman network ID. Podman's container-inspect model defines `NetworkSettings.Networks` as a map **from network name to network information**; the stable identity is carried separately by each entry's `NetworkID` field.
 
+Podman's current network-create documentation also states that successful `podman network create` displays the newly added network's **name**, while network inspection exposes a distinct `.ID` in addition to `.Name`, `.Internal`, `.DNSEnabled`, and other configuration. Therefore network-create stdout is correlation/name evidence, not the full immutable network identity required for attachment comparison or destructive cleanup.
+
 A future acquired-ID implementation could therefore be rejected by a correct attachment verifier before the fixture reaches its intended explicit-termination boundary merely because the fake backend emitted an impossible name/identity shape.
 
 A second authority-separation defect exists in the current production construction path. `ApplicationServiceCleanupAuthority.network_id` is derived from the same `RuntimeLeaseMetadata.network_id` that becomes public `ApplicationServiceLease.network_id()`. If an acquired-ID GREEN merely replaces that metadata field with Podman's full network ID, cleanup obtains exact destructive authority but the public lease silently stops carrying the generated `qsr-net-*` correlation. That would change consumer-visible semantics solely to satisfy an internal cleanup requirement.
@@ -35,6 +37,7 @@ These repairs are test/documentation only. Production Rust/API/schema/runtime se
 ## Rejected alternatives
 
 - **Keep the selected selector as the map key.** Rejected because it makes future ID-bound inspect evidence unlike Podman's documented data model and can move the RED to a fixture artifact.
+- **Treat network-create stdout as the acquired network ID.** Rejected because Podman documents that `network create` prints the newly added network name; the stable network ID must be obtained from inspection rather than inferred from that output.
 - **Require only the network name.** Rejected because the acquired-ID RED separately requires stable identity before container creation and the termination witness must remain compatible with that future GREEN.
 - **Ignore `NetworkSettings.Networks` and trust `HostConfig.NetworkMode`.** Rejected because configuration intent is not effective attachment proof; the hostile contract requires exact effective membership before readiness.
 - **Put the acquired Podman ID into public `ApplicationServiceLease.network_id()`.** Rejected because it changes an existing consumer-visible correlation field to satisfy an internal destructive-authority need. A public semantic change would require its own versioned contract decision rather than occurring as an incidental cleanup implementation detail.
@@ -72,3 +75,7 @@ Queued or cancelled runs, predecessor GREEN, network-object configuration alone,
 The Podman Project. (2026). *Container inspection data structures* [Source code]. GitHub. https://github.com/containers/podman/blob/main/libpod/define/container_inspect.go
 
 The Podman Project. (2026). *podman-inspect — Display artifact, container, image, volume, network, or pod configuration* [Documentation]. https://docs.podman.io/en/latest/markdown/podman-inspect.1.html
+
+The Podman Project. (2026). *podman-network-create — Create a Podman network* [Documentation]. https://docs.podman.io/en/latest/markdown/podman-network-create.1.html
+
+The Podman Project. (2026). *podman-network-inspect — Display the network configuration for one or more networks* [Documentation]. https://docs.podman.io/en/latest/markdown/podman-network-inspect.1.html
