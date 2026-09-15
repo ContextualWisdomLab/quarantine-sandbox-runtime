@@ -20,15 +20,13 @@ fn bounded_command_contract_is_owned_by_core_sandbox_context() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let core_module_path = root.join("src/sandbox_execution/mod.rs");
     let core_contract_path = root.join("src/sandbox_execution/bounded_command_execution.rs");
-    let supporting_module_path = root.join("src/application_service/mod.rs");
+    let supporting_context_root = root.join("src/application_service");
     let historical_supporting_contract_path =
         root.join("src/application_service/command_execution.rs");
     let podman_infrastructure_path = root.join("src/infrastructure/podman.rs");
 
     let core_module =
         fs::read_to_string(core_module_path).expect("sandbox_execution source should be readable");
-    let supporting_module = fs::read_to_string(supporting_module_path)
-        .expect("application_service source should be readable");
     let podman_infrastructure = fs::read_to_string(podman_infrastructure_path)
         .expect("Podman infrastructure source should be readable");
 
@@ -48,14 +46,27 @@ fn bounded_command_contract_is_owned_by_core_sandbox_context() {
         !historical_supporting_contract_path.exists(),
         "application_service must not retain a second bounded command source of truth"
     );
+
+    let mut supporting_sources = Vec::new();
+    collect_rust_sources(&supporting_context_root, &mut supporting_sources);
     assert!(
-        !supporting_module.contains("mod command_execution;"),
-        "application_service must not define the bounded command module"
+        !supporting_sources.is_empty(),
+        "application_service Supporting context must contain Rust sources"
     );
-    assert!(
-        !supporting_module.contains("CommandExecutionOutcome"),
-        "application_service must not re-export Core-private bounded command outcomes"
-    );
+    for path in supporting_sources {
+        let source = fs::read_to_string(&path).expect("application_service source should be readable");
+        let compact_source: String = source.split_whitespace().collect();
+        assert!(
+            !source.contains("CommandExecutionOutcome"),
+            "application_service source {} must not expose Core-private bounded command outcomes",
+            path.display()
+        );
+        assert!(
+            !compact_source.contains("sandbox_execution::*"),
+            "application_service source {} must not wildcard-import Core sandbox_execution exports",
+            path.display()
+        );
+    }
     assert!(
         !podman_infrastructure.contains("application_service::CommandExecutionOutcome"),
         "infrastructure must import bounded command domain truth directly from sandbox_execution Core"
