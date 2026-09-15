@@ -80,13 +80,41 @@ SUPPORTING_CONTEXT_REFERENCE = re.compile(
 )
 
 
+def rust_raw_string_end(source: str, index: int) -> int | None:
+    """Return one-past-end for a Rust raw string token starting at ``index``."""
+
+    if index > 0 and (source[index - 1].isalnum() or source[index - 1] == "_"):
+        return None
+
+    cursor = index
+    if source.startswith(("br", "cr"), cursor):
+        cursor += 2
+    elif source.startswith("r", cursor):
+        cursor += 1
+    else:
+        return None
+
+    hash_start = cursor
+    while cursor < len(source) and source[cursor] == "#":
+        cursor += 1
+    if cursor >= len(source) or source[cursor] != '"':
+        return None
+
+    hash_count = cursor - hash_start
+    closing_delimiter = '"' + ("#" * hash_count)
+    closing_index = source.find(closing_delimiter, cursor + 1)
+    if closing_index < 0:
+        return len(source)
+    return closing_index + len(closing_delimiter)
+
+
 def rust_code_without_comments_and_strings(source: str) -> str:
     """Return Rust source with comments and string contents removed.
 
     The DDD fitness rule is about compile-time dependencies. Documentation,
     diagnostic text, and compatibility notes may legitimately name a Supporting
     context and must not create a false dependency finding. Nested block comments
-    are handled because Rust permits them.
+    and raw-string delimiters are handled because Rust permits both.
     """
 
     output: list[str] = []
@@ -121,6 +149,15 @@ def rust_code_without_comments_and_strings(source: str) -> str:
             else:
                 output.append("\n" if character == "\n" else " ")
                 index += 1
+            continue
+
+        raw_string_end = rust_raw_string_end(source, index)
+        if raw_string_end is not None:
+            output.extend(
+                "\n" if character == "\n" else " "
+                for character in source[index:raw_string_end]
+            )
+            index = raw_string_end
             continue
 
         if source.startswith("//", index):
