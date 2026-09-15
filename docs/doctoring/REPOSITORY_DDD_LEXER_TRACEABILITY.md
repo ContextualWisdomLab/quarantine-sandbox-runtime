@@ -27,11 +27,22 @@ Commit `fa6886cb27cde0b7c6da07aff45bcffaa65ef5dd` adds `rust_raw_string_end`, re
 
 Test-only descendant `4ecb5894d51df40334eb78e2e2e7d8cc5ee9b7f3` adds multiple-hash, raw-byte, and post-raw-string real-dependency controls. The repair does not weaken the executable dependency matcher.
 
+## 2026-09-15 review repair: lifetimes, labels, and Supporting-context submodules
+
+Current-head review exposed two additional fitness-rule gaps that are distinct from raw strings.
+
+First, Rust lifetime and loop-label syntax uses a leading single quote. The dependency regex treated `'application_service` as the identifier `application_service`, so a Core function could be rejected merely for using a legal lifetime or label with that name. Checked-in regression `990c4b8d356a9aefadd25b581988c209cdd035dd` adds both lifetime and loop-label witnesses. A deterministic local evaluation of the prior regex reproduced both false positives while a real `crate::application_service::ApplicationServiceRequest` reference remained positive. Commit `13467248e955853c050248a6eb2bf55f8dc717c1` narrows the matcher only for Supporting-context tokens immediately preceded by a single quote. It does not suppress ordinary module paths or `ApplicationService*` type names.
+
+Second, the Rust architectural fitness test previously inspected only `src/application_service/mod.rs`. That left a structural loophole: a Supporting-context submodule could import a Core-private `CommandExecutionOutcome`, and the parent module could expose it indirectly. Commit `0b6c6f72ea12c2f1a25faebff3c0135646a476fa` changes the test to recursively inspect every Rust source under `src/application_service/`. It rejects any `CommandExecutionOutcome` occurrence in that bounded context and also rejects a whitespace-normalized `sandbox_execution::*` wildcard import. The existing infrastructure rule requiring bounded-command domain truth to come directly from `sandbox_execution` remains in place.
+
+These changes are repository-policy and architecture-test repairs only. They do not modify production runtime Rust or move domain ownership. Hosted exact-head evidence remains required after every descendant commit; no predecessor GREEN transfers.
+
 ## Alternatives rejected
 
-- Renaming documentation or diagnostic strings: hides the validator defect and leaves equivalent raw strings vulnerable.
+- Renaming documentation, lifetimes, labels, or diagnostic strings: hides validator defects and leaves equivalent legal Rust syntax vulnerable.
 - Whitelisting specific messages or files: converts a structural rule into mutable exceptions.
 - Removing the `ApplicationService*` / `application_service` fitness rule: weakens the DDD boundary rather than fixing lexical classification.
+- Scanning only the Supporting-context root module: does not protect the bounded context when implementation is split across submodules.
 - Adding a full Rust parser solely for this rule: materially increases repository-policy dependency and maintenance surface for a bounded lexical requirement. Revisit only if future Rust token classes make the local lexer materially incomplete.
 
 ## Verification and remaining gate
@@ -42,4 +53,4 @@ The repair candidate must pass the focused repository-validator regressions and 
 
 Rust Project Developers. (n.d.). *Tokens*. The Rust Reference. Retrieved September 15, 2026, from https://doc.rust-lang.org/reference/tokens.html
 
-The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal.
+The Rust Reference defines raw string literals as `r` followed by fewer than 256 `#` characters and a quote, terminated only by a quote followed by the same number of `#` characters. It separately defines raw byte (`br`) and raw C (`cr`, Edition 2021+) string literal token forms. Embedded quotes and backslashes that do not form the matching closing delimiter have no special terminating meaning inside a raw literal. Rust lifetime and loop-label tokens use a leading single quote followed by an identifier; that quote is syntax, not a Supporting-context path separator.
