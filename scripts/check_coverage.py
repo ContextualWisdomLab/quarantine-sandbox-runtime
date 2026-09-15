@@ -48,7 +48,13 @@ def _source_line_map_from_functions(
             if filename not in production_filenames:
                 continue
             executed = int(region[4]) > 0
-            for line_number in range(int(region[0]), int(region[2]) + 1):
+            line_start = int(region[0])
+            line_end = int(region[2])
+            column_end = int(region[3])
+            touched_lines = list(range(line_start, line_end))
+            if line_end == line_start or column_end > 1:
+                touched_lines.append(line_end)
+            for line_number in touched_lines:
                 key = (filename, line_number)
                 source_lines[key] = source_lines.get(key, False) or executed
     return source_lines
