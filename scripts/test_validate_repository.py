@@ -63,6 +63,26 @@ use crate::application_service::ApplicationServiceRequest;
 
         self.assertTrue(core_depends_on_application_service(source))
 
+    def test_application_service_lifetime_is_not_a_dependency(self) -> None:
+        source = '''
+fn borrow<'application_service>(value: &'application_service str) -> &'application_service str {
+    value
+}
+'''
+
+        self.assertFalse(core_depends_on_application_service(source))
+
+    def test_application_service_label_is_not_a_dependency(self) -> None:
+        source = '''
+fn retry() {
+    'application_service: loop {
+        break 'application_service;
+    }
+}
+'''
+
+        self.assertFalse(core_depends_on_application_service(source))
+
 
 if __name__ == "__main__":
     unittest.main()
