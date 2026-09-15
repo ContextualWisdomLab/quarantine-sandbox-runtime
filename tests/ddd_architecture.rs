@@ -55,14 +55,13 @@ fn bounded_command_contract_is_owned_by_core_sandbox_context() {
     );
     for path in supporting_sources {
         let source = fs::read_to_string(&path).expect("application_service source should be readable");
-        let compact_source: String = source.split_whitespace().collect();
         assert!(
             !source.contains("CommandExecutionOutcome"),
             "application_service source {} must not expose Core-private bounded command outcomes",
             path.display()
         );
         assert!(
-            !compact_source.contains("sandbox_execution::*"),
+            !imports_sandbox_execution_glob(&source),
             "application_service source {} must not wildcard-import Core sandbox_execution exports",
             path.display()
         );
@@ -79,6 +78,31 @@ fn bounded_command_contract_is_owned_by_core_sandbox_context() {
             && !core_contract.contains("ApplicationService"),
         "Core bounded command domain truth must not depend on Supporting application_service types"
     );
+}
+
+#[test]
+fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
+    for source in [
+        "use crate::sandbox_execution::*;",
+        "use crate::sandbox_execution::{*};",
+        "use crate::sandbox_execution::{CommandExecutionRequest, *};",
+        "use crate::sandbox_execution::{nested::{Thing}, *};",
+    ] {
+        assert!(
+            imports_sandbox_execution_glob(source),
+            "wildcard Core import must be detected: {source}"
+        );
+    }
+
+    for source in [
+        "use crate::sandbox_execution::CommandExecutionRequest;",
+        "use crate::sandbox_execution::{CommandExecutionRequest, CommandExecutionResult};",
+    ] {
+        assert!(
+            !imports_sandbox_execution_glob(source),
+            "named Core imports must not be classified as wildcard imports: {source}"
+        );
+    }
 }
 
 #[test]
@@ -197,6 +221,43 @@ fn test_module_stripping_never_hides_conditionally_production_or_trailing_items(
         strip_trailing_test_module(test_only),
         "fn production() {}\n"
     );
+}
+
+fn imports_sandbox_execution_glob(source: &str) -> bool {
+    let compact_source: String = source.split_whitespace().collect();
+    let marker = "sandbox_execution::";
+    let mut cursor = 0;
+
+    while let Some(relative_index) = compact_source[cursor..].find(marker) {
+        let use_tree_start = cursor + relative_index + marker.len();
+        let tail = &compact_source[use_tree_start..];
+        if tail.starts_with('*') {
+            return true;
+        }
+        if tail.starts_with('{') {
+            let mut brace_depth = 0_u32;
+            for byte in tail.bytes() {
+                match byte {
+                    b'{' => brace_depth += 1,
+                    b'}' => {
+                        brace_depth = brace_depth.saturating_sub(1);
+                        if brace_depth == 0 {
+                            break;
+                        }
+                    }
+                    b'*' if brace_depth > 0 => return true,
+                    _ => {}
+                }
+            }
+        }
+
+        cursor = use_tree_start;
+        if cursor >= compact_source.len() {
+            break;
+        }
+    }
+
+    false
 }
 
 fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {
