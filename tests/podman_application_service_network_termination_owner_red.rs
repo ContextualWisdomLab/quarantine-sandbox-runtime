@@ -209,6 +209,11 @@ fn explicit_termination_preserves_foreign_network_member() {
             );
         }
     };
+    let public_network_id = lease.network_id().to_owned();
+    let public_network_correlation = fs::read_to_string(&created_network_name)
+        .expect("created network correlation must remain available")
+        .trim()
+        .to_owned();
     fs::write(&foreign_marker, "safe\n").expect("foreign marker must be writable");
 
     let result = adapter.terminate_at(&lease, TERMINATED_AT_EPOCH_SECONDS);
@@ -230,6 +235,14 @@ fn explicit_termination_preserves_foreign_network_member() {
     assert_eq!(
         foreign_state, "safe\n",
         "explicit termination must preserve the foreign network member"
+    );
+    assert_eq!(
+        public_network_id, public_network_correlation,
+        "the public lease must retain the generated qsr-net correlation instead of exposing destructive network authority"
+    );
+    assert_ne!(
+        public_network_id, OWNED_NETWORK_ID,
+        "the acquired Podman network ID must remain private cleanup/attachment authority"
     );
     assert!(
         calls
