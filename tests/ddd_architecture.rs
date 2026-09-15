@@ -114,7 +114,7 @@ fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
         "// use crate::sandbox_execution::*;",
         "let sample = \"use crate::sandbox_execution::*;\";",
         "let sample = r#\"use crate::sandbox_execution::nested::*;\"#;",
-        "/* use crate::sandbox_execution::{*}; */",
+        "/* outer /* use crate::sandbox_execution::{*}; */ comment */",
     ] {
         assert!(
             !imports_sandbox_execution_glob(source),
@@ -242,7 +242,8 @@ fn test_module_stripping_never_hides_conditionally_production_or_trailing_items(
 }
 
 fn imports_sandbox_execution_glob(source: &str) -> bool {
-    let compact_source: String = source.split_whitespace().collect();
+    let code = rust_code_without_comments_and_strings(source);
+    let compact_source: String = code.split_whitespace().collect();
     let marker = "sandbox_execution::";
     let mut cursor = 0;
 
@@ -261,6 +262,126 @@ fn imports_sandbox_execution_glob(source: &str) -> bool {
     }
 
     false
+}
+
+fn rust_code_without_comments_and_strings(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    let mut block_depth = 0_u32;
+    let mut in_string = false;
+
+    while index < bytes.len() {
+        if block_depth > 0 {
+            if bytes[index..].starts_with(b"/*") {
+                block_depth += 1;
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else if bytes[index..].starts_with(b"*/") {
+                block_depth -= 1;
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else {
+                output.push(if bytes[index] == b'\n' { b'\n' } else { b' ' });
+                index += 1;
+            }
+            continue;
+        }
+
+        if in_string {
+            if bytes[index] == b'\\' && index + 1 < bytes.len() {
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else if bytes[index] == b'"' {
+                output.push(b' ');
+                in_string = false;
+                index += 1;
+            } else {
+                output.push(if bytes[index] == b'\n' { b'\n' } else { b' ' });
+                index += 1;
+            }
+            continue;
+        }
+
+        if let Some(raw_end) = rust_raw_string_end(bytes, index) {
+            for byte in &bytes[index..raw_end] {
+                output.push(if *byte == b'\n' { b'\n' } else { b' ' });
+            }
+            index = raw_end;
+            continue;
+        }
+
+        if bytes[index..].starts_with(b"//") {
+            while index < bytes.len() && bytes[index] != b'\n' {
+                output.push(b' ');
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            block_depth = 1;
+            output.extend_from_slice(b"  ");
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'"' {
+            in_string = true;
+            output.push(b' ');
+            index += 1;
+            continue;
+        }
+
+        output.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(output).expect("masked Rust source must remain valid UTF-8")
+}
+
+fn rust_raw_string_end(bytes: &[u8], index: usize) -> Option<usize> {
+    if index > 0
+        && (bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_')
+    {
+        return None;
+    }
+
+    let mut cursor = index;
+    if bytes.get(cursor) == Some(&b'b') && bytes.get(cursor + 1) == Some(&b'r')
+        || bytes.get(cursor) == Some(&b'c') && bytes.get(cursor + 1) == Some(&b'r')
+    {
+        cursor += 2;
+    } else if bytes.get(cursor) == Some(&b'r') {
+        cursor += 1;
+    } else {
+        return None;
+    }
+
+    let hash_start = cursor;
+    while bytes.get(cursor) == Some(&b'#') {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'"') {
+        return None;
+    }
+
+    let hash_count = cursor - hash_start;
+    let mut closing_index = cursor + 1;
+    while closing_index < bytes.len() {
+        if bytes[closing_index] == b'"' {
+            let hash_start = closing_index + 1;
+            let hash_end = hash_start + hash_count;
+            if hash_end <= bytes.len()
+                && bytes[hash_start..hash_end]
+                    .iter()
+                    .all(|byte| *byte == b'#')
+            {
+                return Some(hash_end);
+            }
+        }
+        closing_index += 1;
+    }
+
+    Some(bytes.len())
 }
 
 fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {
