@@ -190,32 +190,37 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
     let program = write_fake_podman(case, ready_port, &log, &network_selector);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
+    let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
+    let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    let _ = fs::remove_file(network_selector);
+    drop(listener);
+
     assert_eq!(
-        adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS),
+        result,
         Err(ApplicationServiceError::IsolationVerificationFailed {
             control_name: "sandbox_network_binding",
         }),
         "network-object configuration must not substitute for exact container-attachment proof"
     );
-
-    let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     assert!(
-        calls.lines().any(|line| line.starts_with("network create --internal --disable-dns qsr-net-")),
+        calls
+            .lines()
+            .any(|line| line.starts_with("network create --internal --disable-dns qsr-net-")),
         "the runtime-owned network must be created; calls were:\n{calls}"
     );
     assert!(
-        calls.lines().any(|line| line == format!("container inspect --format json {OWNED_CONTAINER_ID}")),
+        calls
+            .lines()
+            .any(|line| line == format!("container inspect --format json {OWNED_CONTAINER_ID}")),
         "effective isolation must remain bound to the exact acquired container ID; calls were:\n{calls}"
     );
     assert!(
         !calls.lines().any(|line| line.starts_with("port ")),
         "readiness must not be queried after an effective attachment mismatch; calls were:\n{calls}"
     );
-
-    let _ = fs::remove_file(program);
-    let _ = fs::remove_file(log);
-    let _ = fs::remove_file(network_selector);
-    drop(listener);
 }
 
 #[test]
