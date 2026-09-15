@@ -87,6 +87,9 @@ fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
         "use crate::sandbox_execution::{*};",
         "use crate::sandbox_execution::{CommandExecutionRequest, *};",
         "use crate::sandbox_execution::{nested::{Thing}, *};",
+        "use crate::sandbox_execution::nested::*;",
+        "use crate::sandbox_execution::{nested::*};",
+        "use crate::sandbox_execution::nested::{Thing, *};",
     ] {
         assert!(
             imports_sandbox_execution_glob(source),
@@ -97,6 +100,9 @@ fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
     for source in [
         "use crate::sandbox_execution::CommandExecutionRequest;",
         "use crate::sandbox_execution::{CommandExecutionRequest, CommandExecutionResult};",
+        "use crate::sandbox_execution::nested::Thing;",
+        "use crate::sandbox_execution::{nested::Thing};",
+        "use crate::sandbox_execution::nested::{Thing, OtherThing};",
     ] {
         assert!(
             !imports_sandbox_execution_glob(source),
