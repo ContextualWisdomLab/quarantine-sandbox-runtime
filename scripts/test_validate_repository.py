@@ -42,6 +42,27 @@ use crate::application_service::ApplicationServiceRequest;
 
         self.assertFalse(core_depends_on_application_service(source))
 
+    def test_raw_string_with_multiple_hashes_does_not_create_false_dependency(self) -> None:
+        source = (
+            'const MESSAGE: &str = r###"compatibility "# ApplicationServiceError '
+            'crate::application_service text"###;\n'
+        )
+
+        self.assertFalse(core_depends_on_application_service(source))
+
+    def test_raw_byte_string_does_not_create_false_dependency(self) -> None:
+        source = 'const MESSAGE: &[u8] = br#"ApplicationServiceError " quoted"#;\n'
+
+        self.assertFalse(core_depends_on_application_service(source))
+
+    def test_real_dependency_after_raw_string_is_still_rejected(self) -> None:
+        source = '''
+const MESSAGE: &str = r#"ApplicationServiceError compatibility text"#;
+use crate::application_service::ApplicationServiceRequest;
+'''
+
+        self.assertTrue(core_depends_on_application_service(source))
+
 
 if __name__ == "__main__":
     unittest.main()
