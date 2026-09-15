@@ -27,9 +27,15 @@ Production candidate `54fb9e33fbafd2b2549d95e4691464749e2dbf63` adapts only the 
 
 The wildcard `Other` mapping is deliberate because Rust marks `std::io::ErrorKind` as `#[non_exhaustive]` and explicitly requires callers to remain forward-compatible with future variants. POSIX.1-2024 separately distinguishes execution failures such as `ENOENT`, `EACCES`, and possible `ENOMEM`; the public vocabulary preserves operationally useful classes without coupling the domain contract to platform errno integers.
 
+## Review-driven fixture migration
+
+CodeRabbit's review of the executed RED found one valid compatibility defect in the first production candidate: the existing process-boundary regression `missing_or_non_rootless_backend_fails_before_isolation_resources_are_created` still expected generic `BackendInvocationFailed { operation: "rootless_probe" }` for the same missing executable. Leaving that expectation unchanged would make the intentional public taxonomy change fail broad tests for a stale assertion rather than a product defect.
+
+Ordinary descendant `7b750f9ca3f992f94c1d79476bbf887c52ed7c17` changes only that existing test: it imports `BackendInvocationFailureKind` and requires `BackendSpawnFailed { operation: "rootless_probe", failure_kind: NotFound }`. The real nonzero backend-command and non-rootless controls are unchanged, and Wait/Capture continue to use generic post-spawn invocation failure. This is a test-contract migration required by the reviewed public API change, not a weakening of the causal RED.
+
 ## Verification gate
 
-This repair is not GREEN merely because the source candidate exists. The authoritative GREEN requires a fresh exact-head run after this traceability commit with repository policy, formatting, full tests, Clippy `-D warnings`, rustdoc `-D warnings`, complete owned-production coverage, branch coverage, hosted negative confinement, and the repository's applicable security/review gates. Dedicated positive-LSM evidence remains independently required for any real-isolation or release claim.
+The current branch head after this doctoring update must acquire its own exact-head evidence. Neither #72's historical GREEN, the `76d6d2...` RED run, nor any intermediate candidate transfers. Required evidence remains repository policy, formatting, full tests, Clippy `-D warnings`, rustdoc `-D warnings`, complete owned-production coverage, branch coverage, hosted negative confinement, current review/security gates, and separately required positive-LSM evidence for any real-isolation or release claim.
 
 After process-boundary GREEN, the intended sequence is #119 inherited network RED replay, #120 explicit-termination foreign-member RED, #122 acquired-network-identity RED, and only then the minimum network lifecycle production repair.
 
