@@ -36,7 +36,7 @@ jobs:
       - name: Validate repository policy
         run: python3 scripts/validate_repository.py
       - name: Test CI evidence contracts
-        run: python3 -m unittest scripts/test_check_coverage.py scripts/test_ci_test_inventory.py
+        run: python3 -m unittest scripts/test_check_coverage.py scripts/test_ci_test_inventory.py scripts/test_validate_repository.py
       - name: Check formatting
         run: cargo fmt --check
       - name: Test
