@@ -222,15 +222,14 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
         "the runtime-owned network must be created; calls were:\n{calls}"
     );
     assert!(
-        calls.lines().any(|line| {
-            line.starts_with("network inspect --format json qsr-net-")
-        }),
+        calls
+            .lines()
+            .any(|line| { line.starts_with("network inspect --format json qsr-net-") }),
         "network identity must be acquired from the generated correlation name; calls were:\n{calls}"
     );
     assert!(
-        calls
-            .lines()
-            .any(|line| line.starts_with("create --name ") && line.contains(&format!(" --network {OWNED_NETWORK_ID} "))),
+        calls.lines().any(|line| line.starts_with("create --name ")
+            && line.contains(&format!(" --network {OWNED_NETWORK_ID} "))),
         "container creation must bind to the acquired network ID; calls were:\n{calls}"
     );
     assert!(
