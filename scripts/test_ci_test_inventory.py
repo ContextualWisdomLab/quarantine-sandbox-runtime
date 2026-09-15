@@ -53,7 +53,7 @@ class NativeTestInventoryContract(unittest.TestCase):
         """The contract must be executed by CI, not merely checked into the repository."""
         command = (
             "run: python3 -m unittest scripts/test_check_coverage.py "
-            "scripts/test_ci_test_inventory.py"
+            "scripts/test_ci_test_inventory.py scripts/test_validate_repository.py"
         )
         self.assertIn(command, self.verify_job)
         self.assertLess(self.verify_job.index(command), self.verify_job.index("- name: Test\n"))
