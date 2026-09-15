@@ -1,6 +1,6 @@
 # Coverage source-coordinate admission traceability
 
-Last reviewed: 2026-09-13 KST
+Last reviewed: 2026-09-15 KST
 
 ## Problem
 
@@ -26,12 +26,21 @@ A later coverage investigation found the same duplicate-instance identity proble
 
 The publication commit was authored by `github-actions[bot]`, so its pull-request CI materialized as `action_required` rather than usable exact-head product evidence. This traceability commit is an ordinary owner-authored descendant whose purpose is to preserve the decision record and reacquire native CI on a human-authored exact head. No predecessor GREEN transfers.
 
+## 2026-09-15 review repair: terminal line at column 1
+
+Fresh review identified an inconsistency between the two source-line reconstructions. The file-segment path already treated a multi-line counted interval ending at column 1 as not touching the terminal line, while `_source_line_map_from_functions` unconditionally iterated through `line_end`. A normal region from `10:5` to `11:1` therefore produced function lines `{10, 11}` but segment lines `{10}`, causing the fail-closed denominator check to reject valid LLVM evidence.
+
+Checked-in regression `f100d97b6d99a773014ee679b9300bbae89c65be` fixes the measurement expectation before the implementation repair: the `10:5 → 11:1` region must account for exactly one physical source line. A deterministic local reconstruction reproduced the old disagreement. Commit `af2ea04ff29332c81fd78eecde4f030e20992169` then applies the same interval rule to function regions: include all lines before `line_end`; include `line_end` only for a same-line region or when `column_end > 1`. This preserves ordinary same-line ranges and multi-line ranges that contain source text on their final line.
+
+The rule is derived from the source-coordinate boundaries exported by LLVM and cross-validated against LLVM's own file-segment representation; it is not a coverage exclusion or denominator reduction. LLVM's current coverage-mapping documentation defines mapping regions by start/end line and column source ranges and states that code regions drive line execution counts. `llvm-cov export` exposes the region/function/file data consumed by this admission. The repository therefore keeps the independent function-region/segment agreement check as the stronger local invariant.
+
 ## Acceptance invariants
 
 - Raw LLVM line/region totals remain visible in logs.
 - Source-region identity includes file, exact start/end coordinates, and region kind.
 - Region denominator mismatch against production file summaries fails closed.
 - Source-line identity and execution truth must agree between function regions and file segments.
+- A multi-line source interval ending at column 1 does not claim the terminal line solely from its end coordinate.
 - Mixed zero/nonzero codegen instances for one source coordinate count as one executed physical source coordinate.
 - All-zero instances for one source coordinate remain uncovered.
 - Branch and function admissions are not weakened or redefined.
@@ -43,10 +52,10 @@ LLVM describes coverage mapping as a mapping from profiling counters to source r
 
 ### References
 
-LLVM Project. (n.d.). *LLVM code coverage mapping format*. https://llvm.org/docs/CoverageMappingFormat.html
+LLVM Project. (n.d.). *LLVM code coverage mapping format*. Retrieved September 15, 2026, from https://llvm.org/docs/CoverageMappingFormat.html
 
-LLVM Project. (n.d.). *llvm-cov — emit coverage information*. https://llvm.org/docs/CommandGuide/llvm-cov.html
+LLVM Project. (n.d.). *llvm-cov — emit coverage information*. Retrieved September 15, 2026, from https://llvm.org/docs/CommandGuide/llvm-cov.html
 
 ## Remaining release boundary
 
-This measurement repair does not establish release readiness by itself. PR #112 still requires exact-head native CI after this owner-authored descendant, dedicated positive effective-LSM evidence, stable #21/#113 application-service ancestry for its owned readiness/lifecycle findings, qualifying independent review and security gates, real-runtime acceptance for #35/#43, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback evidence.
+This measurement repair does not establish release readiness by itself. PR #112 still requires exact-head native CI after the latest owner-authored descendant, dedicated positive effective-LSM evidence, stable #21/#113 application-service ancestry for its owned readiness/lifecycle findings, qualifying independent review and security gates, real-runtime acceptance for #35/#43, protected integration, and immutable release/SBOM/provenance/reproducibility/rollback evidence.
