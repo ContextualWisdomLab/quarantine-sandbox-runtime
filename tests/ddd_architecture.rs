@@ -109,6 +109,18 @@ fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
             "named Core imports must not be classified as wildcard imports: {source}"
         );
     }
+
+    for source in [
+        "// use crate::sandbox_execution::*;",
+        "let sample = \"use crate::sandbox_execution::*;\";",
+        "let sample = r#\"use crate::sandbox_execution::nested::*;\"#;",
+        "/* use crate::sandbox_execution::{*}; */",
+    ] {
+        assert!(
+            !imports_sandbox_execution_glob(source),
+            "non-code wildcard text must not be classified as Core import: {source}"
+        );
+    }
 }
 
 #[test]
