@@ -1,3 +1,5 @@
+#![cfg(all(test, unix))]
+
 use std::{
     io::ErrorKind,
     path::Path,
