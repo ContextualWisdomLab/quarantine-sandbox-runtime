@@ -73,6 +73,7 @@ impl BoundedCommandRunner {
             &stdout_handle,
             &stderr_handle,
             deadline,
+            overflow.as_ref(),
             status_result,
         );
         let stdout_result = join_stream(stdout_handle);
@@ -203,32 +204,45 @@ fn enforce_capture_deadline<P, T, U>(
     stdout_handle: &JoinHandle<T>,
     stderr_handle: &JoinHandle<U>,
     deadline: Instant,
+    overflow: &AtomicBool,
     status_result: Result<ExitStatus, BoundedCommandError>,
 ) -> Result<ExitStatus, BoundedCommandError>
 where
     P: ChildProcess,
 {
-    if status_result.is_err()
-        || streams_finished_before_deadline(stdout_handle, stderr_handle, deadline)
-    {
+    if status_result.is_err() {
         return status_result;
     }
-    child.terminate().map_err(|_| BoundedCommandError::Wait)?;
-    Err(BoundedCommandError::Timeout)
+    match streams_finished_before_deadline(stdout_handle, stderr_handle, deadline, overflow) {
+        Ok(true) => status_result,
+        Ok(false) => {
+            child.terminate().map_err(|_| BoundedCommandError::Wait)?;
+            Err(BoundedCommandError::Timeout)
+        }
+        Err(BoundedCommandError::OutputLimit) => {
+            child.terminate().map_err(|_| BoundedCommandError::Wait)?;
+            Err(BoundedCommandError::OutputLimit)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn streams_finished_before_deadline<T, U>(
     stdout_handle: &JoinHandle<T>,
     stderr_handle: &JoinHandle<U>,
     deadline: Instant,
-) -> bool {
+    overflow: &AtomicBool,
+) -> Result<bool, BoundedCommandError> {
     loop {
         if stdout_handle.is_finished() && stderr_handle.is_finished() {
-            return true;
+            return Ok(true);
+        }
+        if overflow.load(Ordering::Acquire) {
+            return Err(BoundedCommandError::OutputLimit);
         }
         let now = Instant::now();
         if now >= deadline {
-            return false;
+            return Ok(false);
         }
         thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
     }
@@ -449,31 +463,64 @@ mod tests {
 
     #[test]
     fn capture_workers_share_the_command_deadline() {
+        let overflow = AtomicBool::new(false);
         let completed_stdout = thread::spawn(|| ());
         let completed_stderr = thread::spawn(|| ());
-        assert!(streams_finished_before_deadline(
-            &completed_stdout,
-            &completed_stderr,
-            Instant::now() + Duration::from_millis(100),
-        ));
+        assert_eq!(
+            streams_finished_before_deadline(
+                &completed_stdout,
+                &completed_stderr,
+                Instant::now() + Duration::from_millis(100),
+                &overflow,
+            ),
+            Ok(true)
+        );
         completed_stdout.join().expect("stdout worker must finish");
         completed_stderr.join().expect("stderr worker must finish");
 
         let (sender, receiver) = mpsc::sync_channel::<()>(0);
         let blocked_stdout = thread::spawn(move || receiver.recv());
         let completed_stderr = thread::spawn(|| ());
-        assert!(!streams_finished_before_deadline(
-            &blocked_stdout,
-            &completed_stderr,
-            Instant::now(),
-        ));
+        assert_eq!(
+            streams_finished_before_deadline(
+                &blocked_stdout,
+                &completed_stderr,
+                Instant::now(),
+                &overflow,
+            ),
+            Ok(false)
+        );
         sender.send(()).expect("blocked stdout worker must be released");
-        blocked_stdout.join().expect("stdout worker must finish").expect("release must arrive");
+        blocked_stdout
+            .join()
+            .expect("stdout worker must finish")
+            .expect("release must arrive");
+        completed_stderr.join().expect("stderr worker must finish");
+
+        let overflow = AtomicBool::new(true);
+        let (sender, receiver) = mpsc::sync_channel::<()>(0);
+        let blocked_stdout = thread::spawn(move || receiver.recv());
+        let completed_stderr = thread::spawn(|| ());
+        assert_eq!(
+            streams_finished_before_deadline(
+                &blocked_stdout,
+                &completed_stderr,
+                Instant::now() + Duration::from_millis(100),
+                &overflow,
+            ),
+            Err(BoundedCommandError::OutputLimit)
+        );
+        sender.send(()).expect("blocked stdout worker must be released");
+        blocked_stdout
+            .join()
+            .expect("stdout worker must finish")
+            .expect("release must arrive");
         completed_stderr.join().expect("stderr worker must finish");
     }
 
     #[test]
     fn capture_deadline_preserves_prior_errors_and_cleanup_outcomes() {
+        let overflow = AtomicBool::new(false);
         let completed_stdout = thread::spawn(|| ());
         let completed_stderr = thread::spawn(|| ());
         let mut prior_error = FakeChild::new([]);
@@ -483,6 +530,7 @@ mod tests {
                 &completed_stdout,
                 &completed_stderr,
                 Instant::now(),
+                &overflow,
                 Err(BoundedCommandError::Wait),
             ),
             Err(BoundedCommandError::Wait)
@@ -499,6 +547,7 @@ mod tests {
                 &completed_stdout,
                 &completed_stderr,
                 Instant::now() + Duration::from_millis(100),
+                &overflow,
                 Ok(success_status()),
             )
             .is_ok()
@@ -516,12 +565,39 @@ mod tests {
                 &blocked_stdout,
                 &completed_stderr,
                 Instant::now(),
+                &overflow,
                 Ok(success_status()),
             ),
             Err(BoundedCommandError::Timeout)
         );
         sender.send(()).expect("blocked stdout worker must be released");
-        blocked_stdout.join().expect("stdout worker must finish").expect("release must arrive");
+        blocked_stdout
+            .join()
+            .expect("stdout worker must finish")
+            .expect("release must arrive");
+        completed_stderr.join().expect("stderr worker must finish");
+
+        let overflowed = AtomicBool::new(true);
+        let (sender, receiver) = mpsc::sync_channel::<()>(0);
+        let blocked_stdout = thread::spawn(move || receiver.recv());
+        let completed_stderr = thread::spawn(|| ());
+        let mut output_limited = FakeChild::new([]);
+        assert_eq!(
+            enforce_capture_deadline(
+                &mut output_limited,
+                &blocked_stdout,
+                &completed_stderr,
+                Instant::now() + Duration::from_millis(100),
+                &overflowed,
+                Ok(success_status()),
+            ),
+            Err(BoundedCommandError::OutputLimit)
+        );
+        sender.send(()).expect("blocked stdout worker must be released");
+        blocked_stdout
+            .join()
+            .expect("stdout worker must finish")
+            .expect("release must arrive");
         completed_stderr.join().expect("stderr worker must finish");
 
         let (sender, receiver) = mpsc::sync_channel::<()>(0);
@@ -535,12 +611,16 @@ mod tests {
                 &blocked_stdout,
                 &completed_stderr,
                 Instant::now(),
+                &overflow,
                 Ok(success_status()),
             ),
             Err(BoundedCommandError::Wait)
         );
         sender.send(()).expect("blocked stdout worker must be released");
-        blocked_stdout.join().expect("stdout worker must finish").expect("release must arrive");
+        blocked_stdout
+            .join()
+            .expect("stdout worker must finish")
+            .expect("release must arrive");
         completed_stderr.join().expect("stderr worker must finish");
     }
 
