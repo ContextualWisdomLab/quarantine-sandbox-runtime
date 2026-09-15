@@ -237,24 +237,9 @@ fn imports_sandbox_execution_glob(source: &str) -> bool {
     while let Some(relative_index) = compact_source[cursor..].find(marker) {
         let use_tree_start = cursor + relative_index + marker.len();
         let tail = &compact_source[use_tree_start..];
-        if tail.starts_with('*') {
+        let use_tree = tail.split_once(';').map_or(tail, |(tree, _)| tree);
+        if use_tree.contains('*') {
             return true;
-        }
-        if tail.starts_with('{') {
-            let mut brace_depth = 0_u32;
-            for byte in tail.bytes() {
-                match byte {
-                    b'{' => brace_depth += 1,
-                    b'}' => {
-                        brace_depth = brace_depth.saturating_sub(1);
-                        if brace_depth == 0 {
-                            break;
-                        }
-                    }
-                    b'*' if brace_depth > 0 => return true,
-                    _ => {}
-                }
-            }
         }
 
         cursor = use_tree_start;
