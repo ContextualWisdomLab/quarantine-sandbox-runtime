@@ -13,6 +13,7 @@ Serde documents that self-describing formats such as JSON ignore unknown fields 
 - Existing `1.0.0` JSON Schema already rejects additional object members, so the repair aligns Rust with the published contract rather than inventing a new wire version.
 - Unknown members must not be stripped, coerced, or retained in an untyped extension map without a separately reviewed/versioned contract.
 - Isolation/runtime behavior is unchanged by this repair.
+- Repository-wide `docs/product-technical-gap-baseline.md` is a single-writer ledger owned by the canonical gap-baseline lane (#121), not by this focused contract leaf.
 
 ## Alternatives
 
@@ -30,7 +31,17 @@ Native CI `34086035165`, verify job `101630147469`, executed that exact head on 
 
 Commit `62f45df35212119c9cd1cc5fe957623f9a605a4c` adds only `#[serde(deny_unknown_fields)]` to `ArtifactDescriptor`, `EvidenceRecord`, `RuntimeManifest`, and `EvidenceBundle`. No field, schema, serialization shape, runtime behavior, evidence taxonomy, or verdict authority changed. The valid published fixture remains the positive control for compatibility.
 
-This commit is a GREEN candidate, not a GREEN claim. Its native CI `34194117703` materialized after the source change and must complete on the unchanged exact head before promotion. Required evidence remains fmt, workspace tests, clippy, rustdoc, repository validation, exact 100% owned-production source/function/line/branch coverage, review/security gates, dependency-safe parent integration, protected integration, and release provenance.
+Exact `006849441402332bf05ebe8da2eac0018af623ef` later executed the focused strict-deserialization suite GREEN: the valid published bundle and all four unknown-member rejection cases passed. The broader workspace still failed later in inherited command-runtime ancestry, so this remains focused exact-head evidence rather than whole-head merge authority.
+
+## Single-writer gap-ledger repair
+
+Review `5229219444` found that #76 still carried a historical `docs/product-technical-gap-baseline.md` delta even though repository-wide Gap authority is maintained by #121. Leaving that leaf-owned ledger in place could reintroduce stale owner pointers during later integration.
+
+Ordinary fast-forward `b3600681cbdcb5f5b456f8f7a167ca8c1e9e818f` restores the global baseline byte-for-byte to the exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9`. This owner-boundary repair changes no production Rust, public schema, serialization contract, or focused regression. The current documentation head records the repair locally; no predecessor CI status transfers after head movement.
+
+## Current gate
+
+The moved head must independently reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, positive effective-isolation evidence where applicable, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication. The focused GREEN on `006849441...` remains historical evidence only.
 
 ## Evidence and references
 
