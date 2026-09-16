@@ -1,6 +1,6 @@
 # Artifact Policy-Boundary Binding Traceability
 
-Status: causal RED executed on `182a55637a42d274bf09d11e034afc6a2c8c81b4`; minimal production repair is checked in on the ordinary descendant lineage and remains a candidate GREEN until current exact-head CI, coverage, review, and protected integration succeed.
+Status: causal RED executed on `182a55637a42d274bf09d11e034afc6a2c8c81b4`; minimal production repair is checked in on the ordinary descendant lineage and remains a candidate GREEN until the unchanged review candidate obtains exact-head CI, coverage, review, and protected integration.
 
 ## Problem
 
@@ -30,7 +30,7 @@ Production commit `e0c5ff8819f9068ab25372e88b7f97d6322cd611` changes only the ar
 
 The binding uses the manifest boolean's canonical Rust string representation. A reserved value therefore validates only when it is present and exactly `true` or `false` as implied by the manifest. A contradictory, missing, or non-canonical value fails through the existing `RuntimeBoundaryViolated` error family rather than being rewritten or coerced. No wire field, JSON Schema shape, verdict authority, dynamic-execution policy, or sandbox enforcement behavior changes in this repair.
 
-Ordinary descendant `2a3c387bf3e01ace7b89750f69a5edb7d2bfafea` extends the focused contract test to cover missing and malformed (`FALSE`) reserved attributes for each of the three duplicated facts. These tests are part of current-head verification; they are not claimed as executed until CI runs that exact head.
+Ordinary descendant `2a3c387bf3e01ace7b89750f69a5edb7d2bfafea` extends the focused contract test to cover missing and malformed (`FALSE`) reserved attributes for each of the three duplicated facts. These tests belong to the candidate lineage and are not claimed as executed until CI runs an exact head that contains them unchanged.
 
 ## Decision record
 
@@ -52,7 +52,7 @@ Risk/effect: admissible receipts become narrower. Engine-produced foundation rec
 
 ## Release gates
 
-Current exact head after the test extension is `2a3c387bf3e01ace7b89750f69a5edb7d2bfafea`. It must obtain exact-head formatting, tests, clippy, rustdoc, 100% owned production statement/function/region/branch coverage, review/security gates, and protected integration before the repair can be called GREEN or release-authoritative.
+The unchanged review candidate must obtain exact-head formatting, tests, clippy, rustdoc, 100% owned production statement/function/region/branch coverage, review/security gates, and protected integration before the repair can be called GREEN or release-authoritative. Commit identifiers above are causal milestones, not a self-referential assertion that a documentation commit is the current branch head.
 
 Issue #62 remains independent of #49 analyzer capability isolation, #50 bounded worker-result ingestion, #52 truthful dynamic execution/completeness, #54 stable analyzer provenance, #56 ToolFailure/completeness consistency, #58 artifact-subject binding, and #60 evidence-record/job identity binding. Passing this contract does not promote ADR-0009 or artifact-analysis release readiness by itself.
 
