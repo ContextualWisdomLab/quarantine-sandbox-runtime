@@ -22,47 +22,7 @@ fn evidence_bundle_schema() -> Value {
         .expect("checked-in EvidenceBundle schema must be valid JSON")
 }
 
-fn collect_contains_cardinality(
-    schema: &Value,
-    constraints: &mut BTreeMap<String, (u64, u64)>,
-) {
-    match schema {
-        Value::Object(object) => {
-            if let Some(contains) = object.get("contains") {
-                let evidence_kind = contains
-                    .pointer("/properties/evidence_kind/const")
-                    .and_then(Value::as_str);
-                let min_contains = object.get("minContains").and_then(Value::as_u64);
-                let max_contains = object.get("maxContains").and_then(Value::as_u64);
-
-                if let (Some(evidence_kind), Some(min_contains), Some(max_contains)) =
-                    (evidence_kind, min_contains, max_contains)
-                {
-                    let previous = constraints.insert(
-                        evidence_kind.to_owned(),
-                        (min_contains, max_contains),
-                    );
-                    assert!(
-                        previous.is_none(),
-                        "schema must not declare conflicting occurrence bounds for {evidence_kind}"
-                    );
-                }
-            }
-
-            for child in object.values() {
-                collect_contains_cardinality(child, constraints);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_contains_cardinality(item, constraints);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
+fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
     let schema = evidence_bundle_schema();
     assert_eq!(
         schema.get("$schema").and_then(Value::as_str),
@@ -73,14 +33,40 @@ fn evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
     let evidence_schema = schema
         .pointer("/properties/evidence")
         .expect("EvidenceBundle schema must declare the evidence array");
+    let all_of = evidence_schema
+        .get("allOf")
+        .and_then(Value::as_array)
+        .expect("evidence cardinality constraints must apply directly through allOf");
+
     let mut constraints = BTreeMap::new();
-    collect_contains_cardinality(evidence_schema, &mut constraints);
+    for constraint in all_of {
+        let Some(evidence_kind) = constraint
+            .pointer("/contains/properties/evidence_kind/const")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let min_contains = constraint.get("minContains").and_then(Value::as_u64);
+        let max_contains = constraint.get("maxContains").and_then(Value::as_u64);
+
+        if let (Some(min_contains), Some(max_contains)) = (min_contains, max_contains) {
+            let previous = constraints.insert(
+                evidence_kind.to_owned(),
+                (min_contains, max_contains),
+            );
+            assert!(
+                previous.is_none(),
+                "schema must not declare conflicting direct occurrence bounds for {evidence_kind}"
+            );
+        }
+    }
+
     constraints
 }
 
 #[test]
 fn evidence_schema_requires_exactly_one_of_each_foundation_kind() {
-    let constraints = evidence_occurrence_constraints();
+    let constraints = direct_evidence_occurrence_constraints();
 
     for evidence_kind in FOUNDATION_EVIDENCE_KINDS {
         assert_eq!(
@@ -93,7 +79,7 @@ fn evidence_schema_requires_exactly_one_of_each_foundation_kind() {
 
 #[test]
 fn evidence_schema_does_not_singleton_non_foundation_kinds() {
-    let constraints = evidence_occurrence_constraints();
+    let constraints = direct_evidence_occurrence_constraints();
 
     for evidence_kind in NON_FOUNDATION_EVIDENCE_KINDS {
         assert!(
