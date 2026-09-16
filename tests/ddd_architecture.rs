@@ -54,7 +54,8 @@ fn bounded_command_contract_is_owned_by_core_sandbox_context() {
         "application_service Supporting context must contain Rust sources"
     );
     for path in supporting_sources {
-        let source = fs::read_to_string(&path).expect("application_service source should be readable");
+        let source =
+            fs::read_to_string(&path).expect("application_service source should be readable");
         assert!(
             !source.contains("CommandExecutionOutcome"),
             "application_service source {} must not expose Core-private bounded command outcomes",
@@ -339,9 +340,7 @@ fn rust_code_without_comments_and_strings(source: &str) -> String {
 }
 
 fn rust_raw_string_end(bytes: &[u8], index: usize) -> Option<usize> {
-    if index > 0
-        && (bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_')
-    {
+    if index > 0 && (bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_') {
         return None;
     }
 
@@ -371,9 +370,7 @@ fn rust_raw_string_end(bytes: &[u8], index: usize) -> Option<usize> {
             let hash_start = closing_index + 1;
             let hash_end = hash_start + hash_count;
             if hash_end <= bytes.len()
-                && bytes[hash_start..hash_end]
-                    .iter()
-                    .all(|byte| *byte == b'#')
+                && bytes[hash_start..hash_end].iter().all(|byte| *byte == b'#')
             {
                 return Some(hash_end);
             }

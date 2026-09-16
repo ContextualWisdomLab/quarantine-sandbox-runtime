@@ -2,11 +2,11 @@
 
 mod bounded_command_execution;
 
+pub(crate) use bounded_command_execution::CommandExecutionOutcome;
 pub use bounded_command_execution::{
     CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
     CommandExecutionResult, execute_command,
 };
-pub(crate) use bounded_command_execution::CommandExecutionOutcome;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

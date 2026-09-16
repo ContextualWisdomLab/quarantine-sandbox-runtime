@@ -36,11 +36,11 @@ pub use pr_source_artifact::{
     PrSourceArtifactError, PrSourceArtifactInput, PrSourceArtifactReceipt, StagedPrSourceArtifact,
     stage_pr_source_artifact,
 };
+/// Compatibility name retained for the application-service public error contract.
+pub use sandbox_execution::SandboxRuntimeError as ApplicationServiceError;
 pub use sandbox_execution::{
     BackendInvocationFailureKind, CommandExecutionBackend, CommandExecutionError,
     CommandExecutionRequest, CommandExecutionResult, IsolationControlStatus, IsolationPolicy,
     ResourceRequest, SandboxExecutionError, SandboxRuntimeError, VerifiedIsolationState,
     execute_command,
 };
-/// Compatibility name retained for the application-service public error contract.
-pub use sandbox_execution::SandboxRuntimeError as ApplicationServiceError;
