@@ -34,7 +34,7 @@ REQUIRED_FILES = (
     "src/artifact_analysis/ingestion.rs",
     "src/artifact_analysis/runtime.rs",
     "src/application_service/mod.rs",
-    "src/application_service/command_execution.rs",
+    "src/sandbox_execution/bounded_command_execution.rs",
     "src/sandbox_execution/mod.rs",
     "src/infrastructure/mod.rs",
     "src/infrastructure/podman.rs",
@@ -75,6 +75,118 @@ FORBIDDEN_DATABASE_NAME = re.compile(
 )
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
 ACTION_REFERENCE = re.compile(r"^[0-9a-f]{40}$")
+SUPPORTING_CONTEXT_REFERENCE = re.compile(
+    r"(?<!')\bapplication_service\b|(?<!')\bApplicationService[A-Za-z0-9_]*\b"
+)
+
+
+def rust_raw_string_end(source: str, index: int) -> int | None:
+    """Return one-past-end for a Rust raw string token starting at ``index``."""
+
+    if index > 0 and (source[index - 1].isalnum() or source[index - 1] == "_"):
+        return None
+
+    cursor = index
+    if source.startswith(("br", "cr"), cursor):
+        cursor += 2
+    elif source.startswith("r", cursor):
+        cursor += 1
+    else:
+        return None
+
+    hash_start = cursor
+    while cursor < len(source) and source[cursor] == "#":
+        cursor += 1
+    if cursor >= len(source) or source[cursor] != '"':
+        return None
+
+    hash_count = cursor - hash_start
+    closing_delimiter = '"' + ("#" * hash_count)
+    closing_index = source.find(closing_delimiter, cursor + 1)
+    if closing_index < 0:
+        return len(source)
+    return closing_index + len(closing_delimiter)
+
+
+def rust_code_without_comments_and_strings(source: str) -> str:
+    """Return Rust source with comments and string contents removed.
+
+    The DDD fitness rule is about compile-time dependencies. Documentation,
+    diagnostic text, and compatibility notes may legitimately name a Supporting
+    context and must not create a false dependency finding. Nested block comments
+    and raw-string delimiters are handled because Rust permits both.
+    """
+
+    output: list[str] = []
+    index = 0
+    block_depth = 0
+    in_string = False
+
+    while index < len(source):
+        if block_depth:
+            if source.startswith("/*", index):
+                block_depth += 1
+                output.extend("  ")
+                index += 2
+            elif source.startswith("*/", index):
+                block_depth -= 1
+                output.extend("  ")
+                index += 2
+            else:
+                output.append("\n" if source[index] == "\n" else " ")
+                index += 1
+            continue
+
+        if in_string:
+            character = source[index]
+            if character == "\\" and index + 1 < len(source):
+                output.extend("  ")
+                index += 2
+            elif character == '"':
+                output.append(" ")
+                in_string = False
+                index += 1
+            else:
+                output.append("\n" if character == "\n" else " ")
+                index += 1
+            continue
+
+        raw_string_end = rust_raw_string_end(source, index)
+        if raw_string_end is not None:
+            output.extend(
+                "\n" if character == "\n" else " "
+                for character in source[index:raw_string_end]
+            )
+            index = raw_string_end
+            continue
+
+        if source.startswith("//", index):
+            while index < len(source) and source[index] != "\n":
+                output.append(" ")
+                index += 1
+            continue
+        if source.startswith("/*", index):
+            block_depth = 1
+            output.extend("  ")
+            index += 2
+            continue
+        if source[index] == '"':
+            in_string = True
+            output.append(" ")
+            index += 1
+            continue
+
+        output.append(source[index])
+        index += 1
+
+    return "".join(output)
+
+
+def core_depends_on_application_service(source: str) -> bool:
+    """Return whether executable Rust code references the Supporting context."""
+
+    executable_source = rust_code_without_comments_and_strings(source)
+    return SUPPORTING_CONTEXT_REFERENCE.search(executable_source) is not None
 
 
 def main() -> int:
@@ -96,7 +208,7 @@ def main() -> int:
     sandbox_root = ROOT / "src/sandbox_execution"
     for path in sorted(sandbox_root.rglob("*.rs")):
         text = path.read_text(encoding="utf-8")
-        if "application_service" in text or "ApplicationService" in text:
+        if core_depends_on_application_service(text):
             errors.append(
                 "DDD dependency regression: Core sandbox_execution must not depend on "
                 f"Supporting application_service: {path.relative_to(ROOT)}"

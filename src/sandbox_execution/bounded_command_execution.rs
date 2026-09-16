@@ -1,36 +1,26 @@
-//! Bounded command-to-completion contract: a narrower sibling of the service lease.
+//! Core bounded command-to-completion contract.
 //!
-//! [`super::ApplicationServiceRequest`]/[`super::ApplicationServiceLease`] model a
-//! long-lived, readiness-gated network service: the runtime returns a loopback
-//! endpoint once the workload is reachable, and the caller polls or connects to
-//! it. A CI-style consumer -- for example a review pipeline that must execute a
-//! pull request's own test suite or a proof-of-concept command and report a
-//! structured pass/fail -- needs a different shape: run one bounded command
-//! inside an isolated sandbox *to completion* and receive its exit status and
-//! bounded output. There is no service endpoint to become ready, and a nonzero
-//! exit status is an expected, valid outcome the consumer decides how to treat,
-//! not a runtime failure.
+//! A bounded command runs one direct argv inside an isolated sandbox to
+//! completion and returns an attributable terminal result. Unlike a long-lived,
+//! readiness-gated network service, there is no endpoint to become ready and a
+//! nonzero process status is an observed workload outcome rather than a runtime
+//! failure.
 //!
-//! This module adds [`CommandExecutionRequest`]/[`CommandExecutionResult`] and
-//! the matching [`CommandExecutionBackend`] port for that narrower contract. It
-//! reuses the existing digest-pinned image, identifier, and command-argument
-//! validation plus the [`crate::IsolationPolicy`]/[`crate::ResourceRequest`]
-//! budget contracts from [`super`] rather than duplicating them, and it does not
-//! change the existing service-lease lifecycle at all.
-//!
-//! The production one-shot path now has a rootless-Podman backend and CLI
-//! transport. ADR-0007 defines this bounded application-service contract;
-//! Proposed ADR-0008 records the concrete Podman/CLI runtime-gate implementation.
-//! The port remains independent from the long-lived service lease so consumers
-//! depend on this contract rather than infrastructure details.
+//! This module owns [`CommandExecutionRequest`], [`CommandExecutionResult`],
+//! [`CommandExecutionBackend`], and the validation/error vocabulary for that
+//! Core command lifecycle. Infrastructure adapters implement the backend port;
+//! they do not own these domain contracts.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::ApplicationServiceError;
+use super::{
+    IsolationPolicy, MAX_COMMAND_ARGUMENT_BYTES, MAX_COMMAND_ARGUMENTS,
+    MAX_REQUEST_IDENTIFIER_BYTES, ResourceRequest, SandboxExecutionError, SandboxRuntimeError,
+    is_digest_pinned_image_reference,
+};
 use crate::{
-    CONTRACT_SCHEMA_VERSION, IsolationPolicy, PrSourceArtifactError, PrSourceArtifactInput,
-    PrSourceArtifactReceipt, ResourceRequest, SandboxExecutionError,
+    CONTRACT_SCHEMA_VERSION, PrSourceArtifactError, PrSourceArtifactInput, PrSourceArtifactReceipt,
 };
 
 const COMMAND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "1.0.0";
@@ -69,25 +59,25 @@ impl CommandExecutionRequest {
             });
         }
         if self.request_id.is_empty()
-            || self.request_id.len() > super::MAX_REQUEST_IDENTIFIER_BYTES
+            || self.request_id.len() > MAX_REQUEST_IDENTIFIER_BYTES
             || self.request_id.chars().any(char::is_control)
         {
             return Err(CommandExecutionError::InvalidRequestId);
         }
-        if !super::is_digest_pinned_image_reference(&self.image_reference) {
+        if !is_digest_pinned_image_reference(&self.image_reference) {
             return Err(CommandExecutionError::ImageReferenceNotDigestPinned);
         }
         if self.command.is_empty() {
             return Err(CommandExecutionError::EmptyCommand);
         }
-        if self.command.len() > super::MAX_COMMAND_ARGUMENTS {
+        if self.command.len() > MAX_COMMAND_ARGUMENTS {
             return Err(CommandExecutionError::TooManyCommandArguments {
-                maximum_arguments: super::MAX_COMMAND_ARGUMENTS,
+                maximum_arguments: MAX_COMMAND_ARGUMENTS,
             });
         }
         for (argument_index, argument) in self.command.iter().enumerate() {
             if argument.is_empty()
-                || argument.len() > super::MAX_COMMAND_ARGUMENT_BYTES
+                || argument.len() > MAX_COMMAND_ARGUMENT_BYTES
                 || argument.chars().any(char::is_control)
             {
                 return Err(CommandExecutionError::InvalidCommandArgument { argument_index });
@@ -101,12 +91,11 @@ impl CommandExecutionRequest {
     }
 }
 
-/// Infrastructure port required by the command-execution coordinator.
+/// Infrastructure port required by the bounded-command coordinator.
 ///
-/// Implementations may reuse the same underlying container runtime as
-/// [`super::ApplicationServiceBackend`]; the two ports are kept separate
-/// because "run to completion" and "become ready as a network service" are
-/// different consumer contracts with different terminal conditions.
+/// Implementations may reuse the same underlying container runtime as other
+/// isolation profiles, but command completion remains a separate Core contract
+/// because it has a distinct terminal condition and result shape.
 pub trait CommandExecutionBackend: Send + Sync {
     /// Run one bounded, already-validated command to completion inside a
     /// fresh isolated sandbox and return its terminal outcome.
@@ -143,11 +132,8 @@ pub fn execute_command(
 
 /// Backend-supplied fields describing how one command ran to completion.
 ///
-/// Bundled into one type, rather than passed as separate constructor
-/// arguments, to keep the constructor a small, clippy-clean call site for
-/// every backend that builds a result. Built by
-/// [`crate::RootlessPodmanAdapter::run_command_at`] for a real run and by
-/// `tests::FakeCommandExecutionBackend` for contract tests.
+/// The infrastructure adapter and Core contract tests construct this value;
+/// callers receive only the stable [`CommandExecutionResult`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommandExecutionOutcome {
     pub(crate) backend_id: &'static str,
@@ -184,10 +170,10 @@ pub struct CommandExecutionResult {
     source_artifact_receipt: Option<PrSourceArtifactReceipt>,
 }
 
-/// Constructs a [`CommandExecutionResult`] from backend-supplied fields.
+/// Construct a result from backend-supplied terminal facts.
 ///
-/// `pub(crate)`, alongside [`CommandExecutionOutcome`]: see that type's docs
-/// for the two call sites that use it.
+/// The crate-private outcome keeps infrastructure-only construction details
+/// out of the public command contract while preserving a small constructor.
 impl CommandExecutionResult {
     pub(crate) fn new(request: &CommandExecutionRequest, outcome: CommandExecutionOutcome) -> Self {
         Self {
@@ -354,7 +340,7 @@ pub enum CommandExecutionError {
     /// The operator isolation policy was invalid, a resource request exceeded
     /// it, or the backend could not establish or observe the sandbox.
     #[error(transparent)]
-    Backend(#[from] ApplicationServiceError),
+    Backend(#[from] SandboxRuntimeError),
 }
 
 impl From<PrSourceArtifactError> for CommandExecutionError {
@@ -372,14 +358,13 @@ impl From<PrSourceArtifactError> for CommandExecutionError {
 
 impl From<SandboxExecutionError> for CommandExecutionError {
     fn from(error: SandboxExecutionError) -> Self {
-        Self::Backend(ApplicationServiceError::from(error))
+        Self::Backend(error.into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox_execution::IsolationPolicy;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn policy() -> IsolationPolicy {
@@ -419,14 +404,6 @@ mod tests {
         }
     }
 
-    /// The fixed backend outcome `FakeCommandExecutionBackend::succeeding` returns.
-    ///
-    /// Exposed as a standalone fixture (rather than only inline inside the fake
-    /// backend) so a test can build the exact expected [`CommandExecutionResult`]
-    /// independently and compare it with `assert_eq!` -- this codebase's
-    /// established pattern (see `infrastructure::bounded_command::tests` for
-    /// precedent) for asserting a `Result` without ever needing to unwrap or
-    /// pattern-match one whose `Err` arm a test can never actually reach.
     fn sample_outcome(exit_code: i32) -> CommandExecutionOutcome {
         CommandExecutionOutcome {
             backend_id: "fake",
@@ -444,7 +421,6 @@ mod tests {
         }
     }
 
-    /// A fixed-outcome backend for contract tests; never invokes a real container runtime.
     struct FakeCommandExecutionBackend {
         outcome: Result<CommandExecutionOutcome, CommandExecutionError>,
         invocations: AtomicUsize,
@@ -551,7 +527,7 @@ mod tests {
     #[test]
     fn validate_rejects_an_oversized_request_identifier() {
         let mut request = valid_request();
-        request.request_id = "a".repeat(super::super::MAX_REQUEST_IDENTIFIER_BYTES + 1);
+        request.request_id = "a".repeat(MAX_REQUEST_IDENTIFIER_BYTES + 1);
         assert_eq!(
             request.validate(&policy()).unwrap_err(),
             CommandExecutionError::InvalidRequestId
@@ -591,13 +567,13 @@ mod tests {
     #[test]
     fn validate_rejects_too_many_command_arguments() {
         let mut request = valid_request();
-        request.command = (0..super::super::MAX_COMMAND_ARGUMENTS + 1)
+        request.command = (0..MAX_COMMAND_ARGUMENTS + 1)
             .map(|index| format!("arg{index}"))
             .collect();
         assert_eq!(
             request.validate(&policy()).unwrap_err(),
             CommandExecutionError::TooManyCommandArguments {
-                maximum_arguments: super::super::MAX_COMMAND_ARGUMENTS
+                maximum_arguments: MAX_COMMAND_ARGUMENTS
             }
         );
     }
@@ -628,7 +604,7 @@ mod tests {
         request.resources.memory_bytes = policy().maximum_memory_bytes + 1;
         assert_eq!(
             request.validate(&policy()).unwrap_err(),
-            CommandExecutionError::Backend(ApplicationServiceError::ResourceLimitExceeded {
+            CommandExecutionError::Backend(SandboxRuntimeError::ResourceLimitExceeded {
                 resource_name: "memory_bytes"
             })
         );
@@ -640,7 +616,7 @@ mod tests {
         invalid_policy.policy_id = String::new();
         assert_eq!(
             valid_request().validate(&invalid_policy).unwrap_err(),
-            CommandExecutionError::Backend(ApplicationServiceError::InvalidPolicy {
+            CommandExecutionError::Backend(SandboxRuntimeError::InvalidPolicy {
                 field_name: "policy_id"
             })
         );
@@ -649,7 +625,7 @@ mod tests {
     #[test]
     fn execute_command_propagates_a_backend_error() {
         let backend = FakeCommandExecutionBackend::failing(CommandExecutionError::Backend(
-            ApplicationServiceError::BackendInvocationFailed {
+            SandboxRuntimeError::BackendInvocationFailed {
                 operation: "run_to_completion",
             },
         ));
@@ -658,7 +634,7 @@ mod tests {
 
         assert_eq!(
             error,
-            CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            CommandExecutionError::Backend(SandboxRuntimeError::BackendInvocationFailed {
                 operation: "run_to_completion",
             })
         );

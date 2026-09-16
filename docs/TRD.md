@@ -18,10 +18,10 @@ src/
 │   ├── ingestion.rs
 │   └── runtime.rs
 ├── application_service/              Supporting bounded context
-│   ├── command_execution.rs
 │   ├── coordinator.rs
 │   └── mod.rs
 ├── sandbox_execution/                Core bounded context
+│   ├── bounded_command_execution.rs
 │   └── mod.rs
 ├── infrastructure/                   Runtime/process adapters
 │   ├── application_service_backend.rs
@@ -37,13 +37,15 @@ src/
 └── lib.rs                            Public facade only
 ```
 
-Podman, runtime-gate composition, and bounded subprocess execution are infrastructure concerns, not consumer/domain objects. Core and Supporting contexts expose backend-neutral contracts; additional backends belong under the infrastructure boundary without changing consumer request/result/lease semantics merely because runtime technology changes.
+`CommandExecutionRequest`, `CommandExecutionResult`, `CommandExecutionBackend`, `CommandExecutionError`, and `execute_command` are Core `sandbox_execution` domain truth. `application_service` owns only the readiness-gated service lifecycle and consumes Core isolation contracts. Podman, runtime-gate composition, and bounded subprocess execution are infrastructure concerns, not consumer/domain objects. Additional backends belong under the infrastructure boundary without changing consumer request/result/lease semantics merely because runtime technology changes.
 
-## Application-service contracts
+The crate-root facade preserves the existing public command names while their implementation owner is Core. `ApplicationServiceError` is presently a compatibility alias for the shared sandbox-runtime failure taxonomy; the alias does not make bounded command execution part of the Supporting application-service context.
+
+## Core isolation and Supporting application-service contracts
 
 ### `IsolationPolicy`
 
-Operator-owned maxima:
+Operator-owned Core maxima:
 
 - memory bytes;
 - CPU millicores;
@@ -55,7 +57,7 @@ Operator-owned maxima:
 - numeric non-root UID/GID;
 - policy identifier.
 
-The consumer cannot request more than these values or mutate isolation capabilities.
+The consumer cannot request more than these values or mutate isolation capabilities. Supporting contexts consume this Core policy rather than defining parallel resource or image-validation authority.
 
 ### `ApplicationServiceRequest`
 
@@ -172,6 +174,8 @@ The immutable image reference is separated from Podman options with `--` before 
 
 ## One-shot command execution
 
+The bounded-command contract is implemented in `src/sandbox_execution/bounded_command_execution.rs`; infrastructure adapters implement its backend port. No command request/result/backend source of truth belongs under `application_service`.
+
 ### `CommandExecutionRequest`
 
 The command contract is consumer-neutral and bounded. It carries an opaque request/correlation identifier, immutable digest-pinned OCI image, direct argv, the same policy-bounded CPU/RAM/PID/tmpfs/lease resource request, and an optional exact-revision source artifact. It exposes no shell, ambient environment map, secret injection, device, runtime socket, privileged mode, host namespace, public bind, or arbitrary egress authority.
@@ -278,7 +282,7 @@ Required metrics for a real backend include:
 ## Compatibility and release evidence
 
 - JSON contract versions are explicit.
-- Public Rust facade preserves existing artifact-analysis names when internal paths move.
+- Public Rust facade preserves existing artifact-analysis and bounded-command names when internal ownership paths move.
 - New incompatible contract behavior requires a version increment and compatibility tests.
 - No silent coercion of mutable image tags, unsupported profiles, malformed backend output, or excessive resource requests.
 - Every merge/release candidate requires exact-head fmt/tests/Clippy/rustdoc, 100% owned-production statement/function/region/branch coverage, required real-runtime security evidence, review/security/dependency/SBOM gates, immutable package/provenance, reproducibility, and rollback evidence.
