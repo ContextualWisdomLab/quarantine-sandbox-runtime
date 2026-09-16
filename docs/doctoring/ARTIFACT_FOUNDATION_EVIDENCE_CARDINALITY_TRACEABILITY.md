@@ -10,7 +10,9 @@ Production commit `701097b97205d630869344d0d23df8d0505c6c50` adds the smallest v
 
 Review of that candidate found a valid fixture-compatibility defect before exact-head GREEN: three shared `valid_bundle()` fixtures still contained only `ArtifactIdentity`, and the private `trusted_fixture_engine` exercised the bundled-runtime path without the required `FormatAnalyzer`. The production cardinality invariant was correct, but these stale fixtures would fail before the assertions they were intended to exercise. Ordinary fast-forward repair commits `14fdbea7a06477ebee8c385961a1e836a8e42305`, `febd990791d1ffefda434a9d4b0f8febab5e8d89`, and `f8d8706e5881e367bcba36203e9a82fe59ce8a5c` add exactly one `FileFormat` and one `PolicyBoundary` record to the affected contract fixtures with contiguous sequence numbers. Test-only runtime commit `e5e440531aeb5334d88f8421fd1ed75cc841978b` prepends `FormatAnalyzer` inside the private `#[cfg(test)]` bundled fixture and updates its evidence-count expectation. It does not add production normalization or change runtime composition semantics.
 
-The current candidate must execute again after these fixture repairs. Earlier RED/repair evidence remains historical evidence for the cardinality defect, but no predecessor GREEN or coverage conclusion transfers to the moved head.
+Review `5228331398` found a separate single-writer authority defect after those fixture repairs: this leaf still carried an older #18-era delta to the global `docs/product-technical-gap-baseline.md`, while current global gap-ledger authority is maintained by #121. Ordinary fast-forward `8252dbe0d5e55efbee9894dcdd8aa415af962124` restores that file to the exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9`. The repair removes only stale leaf ownership of the global ledger; cardinality production, fixtures, focused tests, and this owner-local TRACEABILITY remain intact. Descendant #130 must adopt this owner-clean prerequisite non-force rather than preserve the stale ledger.
+
+The current candidate must execute again after fixture and owner-boundary repairs. Earlier RED/repair evidence remains historical evidence for the cardinality defect, but no predecessor GREEN or coverage conclusion transfers to a moved head.
 
 ## Problem and contract authority
 
@@ -33,6 +35,10 @@ For that reason #64/#65 owns structural v1 cardinality only. Trusted analyzer/ru
 The aggregate invariant changes which `EvidenceBundle` instances are valid. Tests whose purpose is to probe unrelated top-level, runtime, attribute, or limitation failures therefore need a baseline fixture that satisfies the new aggregate preconditions; otherwise cardinality becomes an accidental earlier failure reason. `tests/contracts.rs`, `tests/contract_boundaries.rs`, and `tests/coverage_contracts.rs` now each carry the three foundation kinds before mutating their intended field.
 
 Likewise, the private `trusted_fixture_engine` deliberately opts into `AnalyzerExecutionPath::BundledRuntime`; it must therefore exercise the same foundation composition as that path. Adding `FormatAnalyzer` to the private test helper preserves the intended production contract while leaving caller-specific fixture analyzers and their findings unchanged. Adding a production fallback that synthesizes missing `FileFormat` would instead mask composition defects and was rejected.
+
+### Global gap authority remains single-writer
+
+`docs/product-technical-gap-baseline.md` is an integrated owner-stack ledger, not a leaf artifact-analysis contract. #65 may reference the global ledger but must not carry an obsolete fork of it. Restoring the exact #18 base blob keeps this leaf's merge surface limited to its cardinality contract and lets #121 continue to publish current cross-lane supersession without later regression from descendant adoption.
 
 ## DDD ownership
 
@@ -67,4 +73,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Release effect
 
-No artifact-analysis receipt is release-authoritative until the current exact head re-executes the cardinality repair together with fixture compatibility, required review/security/coverage gates, and protected integration. A GREEN for #64 would not establish trusted producer origin and would not waive #49/#50/#52/#54/#56/#58/#60/#62, real positive isolation, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
+No artifact-analysis receipt is release-authoritative until the current exact head re-executes the cardinality repair together with fixture compatibility, owner-boundary repair, required review/security/coverage gates, and protected integration. A GREEN for #64 would not establish trusted producer origin and would not waive #49/#50/#52/#54/#56/#58/#60/#62, real positive isolation, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
