@@ -218,7 +218,9 @@ def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     ``filenames`` table, so attribution must follow that id rather than assume
     every region belongs to the first filename. A line is uncovered only when
     at least one region for the requested file maps to it and no such region
-    records execution.
+    records execution. Region end coordinates use the same half-open terminal
+    line rule as coverage admission: a next-line column 1 boundary does not
+    touch that terminal line.
     """
 
     uncovered: set[int] = set()
@@ -245,8 +247,12 @@ def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
                 continue
             line_start = int(region[0])
             line_end = int(region[2])
+            column_end = int(region[3])
             execution_count = int(region[4])
-            for line_number in range(line_start, line_end + 1):
+            touched_lines = list(range(line_start, line_end))
+            if line_end == line_start or column_end > 1:
+                touched_lines.append(line_end)
+            for line_number in touched_lines:
                 line_counts[line_number] = line_counts.get(line_number, 0) + execution_count
         for line_number, execution_count in line_counts.items():
             if execution_count == 0:
