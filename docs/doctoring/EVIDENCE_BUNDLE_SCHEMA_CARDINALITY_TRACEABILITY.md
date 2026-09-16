@@ -12,9 +12,11 @@ The initial #130 witness at `47a60a8f9f0ebcb5c6c49b3f0b61ddd37df9de94` recursive
 
 Test-only repair `19e6b171a6e6b57d9f5ab048f903297fdc005a1a` therefore recognizes cardinality only when exact-count subschemas are directly composed under `properties.evidence.allOf`. This binds the structural witness to an unconditional conjunction rather than to keyword presence somewhere in the schema document. Production Rust and the public schema remain unchanged until the witness executes a causal RED.
 
-The prerequisite #65 branch subsequently advanced from historical `1813b49fd908f111ba6f6a43066bacd5f84e836b` to `598a65562968a48ce1fa61814fee1cbc96f7fff8` after review found stale contract fixtures under the new Rust cardinality invariant. #130 adopted that exact prerequisite through ordinary non-force two-parent commit `7240a80f392e5660d728f8ba0c2df829adba4d87`, preserving this lane's test and TRACEABILITY blobs while inheriting #65's fixture repairs. No schema production change, force push, destructive rebase, or child-delta loss occurred.
+The prerequisite #65 branch first advanced from historical `1813b49fd908f111ba6f6a43066bacd5f84e836b` to `598a65562968a48ce1fa61814fee1cbc96f7fff8` after review found stale contract fixtures under the new Rust cardinality invariant. #130 adopted that prerequisite through ordinary non-force two-parent commit `7240a80f392e5660d728f8ba0c2df829adba4d87`, preserving this lane's test and TRACEABILITY blobs while inheriting #65's fixture repairs.
 
-This adoption matters to causality: #130's schema RED must execute on the repaired prerequisite contract rather than on a stale #65 snapshot whose unrelated fixtures would fail first. Historical queued #130 runs do not transfer to the restacked head.
+A later owner-boundary review, `5228331398`, found that #65 still carried an older #18-era delta to the global `docs/product-technical-gap-baseline.md`, even though current gap-ledger authority is maintained by #121. #65 repaired that single-writer violation at `8252dbe0d5e55efbee9894dcdd8aa415af962124` by restoring the exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9`; no cardinality production, fixture, test, or local TRACEABILITY delta was removed. #130 then adopted exact #65 `8252dbe0...` through non-force two-parent commit `169d3fa6ab97d71b97736464116de29f414679da`, keeping this lane's two owned files while carrying the same restored baseline blob. No schema production change, force push, destructive rebase, source copy, or child-delta loss occurred.
+
+These adoptions matter to causality: #130's schema RED must execute on the repaired prerequisite contract and owner-clean tree rather than on a stale #65 snapshot whose unrelated fixture or global-ledger deltas could mask or conflict with this lane. Historical queued #130 runs do not transfer to the moved head.
 
 ## Selected minimum repair after causal RED
 
@@ -36,6 +38,6 @@ APA 7th:
 
 ## Evidence and release gate
 
-The current #130 head must first execute the schema-cardinality witness for the intended missing-effective-constraint cause on top of the repaired #65 prerequisite. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
+The current #130 head must first execute the schema-cardinality witness for the intended missing-effective-constraint cause on top of repaired prerequisite #65. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
 
 Neither #65 nor #129 is complete while Rust validation and the published v1 schema disagree or while either exact owner head lacks its own verification. No predecessor GREEN transfers across head movement.
