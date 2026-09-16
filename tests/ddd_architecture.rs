@@ -140,22 +140,19 @@ fn production_source_filter_excludes_only_unambiguously_test_only_code() {
         None
     );
 
-    let conditional_production =
-        "#![cfg(any(test, feature = \"unsafe-shortcut\"))]\nfn witness() { panic!(\"production-capable\"); }\n";
+    let conditional_production = "#![cfg(any(test, feature = \"unsafe-shortcut\"))]\nfn witness() { panic!(\"production-capable\"); }\n";
     assert_eq!(
         production_source_without_test_only_code(conditional_production),
         Some(conditional_production)
     );
 
-    let trailing_test_module =
-        "fn production() {}\n#[cfg(all(test, unix))]\nmod tests { fn helper() { panic!(\"test-only\"); } }\n";
+    let trailing_test_module = "fn production() {}\n#[cfg(all(test, unix))]\nmod tests { fn helper() { panic!(\"test-only\"); } }\n";
     assert_eq!(
         production_source_without_test_only_code(trailing_test_module),
         Some("fn production() {}\n")
     );
 
-    let production_after_test_module =
-        "#[cfg(test)]\nmod tests { fn helper() { panic!(\"test-only\"); } }\nfn production() { panic!(\"must remain visible\"); }\n";
+    let production_after_test_module = "#[cfg(test)]\nmod tests { fn helper() { panic!(\"test-only\"); } }\nfn production() { panic!(\"must remain visible\"); }\n";
     assert_eq!(
         production_source_without_test_only_code(production_after_test_module),
         Some(production_after_test_module)
