@@ -1,6 +1,6 @@
 # Artifact Evidence Identifier Binding Traceability
 
-Status: issue #60 current-owner RED is hardened for assertion-level causal execution. Production GREEN remains intentionally unchanged until the current exact head executes the two independent hostile identity cases for their intended causes.
+Status: issue #60 current-owner RED is split into independent hostile identity witnesses and hardened against sequence-mismatch false positives. Assertion-level typed identity-mismatch binding remains intentionally incomplete until the current exact head executes the semantic RED and the dedicated contract error exists; production GREEN remains unchanged.
 
 ## Problem
 
@@ -26,19 +26,23 @@ That asymmetry matters after serialization. Audit stores, provenance/signature s
 
 Initial test-bearing authority `b81495c9d4352ed55b3dc662a19cecb535d7a186` placed both hostile mutations in one test. Current predecessor exact `95438943226b719dda296ada384036e258d81bf4`, CI `34057675450`, completed with hosted negative rootless/AppArmor GREEN while verify, coverage, and branch-coverage failed during broader Rust evidence generation. That run proves execution reached the repository's Rust evidence path, but the available GitHub connector evidence does not retain assertion-level log text sufficient to promote the predecessor failure as the precise issue #60 causal RED.
 
-Test-only ordinary child `e9c6217306da87dc075a2e102d38eb41ed83cb28` therefore improves causality rather than guessing. It changes no production Rust, public schema, wire shape, or version. The witness now has three separately named controls:
+Test-only ordinary child `e9c6217306da87dc075a2e102d38eb41ed83cb28` therefore improves causality rather than guessing. It changes no production Rust, public schema, wire shape, or version. The witness has three separately named controls:
 
 1. `emitted_evidence_ids_match_the_documented_job_and_sequence_identity` proves the existing producer emits the deterministic identity form this repair intends to preserve;
 2. `foreign_job_evidence_identifier_fails_closed` changes only the first record identifier to `analysis_job_foreign:evidence:0001` and requires rejection;
 3. `duplicate_sequence_evidence_identifier_fails_closed` reuses record 1's valid identifier at sequence 2 and independently requires rejection.
 
-Splitting the mutations prevents the first failing assertion from hiding the second and gives the next exact-head execution unambiguous test names. No production behavior is authorized to change until that exact witness executes for the intended validator gap.
+Current-head review correctly found that plain `is_err()` assertions could still false-GREEN on an unrelated validation failure. Test-only ordinary child `0181766da395167ab3ca28bcbc2d211efe3a5731` therefore keeps both hostile mutations on their intended one-based sequence, computes the canonical expected identity for that sequence, proves the supplied hostile identity differs from it, and explicitly fails if validation returns `InvalidEvidenceSequence`. This does not invent the future production error or turn the semantic RED into a compile-time missing-variant RED.
+
+The dedicated identity-mismatch error and its expected/actual identity fields remain part of the minimum GREEN contract below. Once the current exact witness executes and proves that the existing validator still accepts both hostile identities, the production repair must add that typed failure and the regression must then assert it exactly. Until then, describing this lane as fully assertion-level typed hardening would overstate the checked-in evidence.
+
+Splitting the mutations prevents the first failing assertion from hiding the second; the sequence guard prevents a later unrelated sequence failure from satisfying either hostile case. No production behavior is authorized to change until the current exact witness executes for the intended validator gap.
 
 ## Smallest causal GREEN after executed RED
 
 After causal execution, the minimum compatible repair is to validate the identity relation the producer already emits: for each one-based sequence `n`, the accepted record identifier is exactly `<analysis_job_id>:evidence:<n padded to four decimal digits>`. Validation should reject a contradiction rather than rewrite or normalize the supplied identifier.
 
-A typed contract error should distinguish evidence-identity mismatch from `InvalidEvidenceSequence`. That preserves the diagnostic boundary between an incorrect numeric position and an identifier that does not belong to the enclosing job/position. The validator should receive the enclosing `analysis_job_id` explicitly rather than recover it by parsing untrusted `evidence_id` text.
+A typed contract error should distinguish evidence-identity mismatch from `InvalidEvidenceSequence`. That preserves the diagnostic boundary between an incorrect numeric position and an identifier that does not belong to the enclosing job/position. The validator should receive the enclosing `analysis_job_id` explicitly rather than recover it by parsing untrusted `evidence_id` text. The post-RED regression must bind both hostile cases to this dedicated error and verify the expected canonical identity for sequence 1 or 2 respectively.
 
 If this deterministic string form is not intended to remain stable public `1.0.0` semantics, the alternative is an explicit versioned contract change. Random record IDs, process-local identity, downstream ignore rules, sequence-only validation while retaining authoritative-looking `evidence_id`, or another unsigned recomputable companion checksum are rejected alternatives.
 
