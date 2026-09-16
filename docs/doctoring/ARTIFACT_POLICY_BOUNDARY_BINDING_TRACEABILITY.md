@@ -50,6 +50,12 @@ Selected repair: make `PolicyBoundary` a runtime-owned evidence kind at the cont
 
 Risk/effect: admissible receipts become narrower. Engine-produced foundation receipts remain unchanged. This repair establishes receipt consistency only; it does not prove that a sandbox actually enforced the claimed boundary.
 
+## Owner-boundary repair
+
+Review `5228839910` found that this focused leaf also carried a 2026-09-06 / #18-era `docs/product-technical-gap-baseline.md` delta. That file is the repository-wide causal gap ledger and is now owned by #121, not by the #62/#63 receipt-consistency lane. Retaining the stale leaf delta would allow a later integration to regress or conflict with the current global owner graph even if the policy-boundary code itself were correct.
+
+Ordinary fast-forward commit `31ce68063f20937c21aa97cf5f4edb56e2f8a5c3` restores `docs/product-technical-gap-baseline.md` byte-for-byte to the exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9`. The policy-boundary production repair, focused tests, and this local TRACEABILITY remain intact. Current global gap authority stays with #121's checked-in baseline and live supersession. No force push, destructive rebase, production rollback, or test weakening is involved.
+
 ## Release gates
 
 The unchanged review candidate must obtain exact-head formatting, tests, clippy, rustdoc, 100% owned production statement/function/region/branch coverage, review/security gates, and protected integration before the repair can be called GREEN or release-authoritative. Commit identifiers above are causal milestones, not a self-referential assertion that a documentation commit is the current branch head.
