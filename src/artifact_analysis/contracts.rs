@@ -454,6 +454,7 @@ impl EvidenceBundle {
         for (index, record) in self.evidence.iter().enumerate() {
             record.validate(index + 1)?;
         }
+        validate_foundation_evidence_cardinality(&self.evidence)?;
 
         let mut unique_limitations = BTreeSet::new();
         for limitation in &self.limitations {
@@ -467,6 +468,29 @@ impl EvidenceBundle {
 
         Ok(())
     }
+}
+
+/// Require exactly one record for each foundation evidence kind in contract v1.
+fn validate_foundation_evidence_cardinality(
+    evidence: &[EvidenceRecord],
+) -> Result<(), ContractError> {
+    for evidence_kind in [
+        EvidenceKind::ArtifactIdentity,
+        EvidenceKind::FileFormat,
+        EvidenceKind::PolicyBoundary,
+    ] {
+        let actual_count = evidence
+            .iter()
+            .filter(|record| record.evidence_kind == evidence_kind)
+            .count();
+        if actual_count != 1 {
+            return Err(ContractError::InvalidFoundationEvidenceCardinality {
+                evidence_kind: evidence_kind.as_str(),
+                actual_count,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Contract validation failure.
@@ -553,6 +577,16 @@ pub enum ContractError {
         expected_sequence: usize,
         /// Actual sequence.
         actual_sequence: usize,
+    },
+    /// A v1 foundation evidence kind is missing or appears more than once.
+    #[error(
+        "invalid foundation evidence cardinality for {evidence_kind}: expected 1, got {actual_count}"
+    )]
+    InvalidFoundationEvidenceCardinality {
+        /// Stable evidence-kind wire code whose v1 cardinality was violated.
+        evidence_kind: &'static str,
+        /// Number of matching records found in the bundle.
+        actual_count: usize,
     },
     /// The foundation boundary claims artifact execution, network, or credentials.
     #[error("foundation runtime boundary violated: {boundary_name}")]
