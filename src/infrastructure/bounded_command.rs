@@ -35,6 +35,13 @@ pub(crate) enum BoundedCommandError {
     Capture,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaptureWaitOutcome {
+    Finished,
+    Deadline,
+    OutputLimit,
+}
+
 /// Execute direct argv with bounded wall-clock and retained stdout/stderr memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BoundedCommandRunner {
@@ -214,16 +221,15 @@ where
         return status_result;
     }
     match streams_finished_before_deadline(stdout_handle, stderr_handle, deadline, overflow) {
-        Ok(true) => status_result,
-        Ok(false) => {
+        CaptureWaitOutcome::Finished => status_result,
+        CaptureWaitOutcome::Deadline => {
             child.terminate().map_err(|_| BoundedCommandError::Wait)?;
             Err(BoundedCommandError::Timeout)
         }
-        Err(BoundedCommandError::OutputLimit) => {
+        CaptureWaitOutcome::OutputLimit => {
             child.terminate().map_err(|_| BoundedCommandError::Wait)?;
             Err(BoundedCommandError::OutputLimit)
         }
-        Err(_) => unreachable!("capture wait only reports output-limit errors"),
     }
 }
 
@@ -232,17 +238,17 @@ fn streams_finished_before_deadline<T, U>(
     stderr_handle: &JoinHandle<U>,
     deadline: Instant,
     overflow: &AtomicBool,
-) -> Result<bool, BoundedCommandError> {
+) -> CaptureWaitOutcome {
     loop {
         if stdout_handle.is_finished() && stderr_handle.is_finished() {
-            return Ok(true);
+            return CaptureWaitOutcome::Finished;
         }
         if overflow.load(Ordering::Acquire) {
-            return Err(BoundedCommandError::OutputLimit);
+            return CaptureWaitOutcome::OutputLimit;
         }
         let now = Instant::now();
         if now >= deadline {
-            return Ok(false);
+            return CaptureWaitOutcome::Deadline;
         }
         thread::sleep(POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
     }
@@ -307,9 +313,9 @@ mod tests {
     };
 
     use super::{
-        BoundedCommandError, ChildProcess, captured_pipes, drain_stream, enforce_capture_deadline,
-        finalize_output, join_stream, kill_and_reap, streams_finished_before_deadline,
-        supervise_child,
+        BoundedCommandError, CaptureWaitOutcome, ChildProcess, captured_pipes, drain_stream,
+        enforce_capture_deadline, finalize_output, join_stream, kill_and_reap,
+        streams_finished_before_deadline, supervise_child,
     };
 
     #[derive(Clone, Copy)]
@@ -473,7 +479,7 @@ mod tests {
                 Instant::now() + Duration::from_millis(100),
                 &overflow,
             ),
-            Ok(true)
+            CaptureWaitOutcome::Finished
         );
         completed_stdout.join().expect("stdout worker must finish");
         completed_stderr.join().expect("stderr worker must finish");
@@ -488,7 +494,7 @@ mod tests {
                 Instant::now(),
                 &overflow,
             ),
-            Ok(false)
+            CaptureWaitOutcome::Deadline
         );
         sender
             .send(())
@@ -510,7 +516,7 @@ mod tests {
                 Instant::now() + Duration::from_millis(100),
                 &overflow,
             ),
-            Err(BoundedCommandError::OutputLimit)
+            CaptureWaitOutcome::OutputLimit
         );
         sender
             .send(())
