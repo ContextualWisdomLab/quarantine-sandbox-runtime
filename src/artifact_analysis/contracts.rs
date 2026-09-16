@@ -455,6 +455,15 @@ impl EvidenceBundle {
             record.validate(index + 1)?;
         }
 
+        if self.disposition == RuntimeDisposition::Completed
+            && self
+                .evidence
+                .iter()
+                .any(|record| record.evidence_kind == EvidenceKind::ToolFailure)
+        {
+            return Err(ContractError::CompletedDispositionContainsToolFailure);
+        }
+
         let mut unique_limitations = BTreeSet::new();
         for limitation in &self.limitations {
             validate_text("limitation", limitation, MAX_LIMITATION_BYTES)?;
@@ -563,6 +572,9 @@ pub enum ContractError {
     /// The bundle attempted to suppress the consumer verdict requirement.
     #[error("consumer verdict must remain required")]
     ConsumerVerdictMustBeRequired,
+    /// Completed execution cannot coexist with attributable tool-failure evidence.
+    #[error("completed disposition cannot include tool-failure evidence")]
+    CompletedDispositionContainsToolFailure,
     /// A limitation code is repeated.
     #[error("duplicate limitation: {limitation}")]
     DuplicateLimitation {
