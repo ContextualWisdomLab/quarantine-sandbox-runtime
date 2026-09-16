@@ -506,7 +506,8 @@ mod tests {
         }
     }
 
-    fn trusted_fixture_engine(analyzers: Vec<Box<dyn StaticAnalyzer>>) -> AnalysisEngine {
+    fn trusted_fixture_engine(mut analyzers: Vec<Box<dyn StaticAnalyzer>>) -> AnalysisEngine {
+        analyzers.insert(0, Box::new(FormatAnalyzer));
         let ingestion_policy = IngestionPolicy::default();
         AnalysisEngine::validate_configuration(
             &ingestion_policy,
@@ -699,7 +700,7 @@ mod tests {
             .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc")
             .expect("empty analyzer output is valid");
         assert_eq!(empty.disposition, RuntimeDisposition::Completed);
-        assert_eq!(empty.evidence.len(), 2);
+        assert_eq!(empty.evidence.len(), 3);
 
         let invalid = trusted_fixture_engine(vec![Box::new(InvalidFindingAnalyzer)])
             .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"abc");

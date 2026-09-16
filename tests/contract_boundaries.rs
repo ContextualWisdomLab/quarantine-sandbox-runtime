@@ -51,14 +51,32 @@ fn valid_bundle() -> EvidenceBundle {
         },
         disposition: RuntimeDisposition::Completed,
         consumer_verdict_required: true,
-        evidence: vec![EvidenceRecord {
-            evidence_id: "evidence_boundary_0001".to_owned(),
-            sequence_number: 1,
-            evidence_kind: EvidenceKind::ArtifactIdentity,
-            producer_id: "runtime_core".to_owned(),
-            summary: "Artifact identity established.".to_owned(),
-            attributes: BTreeMap::new(),
-        }],
+        evidence: vec![
+            EvidenceRecord {
+                evidence_id: "evidence_boundary_0001".to_owned(),
+                sequence_number: 1,
+                evidence_kind: EvidenceKind::ArtifactIdentity,
+                producer_id: "runtime_core".to_owned(),
+                summary: "Artifact identity established.".to_owned(),
+                attributes: BTreeMap::new(),
+            },
+            EvidenceRecord {
+                evidence_id: "evidence_boundary_0002".to_owned(),
+                sequence_number: 2,
+                evidence_kind: EvidenceKind::FileFormat,
+                producer_id: "format_analyzer".to_owned(),
+                summary: "Artifact format established.".to_owned(),
+                attributes: BTreeMap::new(),
+            },
+            EvidenceRecord {
+                evidence_id: "evidence_boundary_0003".to_owned(),
+                sequence_number: 3,
+                evidence_kind: EvidenceKind::PolicyBoundary,
+                producer_id: "runtime_core".to_owned(),
+                summary: "Runtime policy boundary established.".to_owned(),
+                attributes: BTreeMap::new(),
+            },
+        ],
         limitations: vec!["runtime_does_not_determine_maliciousness".to_owned()],
     }
 }
