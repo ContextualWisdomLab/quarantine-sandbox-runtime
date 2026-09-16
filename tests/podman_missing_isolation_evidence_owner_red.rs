@@ -154,10 +154,7 @@ fn launch(
     (result, calls)
 }
 
-fn assert_rejected_before_port(
-    fixture: Fixture,
-    expected: ApplicationServiceError,
-) {
+fn assert_rejected_before_port(fixture: Fixture, expected: ApplicationServiceError) {
     let (result, calls) = launch(fixture);
     assert_eq!(result, Err(expected));
     assert!(
