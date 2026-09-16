@@ -1,4 +1,4 @@
-//! RED contract for binding runtime-owned policy-boundary evidence to the runtime manifest.
+//! Contract tests for binding runtime-owned policy-boundary evidence to the runtime manifest.
 
 use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
 
@@ -48,6 +48,24 @@ fn policy_boundary_evidence_must_match_the_runtime_manifest() {
         assert!(
             contradictory.validate().is_err(),
             "PolicyBoundary attribute {attribute_name} must not contradict the enclosing RuntimeManifest"
+        );
+
+        let mut missing = bundle.clone();
+        missing.evidence[policy_boundary_index]
+            .attributes
+            .remove(attribute_name);
+        assert!(
+            missing.validate().is_err(),
+            "PolicyBoundary attribute {attribute_name} must be present when the runtime manifest carries the same fact"
+        );
+
+        let mut malformed = bundle.clone();
+        malformed.evidence[policy_boundary_index]
+            .attributes
+            .insert(attribute_name.to_owned(), "FALSE".to_owned());
+        assert!(
+            malformed.validate().is_err(),
+            "PolicyBoundary attribute {attribute_name} must use the canonical boolean representation"
         );
     }
 }
