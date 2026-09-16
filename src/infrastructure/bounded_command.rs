@@ -27,7 +27,7 @@ pub(crate) enum BoundedCommandError {
     Spawn(io::ErrorKind),
     /// The child could not be observed or reaped reliably.
     Wait,
-    /// The child exceeded its wall-clock budget and was killed and reaped.
+    /// The wall-clock budget could not be represented or was exceeded.
     Timeout,
     /// Stdout or stderr exceeded the configured retained-output budget.
     OutputLimit,
@@ -68,11 +68,13 @@ impl BoundedCommandRunner {
         program: &Path,
         args: &[String],
     ) -> Result<Output, BoundedCommandError> {
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or(BoundedCommandError::Timeout)?;
         let (mut child, stdout, stderr) = spawn_piped_child(program, args)?;
         let overflow = Arc::new(AtomicBool::new(false));
         let stdout_handle = drain_stream(stdout, self.output_limit_bytes, Arc::clone(&overflow));
         let stderr_handle = drain_stream(stderr, self.output_limit_bytes, Arc::clone(&overflow));
-        let deadline = Instant::now() + self.timeout;
 
         let status_result = supervise_child(&mut child, deadline, overflow.as_ref());
         let status_result = enforce_capture_deadline(
