@@ -230,8 +230,9 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
         "network isolation evidence must still inspect the runtime-owned network; calls were:\n{calls}"
     );
     assert!(
-        calls.lines().any(|line| line.starts_with("create --name ")
-            && line.contains(" --network ")),
+        calls
+            .lines()
+            .any(|line| line.starts_with("create --name ") && line.contains(" --network ")),
         "container creation must select the runtime-owned network before attachment evidence is checked; calls were:\n{calls}"
     );
     assert!(
