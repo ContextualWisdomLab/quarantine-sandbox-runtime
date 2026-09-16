@@ -20,9 +20,7 @@ fn unrepresentable_command_deadline_fails_closed_without_panicking() {
         "an unrepresentable monotonic deadline must return a typed error instead of panicking"
     );
     assert!(
-        outcome
-            .expect("panic admission is checked above")
-            .is_err(),
+        outcome.expect("panic admission is checked above").is_err(),
         "an unrepresentable command deadline must fail closed"
     );
 }
