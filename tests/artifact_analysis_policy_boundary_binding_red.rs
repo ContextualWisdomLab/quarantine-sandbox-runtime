@@ -34,7 +34,10 @@ fn policy_boundary_evidence_must_match_the_runtime_manifest() {
         let mut contradictory = bundle.clone();
         let policy_boundary = &mut contradictory.evidence[policy_boundary_index];
         assert_eq!(
-            policy_boundary.attributes.get(attribute_name).map(String::as_str),
+            policy_boundary
+                .attributes
+                .get(attribute_name)
+                .map(String::as_str),
             Some("false"),
             "control fixture must begin with the same false boundary fact as RuntimeManifest"
         );
