@@ -12,7 +12,9 @@ Old exact native-CI specimens on #9 and #10 observed `BackendInvocationFailed { 
 
 Draft #72 hardened its missing-executable RED by creating a test-owned empty directory and targeting an absent child path. Exact `5b623eceeb4b504da9042c9d1efd3b6c1b700fb9` then executed the intended causal RED: native verify passed exact checkout, dependency lock, repository policy, coverage-parser tests, and formatting before `cargo test` failed with E0432 because `BackendInvocationFailureKind` was not exported and E0599 because `ApplicationServiceError::BackendSpawnFailed` did not exist. The hosted negative rootless/AppArmor lane succeeded. This established the missing classification contract without relying on an ambient path or inferred failure.
 
-After that RED, #72 adopted root checkout-credential repair `7482108c0b74f58f447722a98330f9ad44215eec` through an ordinary two-parent non-force merge. The minimum production candidate now preserves `std::io::ErrorKind` only at the infrastructure boundary, maps it into a bounded public vocabulary, separates missing captured pipes from process-spawn failure, and adds no retry behavior. Exact-head GREEN remains required before integration.
+After that RED, #72 adopted root checkout-credential repair `7482108c0b74f58f447722a98330f9ad44215eec` through an ordinary two-parent non-force merge. The minimum production candidate preserves `std::io::ErrorKind` only at the infrastructure boundary, maps it into a bounded public vocabulary, separates missing captured pipes from process-spawn failure, and adds no retry behavior.
+
+A later provider-neutral UL RED also executed. Exact `8850158a5d5bc57630553040e2ac1a99abc03005`, coverage job `101910682603`, kept the typed missing-executable contract GREEN while proving that the generic public invocation-failure wording still leaked Podman-specific language. Production `4f3da8b925170c40e0ff76234aaac1c031bd6413` changed only that public display/doc wording to backend-neutral terminology; the public error shape and process semantics did not change.
 
 ## DDD boundary
 
@@ -47,6 +49,22 @@ POSIX.1-2024 independently distinguishes execution failures such as `ENOENT`, `E
 - `ApplicationServiceError::BackendSpawnFailed` carries only the stable operation code and bounded failure class. `BackendInvocationFailed` remains the non-spawn path for wait/capture failures.
 - Unit coverage exercises every explicit mapping and the wildcard branch; the real missing-executable integration RED remains the end-to-end `NotFound` acceptance.
 
+## Exact hosted execution and coverage finding
+
+Exact `01563100108c158dc29922b6fd008edc31d42839`, native CI `34179057453`, executed the repaired process boundary on hosted Ubuntu. Verify `101914208131` passed exact checkout, dependency lock, repository policy, coverage-parser tests, formatting, the complete workspace/all-target Rust tests, Clippy, and rustdoc. Hosted negative rootless/AppArmor `101914208181` also passed. The typed-spawn and provider-neutral UL behavior were therefore exact-head GREEN on that historical SHA.
+
+Coverage `101914208138` and branch coverage `101914207986` generated and uploaded evidence, then failed only complete-production coverage admission. Artifacts `10038444108` and `10038373778` reported functions `192/192`, branches `452/452`, and lines `1997/1998`. The only zero-count production source line was the legitimate `src/infrastructure/podman.rs` ACL arm that maps `BoundedCommandError::Wait | Capture` to `BackendInvocationFailed`. That gap must not be repaired by deleting or collapsing Wait/Capture semantics.
+
+Review `5136944224` fixed that constraint. Production/test candidate `d5cf70820295f77dac5803e3eb919d3d5ef9bb35` extracts the existing bounded-command error translation into a pure infrastructure ACL helper and directly exercises Timeout, OutputLimit, Spawn, Wait, and Capture while preserving their prior public mappings. It changes neither retry policy nor runtime command execution.
+
+The first exact run after that candidate exposed only formatter layout. Formatter-only exact `900d0273625115f7bcc602d888baadded0caeb4f` subsequently executed native CI `34231220456`: verify `102077568988`, complete production coverage `102077568604`, branch coverage `102077568933`, and hosted negative rootless/AppArmor `102077569052` are GREEN. Dedicated positive-LSM `102077569145` remains queued on `[self-hosted, linux, cwl-hostile-workload, selinux]`; no qualifying approval exists. Those facts are historical exact-head evidence for `900d027...` and do not transfer after any later documentation or ancestry movement.
+
+## Successor and global-ledger ownership
+
+Canonical application-service/network successor #127 has independently replayed the typed-spawn absence on its own ancestry and adapted the bounded spawn contract there. That source succession is meaningful but is not equivalent to a verified complete succession of #72 until the current successor exact head independently passes its full gates and every valid #72 delta/test/contract/evidence item is mapped. Keep #72 open until that proof or normal integration exists; do not simple-close it because a newer branch contains source-equivalent code.
+
+`docs/product-technical-gap-baseline.md` is a repository-wide live ledger and is now single-writer authority under #121. This focused #72 branch predates that decision and accumulated global-state updates together with its typed-spawn evidence. Review `5229439239` therefore requires a two-step repair: first preserve stable #72 causal facts in this local TRACEABILITY, then restore the global baseline byte-for-byte to #72's exact base `5c6a44bb2b35eb17d0315d72db242f4488c3c426`. The restore is an ownership repair, not deletion of causal evidence and not a reason to transfer predecessor GREEN to the moved head.
+
 ## Alternatives
 
 1. Keep one `BackendInvocationFailed` value. Rejected: it prevents causal RCA and encourages speculative retry/workaround behavior.
@@ -57,11 +75,11 @@ POSIX.1-2024 independently distinguishes execution failures such as `ENOENT`, `E
 ## RED to GREEN acceptance
 
 1. The deterministic missing-executable test executed and failed because the stable classification API/variant was absent, not because of formatting, fixture collision, runner setup, or another prerequisite. **Satisfied by the executed predecessor RED.**
-2. The smallest production repair preserves `NotFound`, `PermissionDenied`, resource-exhausted (`WouldBlock`/`OutOfMemory`), and wildcard `Other` semantics. **Implemented; exact-head verification pending.**
-3. Missing stdout/stderr capture remains a capture failure, not a spawn failure. **Implemented; exact-head verification pending.**
-4. Timeout, output-limit, wait/reap, capture, and nonzero-exit regressions remain behaviorally distinct and fail closed. **Exact-head verification pending.**
-5. No retry behavior is added. **Implemented.**
-6. Owned production rustdoc and statement/function/region/branch coverage remain 100%, with exact-head native/security evidence before normal integration. **Pending.**
+2. The smallest production repair preserves `NotFound`, `PermissionDenied`, resource-exhausted (`WouldBlock`/`OutOfMemory`), and wildcard `Other` semantics. **Historical exact-head GREEN on `900d027...`; any moved head must revalidate.**
+3. Missing stdout/stderr capture remains a capture failure, not a spawn failure. **Historical exact-head GREEN on `900d027...`; any moved head must revalidate.**
+4. Timeout, output-limit, wait/reap, capture, and nonzero-exit regressions remain behaviorally distinct and fail closed. **Historical exact-head GREEN on `900d027...`; successor/current moved heads must independently revalidate.**
+5. No retry behavior is added. **Satisfied.**
+6. Owned production rustdoc and statement/function/region/branch coverage remain 100%, with exact-head native/security evidence before normal integration. **Historical hosted gates GREEN on `900d027...`; positive-LSM/review and moved-head gates remain pending.**
 7. Protected-head and release evidence are reacquired after integration; predecessor PR checks never transfer. **Pending.**
 
 ## References
