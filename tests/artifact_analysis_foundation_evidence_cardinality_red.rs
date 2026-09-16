@@ -1,6 +1,8 @@
-//! RED contract for foundation-record cardinality in v1 bundled-runtime receipts.
+//! Contract tests for foundation-record cardinality in v1 bundled-runtime receipts.
 
-use quarantine_sandbox_runtime::{AnalysisEngine, AnalysisProfile, AnalysisRequest, EvidenceKind};
+use quarantine_sandbox_runtime::{
+    AnalysisEngine, AnalysisProfile, AnalysisRequest, ContractError, EvidenceKind,
+};
 
 fn static_request() -> AnalysisRequest {
     AnalysisRequest {
@@ -11,9 +13,7 @@ fn static_request() -> AnalysisRequest {
     }
 }
 
-fn canonicalize_record_identities(
-    bundle: &mut quarantine_sandbox_runtime::EvidenceBundle,
-) {
+fn canonicalize_record_identities(bundle: &mut quarantine_sandbox_runtime::EvidenceBundle) {
     let analysis_job_id = bundle.analysis_job_id.clone();
     for (index, record) in bundle.evidence.iter_mut().enumerate() {
         let sequence_number = index + 1;
@@ -64,8 +64,12 @@ fn v1_foundation_evidence_records_must_exist_exactly_once() {
         let mut missing = bundle.clone();
         missing.evidence.remove(foundation_index);
         canonicalize_record_identities(&mut missing);
-        assert!(
-            missing.validate().is_err(),
+        assert_eq!(
+            missing.validate(),
+            Err(ContractError::InvalidFoundationEvidenceCardinality {
+                evidence_kind: evidence_kind.as_str(),
+                actual_count: 0,
+            }),
             "bundle must reject missing {evidence_kind:?} foundation evidence"
         );
 
@@ -74,8 +78,12 @@ fn v1_foundation_evidence_records_must_exist_exactly_once() {
             .evidence
             .push(bundle.evidence[foundation_index].clone());
         canonicalize_record_identities(&mut duplicated);
-        assert!(
-            duplicated.validate().is_err(),
+        assert_eq!(
+            duplicated.validate(),
+            Err(ContractError::InvalidFoundationEvidenceCardinality {
+                evidence_kind: evidence_kind.as_str(),
+                actual_count: 2,
+            }),
             "bundle must reject a duplicated canonical {evidence_kind:?} foundation record"
         );
     }
