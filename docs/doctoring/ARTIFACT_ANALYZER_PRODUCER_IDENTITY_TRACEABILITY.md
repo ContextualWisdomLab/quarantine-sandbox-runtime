@@ -2,39 +2,43 @@
 
 ## Decision scope
 
-This traceability note covers artifact-analysis producer identity admission on parent PR #18 exact `c0647152ec052d82969b2ae078891e25e6d4d69a` and Issue #99. It does not change analyzer isolation, evidence taxonomy, Wardnet verdict authority, or consumer authorization authority.
+This note covers artifact-analysis producer identity admission on parent PR #18 exact `c0647152ec052d82969b2ae078891e25e6d4d69a` and Issue #99. It does not change analyzer isolation, evidence taxonomy, Wardnet verdict authority, or consumer authorization authority.
+
+Repository-wide `docs/product-technical-gap-baseline.md` is a single-writer ledger owned by canonical gap-baseline lane #121, not by this focused producer-identity leaf.
 
 ## Observed defect
 
-`AnalysisEngine::validate_configuration` currently accepts every syntactically valid, non-duplicate analyzer identifier. `runtime_core` satisfies that syntax and is not reserved. The same runtime emits Core-owned artifact-identity and policy-boundary evidence with `producer_id = "runtime_core"`. An externally supplied analyzer can therefore claim the same producer identifier even though it does not hold Core evidence authority.
+`AnalysisEngine::validate_configuration` previously accepted every syntactically valid, non-duplicate analyzer identifier. `runtime_core` satisfies that syntax. The same runtime emits Core-owned `ArtifactIdentity` and `PolicyBoundary` evidence with `producer_id = "runtime_core"`, so an externally supplied analyzer could claim the same producer identifier without Core evidence authority.
 
-The defect is an acceptance-set and provenance-authority collision: producer identity is metadata used to distinguish evidence origin, but analyzer admission currently accepts a value reserved in practice by the runtime itself.
+This is an acceptance-set and provenance-authority collision. Producer identity belongs to the `artifact_analysis` Ubiquitous Language, but a runtime-owned namespace must not be assignable to an externally supplied analyzer.
 
-## Causal RED
+## Executed causal RED
 
-Test-only commit `286e54c6898be0ac347f582d2376f942dc3e8aeb` adds `tests/artifact_analysis_reserved_producer_id_red.rs`. It requires an otherwise-valid analyzer whose `analyzer_id()` is `runtime_core` to fail during `AnalysisEngine::new(...)` with the existing `AnalysisError::InvalidAnalyzerIdentifier` contract. The analyzer body panics if invoked, proving the acceptance boundary belongs before analyzer execution.
+Test-only `286e54c6898be0ac347f582d2376f942dc3e8aeb` adds `tests/artifact_analysis_reserved_producer_id_red.rs`. It requires an otherwise-valid analyzer whose `analyzer_id()` is `runtime_core` to fail during `AnalysisEngine::new(...)` with the existing `AnalysisError::InvalidAnalyzerIdentifier` boundary. The analyzer body panics if invoked, proving the rejection belongs before analyzer execution.
 
-No production code is changed by that commit. It is checked-in RED only until exact-head CI executes and fails for the reserved-identity cause.
+Gap-ledger descendant `9bd26abc84a454725d9ae4b27d72dc14c6c39ff3` reached native CI `34196213076` after checkout, dependency lock, repository policy, coverage-parser tests, and formatting. The reserved-producer witness supplied causal RED evidence for the missing semantic reservation.
 
-## Minimum repair after causal execution
+## Minimum repair and focused GREEN
 
-Reserve `runtime_core` in analyzer admission. Preserve:
+Production `c2a8944e0e243d88cee823503ab012ecaf85cee2` introduces one private canonical `RUNTIME_CORE_PRODUCER_ID = "runtime_core"`, rejects that identifier during analyzer admission through the existing `InvalidAnalyzerIdentifier` surface, and reuses the same constant for the two Core-owned evidence records. Formatter-only `c34b6f74378187d9466f6061293ea1ee74838d8f` changes layout only.
 
-- the Core-owned producer identifier on Core evidence;
-- existing syntax and duplicate-identifier validation;
-- the public error surface unless executed evidence requires a distinct variant;
-- fail-closed external-analyzer isolation and the #49/#69/#70 worker stack;
-- evidence schemas and consumer authority boundaries.
+No public schema, evidence shape, analyzer execution path, isolation behavior, or consumer authority changed. Renaming Core records, silently rewriting analyzer identifiers, post-hoc namespacing, and asking consumers to infer trust from evidence kind were rejected because they preserve ambiguity or mutate untrusted input instead of rejecting it at the owner boundary.
 
-Rejected alternatives are renaming individual Core records, silently rewriting analyzer identifiers, post-hoc namespacing after admission, and allowing consumers to infer producer trust from evidence kind. Those approaches leave an ambiguous producer namespace or mutate untrusted input instead of rejecting it at the owner boundary.
+Native CI `34246495133` executed exact `c34b6f74378187d9466f6061293ea1ee74838d8f`. Verify `102129720466` passed checkout, dependency lock, repository policy, coverage-parser tests and formatting; `artifact_analysis_reserved_producer_id_red::engine_rejects_runtime_core_as_analyzer_identifier` passed. The producer reservation is therefore historical focused exact-head GREEN.
+
+The broader workspace later failed in inherited `backend_security_info` command/runtime ancestry. That is a separate process-boundary prerequisite and does not justify weakening producer identity.
+
+## Single-writer gap-ledger repair
+
+Review `5229258443` found that #100 still carried a historical `docs/product-technical-gap-baseline.md` delta despite #121 repository-wide ownership. Ordinary fast-forward `5212d0881be40f70a23f02fea0e9330f6c58ded1` restores the global baseline byte-for-byte to exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9` while preserving the producer-reservation production/test/TRACEABILITY delta. The current documentation head records this ownership repair locally. No predecessor execution transfers after branch movement.
 
 ## Security and DDD rationale
 
-Within the `artifact_analysis` Supporting bounded context, producer identity is part of the evidence Ubiquitous Language. A runtime-owned producer namespace must not be assignable to externally supplied analyzers. NIST SI-10 requires validating system inputs against their defined syntax, semantics, and acceptable values; `runtime_core` is syntactically valid but semantically outside the analyzer acceptance set. MITRE CWE-345 describes failures to verify the origin or authenticity of data; this issue is tracked as an engineering integrity analogy rather than a CVE mapping because CWE marks the class as discouraged for vulnerability mapping.
+NIST SI-10 requires validating system inputs against defined syntax, semantics, and acceptable values; `runtime_core` is syntactically valid but semantically outside the external-analyzer acceptance set. MITRE CWE-345 describes failures to verify data origin/authenticity; it is used here as an engineering integrity analogy rather than a vulnerability classification.
 
-## Verification and integration gate
+## Current gate
 
-RED → minimum admission fix → exact-head `cargo fmt --check` → workspace tests → Clippy `-D warnings` → rustdoc `-D warnings` → repository validation → exact 100% owned-production statement/function/region/branch coverage → qualifying review/security gates → dependency-safe non-force adoption by #18. Dedicated positive effective-LSM remains an independent release gate.
+The moved head must independently reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, dependency-safe non-force adoption by #18, positive effective-isolation evidence where applicable, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication.
 
 ## References
 
