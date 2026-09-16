@@ -6,45 +6,45 @@ Last reviewed: 2026-09-16 KST
 
 This note records the monotonic-deadline admission boundary for `src/infrastructure/bounded_command.rs`. It is limited to the owned subprocess runtime used by the Podman adapter. It does not change product timeout values, network isolation semantics, or public API/schema contracts.
 
-## Problem
+## Executed causal evidence
 
-`BoundedCommandRunner::run` currently spawns the child process and capture workers and then evaluates `Instant::now() + self.timeout`. The runner builder accepts an arbitrary `Duration`.
+PR #125 exact `f58dfc6657745b3431502f617c7febad6737efcd`, CI `35047105870`, executed the active `unrepresentable_command_deadline_fails_closed_without_panicking` witness on hosted Ubuntu 24.04 / Rust 1.97.1.
 
-Rust specifies that `Add<Duration> for Instant` may panic when the resulting point in time cannot be represented by the platform's underlying monotonic-clock representation. Rust separately exposes `Instant::checked_add`, which returns `None` for that condition. `Duration::MAX` is therefore a deterministic hostile/configuration witness for the admission boundary rather than a realistic wall-clock wait request.
+The coverage job reached the witness with 16 sibling bounded-command tests GREEN and failed at the intended cause: `BoundedCommandRunner::run` panicked at `src/infrastructure/bounded_command.rs:75` with `overflow when adding duration to instant`. The test-side `catch_unwind` then failed its no-panic assertion. This is current-owner causal RED evidence rather than a source-only inference.
 
-A panic here is not equivalent to a typed timeout failure. It occurs after process creation and before the normal supervision/capture-cleanup path has been established, so the runtime can leave lifecycle ownership to unwinding instead of its explicit fail-closed contract.
+The same exact head independently exposed a rustfmt-only failure in `src/infrastructure/bounded_command_deadline_tests.rs`. Commit `ffe224b5cd3e948228c82c24d4b0f93604fc22b0` applies only that formatter delta.
 
-## Current RED
+## Causal repair
 
-PR #125 exact `52e0c16af7894bf33ac816d05b7558ce92afb14a` activates `src/infrastructure/bounded_command_deadline_tests.rs`.
+Production commit `1709c41c0c88a378bd0b21889a7b9c2987fd93c5` replaces the panicking `Instant::now() + self.timeout` path with `Instant::checked_add` and performs deadline admission before `spawn_piped_child`.
 
-`unrepresentable_command_deadline_fails_closed_without_panicking` invokes `/bin/sh -c 'exit 0'` with `Duration::MAX`, observes unwinding with `catch_unwind`, and requires both:
+An unrepresentable wall-clock budget therefore returns the existing typed `BoundedCommandError::Timeout` before a child process or capture worker is created. The existing timeout class was retained rather than introducing a second public/internal deadline taxonomy: both conditions mean the requested bounded-command wall-clock budget cannot be completed under the runtime contract, while spawn, wait, output-limit, and capture failures remain distinct. The enum rustdoc now states that `Timeout` covers an unrepresentable or exceeded wall-clock budget.
 
-1. the runtime does not panic; and
-2. the invocation returns a typed `Err` rather than being admitted as a valid command execution.
+This repair intentionally does not saturate or clamp the requested `Duration`, does not use production `catch_unwind`, and does not rely on cleanup after a panic. Representable invocations continue through the existing process-group supervision and shared capture deadline; the deadline is now fixed before process creation so spawn and capture setup are included in the same wall-clock budget.
 
-`catch_unwind` is test observation only. It is not an accepted production recovery mechanism and must not be introduced into the runtime.
+## Remaining verification
 
-Production deadline calculation is intentionally unchanged on this RED head. The exact-head CI must execute and fail for the intended unrepresentable-`Instant` cause before a GREEN is applied.
+`1709c41...` is the minimum causal GREEN source, not yet an exact-head GREEN claim. The unchanged successor must still execute:
 
-## Decision boundary for GREEN
+- the `Duration::MAX` witness without panic and with typed failure;
+- existing successful/timeout/output-limit/descendant-held-pipe process tests;
+- `cargo fmt --check`, locked full workspace/all-target tests, Clippy `-D warnings`, public/private rustdoc `-D warnings`;
+- exact owned-production statement/function/region/branch and edge coverage; and
+- applicable hosted/runtime security gates.
 
-The minimum repair must:
+Positive SELinux evidence remains a separate release gate and predecessor status does not transfer to a moved head.
 
-- use a non-panicking representation check such as `Instant::checked_add`;
-- reject an unrepresentable deadline before unsafe lifecycle progression;
-- preserve the distinction between spawn, wait, timeout, output-limit, and capture failures rather than silently clamping the requested timeout;
-- keep descendant process-group termination and capture cleanup behavior unchanged for representable deadlines; and
-- retain 100% owned-production line/function/region/branch coverage without exclusions or synthetic impossible-state tests.
+## Decision record
 
-The exact internal error mapping is intentionally deferred until the RED executes. A new error class is justified only if existing taxonomy cannot express invalid deadline admission without lying about runtime behavior.
+**Problem.** `Instant + Duration` could panic after subprocess creation when the requested monotonic deadline was not representable.
 
-## Rejected alternatives
+**Constraints.** Fail closed before lifecycle side effects, preserve bounded-command failure distinctions, keep one deadline across child supervision and pipe capture, do not silently mutate policy, and retain exact coverage.
 
-- **Saturate to the largest representable instant.** Rejected because it silently changes an operator-supplied timeout into a platform-dependent effectively unbounded wait.
-- **Clamp `Duration` to an arbitrary maximum.** Rejected because no product/operability authority currently defines such a maximum; inventing one here would mix policy with process runtime.
-- **Wrap production execution in `catch_unwind`.** Rejected because panic recovery does not restore process ownership or prove cleanup.
-- **Move directly to a fix before execution.** Rejected because the repository contract requires current-owner RED evidence before causal GREEN.
+**Rejected alternatives.** Saturating to the largest representable instant or clamping to an arbitrary duration changes operator intent. Production `catch_unwind` does not restore process ownership. Computing a checked deadline only after spawning still permits lifecycle side effects before admission.
+
+**Selected direction.** Admit one checked deadline before spawn and reuse it through supervision/capture completion. Preserve the existing `Timeout` class as the wall-clock-budget failure category.
+
+**Effect.** Unrepresentable durations fail as typed runtime errors without creating a child; representable deadlines now cover the complete bounded invocation rather than beginning only after spawn.
 
 ## Exact-head linkage
 
@@ -52,7 +52,10 @@ The exact internal error mapping is intentionally deferred until the RED execute
 - process-lifecycle successor: PR #125;
 - exhaustive capture-outcome repair: `cddf6e9d60a66511537495372f073f25afd31759`;
 - unrepresentable-deadline test addition: `a39621fd1ed0593d3e65116d918da61eda0a312d`;
-- RED activation head before this documentation commit: `52e0c16af7894bf33ac816d05b7558ce92afb14a`.
+- RED activation: `52e0c16af7894bf33ac816d05b7558ce92afb14a`;
+- executed RED / pre-repair evidence: `f58dfc6657745b3431502f617c7febad6737efcd`, CI `35047105870`;
+- exact rustfmt repair: `ffe224b5cd3e948228c82c24d4b0f93604fc22b0`;
+- minimum production repair: `1709c41c0c88a378bd0b21889a7b9c2987fd93c5`.
 
 ## References
 
