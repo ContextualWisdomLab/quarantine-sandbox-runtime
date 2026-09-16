@@ -1,67 +1,63 @@
 # Artifact Evidence Identifier Binding Traceability
 
-Status: issue #60 checked-in RED pending causal execution. No production GREEN is authorized yet.
+Status: issue #60 current-owner RED is hardened for assertion-level causal execution. Production GREEN remains intentionally unchanged until the current exact head executes the two independent hostile identity cases for their intended causes.
 
 ## Problem
 
-`artifact_analysis` exposes one top-level `EvidenceBundle.analysis_job_id` and one `EvidenceRecord.evidence_id` for every normalized record. Production assembly currently creates record identifiers in the canonical form `<analysis_job_id>:evidence:<zero-padded one-based sequence>`, but the public validation boundary does not enforce that relation.
+`artifact_analysis` exposes one top-level `EvidenceBundle.analysis_job_id` and one `EvidenceRecord.evidence_id` for every normalized record. Production assembly already emits record identifiers as `<analysis_job_id>:evidence:<zero-padded one-based sequence>`, but the public validation boundary does not enforce that relation.
 
-On parent Draft #18 exact `7a48b7f904ce41ce2d2f184028c2eec7a9201d55`, `EvidenceRecord::validate(expected_sequence)` checks only bounded text, sequence position, producer, summary, and attributes. `EvidenceBundle::validate()` supplies the expected sequence but never supplies or compares the enclosing `analysis_job_id`, and it does not independently reject duplicate evidence identifiers.
+On current owner ancestry, `EvidenceRecord::validate(expected_sequence)` validates bounded `evidence_id` text and the numeric sequence independently. `EvidenceBundle::validate()` supplies only the expected sequence; it does not bind the record identifier to the enclosing `analysis_job_id`. A deserialized or reconstructed receipt can therefore carry an unrelated but syntactically valid `evidence_id`, or reuse the first record identifier at another valid sequence, while retaining all other fields.
 
-The engine therefore emits internally consistent identifiers while a deserialized or reconstructed receipt can carry an unrelated but syntactically valid `evidence_id`, or reuse one identifier at a different sequence, and still satisfy the current `1.0.0` Rust validator. That is a referential-integrity defect at the evidence contract boundary, not an analyzer verdict or sandbox-isolation finding.
+This is a referential-integrity defect at the evidence-contract boundary. It is not an analyzer verdict, malware classification, sandbox-isolation claim, or consumer authorization decision.
 
 ## DDD ownership
 
-`artifact_analysis` owns analysis-job identity, normalized evidence identity, deterministic evidence ordering, and receipt semantics. `sandbox_execution` owns runtime/worker isolation, resource bounds, lifecycle, termination, cleanup, and their runtime evidence. Infrastructure adapters translate those backend-neutral isolation contracts. AppGuardrail remains static-scan/SARIF authority, Noema admission/activation authority, and Wardnet verdict/incident authority.
+`artifact_analysis` owns analysis-job identity, normalized evidence identity, deterministic evidence ordering, and receipt semantics. `sandbox_execution` owns reusable runtime/worker isolation, resource bounds, lifecycle, termination, and cleanup evidence. Infrastructure adapters translate concrete backend observations into those contracts. AppGuardrail remains static-scan/SARIF authority, Noema admission/activation authority, and Wardnet verdict/incident authority.
 
-Issue #58 owns a different subject-binding invariant between the top-level `ArtifactDescriptor` and nested `ArtifactIdentity` evidence. Issue #60 is split because its causal defect and repair concern record/reference identity inside one analysis job.
+Issue #58 owns the separate subject-binding relation between the top-level `ArtifactDescriptor` and nested `ArtifactIdentity` evidence. Issue #60 is intentionally separate because its invariant is record/reference identity inside one analysis job.
 
 ## Current implementation evidence
 
-`AnalysisEngine::deterministic_job_id()` produces one job identity. `push_record()` then assigns each emitted record an identifier derived from that job identity and the next one-based sequence. This is stronger than what the public validator currently requires.
+`AnalysisEngine::deterministic_job_id()` creates one deterministic job identity. `push_record()` then assigns every emitted record `format!("{analysis_job_id}:evidence:{sequence_number:04}")`. The runtime producer is therefore stricter than the public validator.
 
-The gap matters after serialization. Audit systems, signature/provenance stores, incident references, deduplication, and downstream evidence links can reasonably treat `evidence_id` as the stable identifier of the record produced by the enclosing job. The current validator allows that apparent identity to diverge from the job that contains it.
+That asymmetry matters after serialization. Audit stores, provenance/signature systems, incident references, deduplication, and downstream evidence links can reasonably treat `evidence_id` as the stable identifier for a record produced by the enclosing job. Accepting a different identity at validation time lets the stored reference disagree with the job whose provenance a consumer is evaluating.
 
-## RED
+## RED lineage and review hardening
 
-Test-bearing commit: `b81495c9d4352ed55b3dc662a19cecb535d7a186`.
+Initial test-bearing authority `b81495c9d4352ed55b3dc662a19cecb535d7a186` placed both hostile mutations in one test. Current predecessor exact `95438943226b719dda296ada384036e258d81bf4`, CI `34057675450`, completed with hosted negative rootless/AppArmor GREEN while verify, coverage, and branch-coverage failed during broader Rust evidence generation. That run proves execution reached the repository's Rust evidence path, but the available GitHub connector evidence does not retain assertion-level log text sufficient to promote the predecessor failure as the precise issue #60 causal RED.
 
-`tests/artifact_analysis_evidence_id_binding_red.rs` first obtains an untouched `StaticOnly` control bundle through `AnalysisEngine::default()` and requires it to validate. It then checks two independent hostile mutations:
+Test-only ordinary child `e9c6217306da87dc075a2e102d38eb41ed83cb28` therefore improves causality rather than guessing. It changes no production Rust, public schema, wire shape, or version. The witness now has three separately named controls:
 
-1. replace the first record identifier with a different, bounded identifier unrelated to the enclosing `analysis_job_id` while leaving all other fields intact;
-2. copy the first valid record identifier into the second record while leaving the second record's sequence number unchanged.
+1. `emitted_evidence_ids_match_the_documented_job_and_sequence_identity` proves the existing producer emits the deterministic identity form this repair intends to preserve;
+2. `foreign_job_evidence_identifier_fails_closed` changes only the first record identifier to `analysis_job_foreign:evidence:0001` and requires rejection;
+3. `duplicate_sequence_evidence_identifier_fails_closed` reuses record 1's valid identifier at sequence 2 and independently requires rejection.
 
-Both mutated receipts must fail closed. Current production is expected to RED because neither the job/record relation nor duplicate identifier condition is checked by `EvidenceBundle::validate()`.
-
-This RED changes no production Rust or JSON Schema. A checked-in test is not causal execution evidence until an exact-head runner executes it and fails for the intended validation gap.
+Splitting the mutations prevents the first failing assertion from hiding the second and gives the next exact-head execution unambiguous test names. No production behavior is authorized to change until that exact witness executes for the intended validator gap.
 
 ## Smallest causal GREEN after executed RED
 
-After the RED executes for the intended cause, make record identity a versioned `artifact_analysis` invariant. The smallest compatible repair may require the canonical syntax production already emits: `<analysis_job_id>:evidence:<zero-padded one-based sequence>`. That simultaneously binds every record to one job and makes duplicate identifiers impossible for a valid contiguous sequence.
+After causal execution, the minimum compatible repair is to validate the identity relation the producer already emits: for each one-based sequence `n`, the accepted record identifier is exactly `<analysis_job_id>:evidence:<n padded to four decimal digits>`. Validation should reject a contradiction rather than rewrite or normalize the supplied identifier.
 
-If that string form is not intended to be stable public `1.0.0` wire semantics, introduce an explicit versioned job/record binding or a contract-version change instead of silently redefining arbitrary `evidence_id` text. In either design:
+A typed contract error should distinguish evidence-identity mismatch from `InvalidEvidenceSequence`. That preserves the diagnostic boundary between an incorrect numeric position and an identifier that does not belong to the enclosing job/position. The validator should receive the enclosing `analysis_job_id` explicitly rather than recover it by parsing untrusted `evidence_id` text.
 
-- validation rejects contradictions rather than rewriting forged identifiers;
-- identical semantic inputs retain deterministic identity;
-- every record remains attributable to exactly one enclosing analysis job;
-- ordering and sequence remain deterministic;
-- signing/provenance binds the exact validated serialized identities;
-- JSON Schema is not overstated as proof of arbitrary cross-instance equality if the portable schema dialect cannot express the relation directly.
+If this deterministic string form is not intended to remain stable public `1.0.0` semantics, the alternative is an explicit versioned contract change. Random record IDs, process-local identity, downstream ignore rules, sequence-only validation while retaining authoritative-looking `evidence_id`, or another unsigned recomputable companion checksum are rejected alternatives.
 
-Random record IDs, process-local identity, downstream ignore rules, or sequence-only validation while retaining an apparently authoritative `evidence_id` are rejected alternatives.
+JSON Schema remains an independent limitation: portable Draft 2020-12 keywords do not provide a straightforward cross-instance string-equality function between `analysis_job_id`, array position, and a formatted `evidence_id`. The Rust validator must not claim the JSON Schema proves this relation unless the published dialect is deliberately extended and independently tested.
 
 ## Risk and effect
 
-Without the binding, a receipt can be internally well-formed yet expose conflicting reference identities. That weakens audit reconstruction and can make a signed or stored record identifier refer to evidence outside the job whose top-level provenance a consumer is inspecting. The repair narrows admissible receipts to the identity semantics production already intends; it does not authorize artifact verdicts, analyzer execution, or consumer admission.
+Without the binding, a receipt can be structurally well formed yet expose conflicting reference identities. That weakens audit reconstruction and can make a signed or stored record identifier appear attributable to evidence outside the job whose top-level provenance is being inspected. The repair narrows admissible receipts to the identity semantics the runtime producer already intends; it does not authorize artifact verdicts, analyzer execution, or consumer admission.
 
 ## Related release gates
 
-Issue #60 remains independent of #49 analyzer capability isolation, #50 bounded worker-result ingestion, #52 truthful dynamic execution/completeness, #54 stable analyzer provenance, #56 ToolFailure/completeness consistency, and #58 artifact-subject binding. Passing this contract test cannot promote ADR-0009 or artifact-analysis release readiness by itself.
+Issue #60 remains independent of #49 analyzer capability isolation, #50 bounded worker-result ingestion, #52 truthful dynamic execution/completeness, #54 stable analyzer provenance, #56 ToolFailure/completeness consistency, #58 artifact-subject binding, #64 foundation cardinality, and #129 public-schema cardinality parity. Passing this contract slice cannot promote ADR-0009 or artifact-analysis release readiness by itself.
+
+The exact repaired successor must still pass repository validation, rustfmt, full locked workspace/all-target tests, Clippy and public/private rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, applicable positive isolation, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication.
 
 ## References
 
-SLSA Community. (2025). *SLSA specification v1.2: Provenance*. https://slsa.dev/spec/v1.2/provenance
+SLSA Community. (2026). *SLSA specification version 1.2: Provenance*. https://slsa.dev/spec/v1.2/provenance
 
-SLSA Community. (2025). *SLSA specification v1.2: Build requirements*. https://slsa.dev/spec/v1.2/build-requirements
+SLSA Community. (2026). *SLSA specification version 1.2*. https://slsa.dev/spec/v1.2/
 
 Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019). in-toto: Providing farm-to-table guarantees for bits and bytes. In *28th USENIX Security Symposium (USENIX Security 19)* (pp. 1393–1410). USENIX Association. https://www.usenix.org/conference/usenixsecurity19/presentation/torres-arias
