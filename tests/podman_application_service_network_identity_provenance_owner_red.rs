@@ -87,7 +87,9 @@ fn write_fake_podman(
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let (reported_name_assignment, internal, dns_enabled) = match contradiction {
         IdentityContradiction::WrongName => ("reported_name='qsr-net-foreign'", "true", "false"),
-        IdentityContradiction::ExternalNetwork => ("reported_name=\"$network_name\"", "false", "false"),
+        IdentityContradiction::ExternalNetwork => {
+            ("reported_name=\"$network_name\"", "false", "false")
+        }
         IdentityContradiction::DnsEnabled => ("reported_name=\"$network_name\"", "true", "true"),
     };
     let script = format!(

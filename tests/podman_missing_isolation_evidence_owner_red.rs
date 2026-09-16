@@ -109,7 +109,8 @@ impl Default for Fixture {
 fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf) {
     let program = temporary_path("missing-isolation-evidence-owner-podman");
     let log = temporary_path("missing-isolation-evidence-owner-log");
-    let identity_inspect_marker = temporary_path("missing-isolation-evidence-owner-identity-inspect");
+    let identity_inspect_marker =
+        temporary_path("missing-isolation-evidence-owner-identity-inspect");
     let info = json!({
         "host": {
             "security": {

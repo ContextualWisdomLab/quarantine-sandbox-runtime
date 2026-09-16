@@ -188,7 +188,8 @@ fn failed_container_create_cleans_network_by_acquired_id_without_force() {
         .expect("container create must be attempted");
 
     assert!(
-        network_create_index < identity_inspect_index && identity_inspect_index < container_create_index,
+        network_create_index < identity_inspect_index
+            && identity_inspect_index < container_create_index,
         "acquired network identity must precede the failing container create; calls were:\n{calls}"
     );
     assert!(
