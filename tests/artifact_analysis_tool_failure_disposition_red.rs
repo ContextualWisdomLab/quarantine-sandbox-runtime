@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, EvidenceBundle, EvidenceKind,
+    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle, EvidenceKind,
     EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 use serde_json::Value;
@@ -230,9 +230,10 @@ fn tool_failure_receipt_remains_representable_as_inconclusive() {
 fn tool_failure_evidence_cannot_claim_completed_disposition() {
     let bundle = bundle_with_tool_failure(RuntimeDisposition::Completed);
 
-    assert!(
-        bundle.validate().is_err(),
-        "a receipt containing ToolFailure evidence must not validate as Completed"
+    assert_eq!(
+        bundle.validate(),
+        Err(ContractError::CompletedDispositionContainsToolFailure),
+        "a receipt containing ToolFailure evidence must fail with the dedicated completeness error"
     );
 }
 
