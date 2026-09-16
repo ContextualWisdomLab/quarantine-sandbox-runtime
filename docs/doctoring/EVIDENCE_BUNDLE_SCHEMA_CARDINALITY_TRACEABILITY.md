@@ -6,13 +6,15 @@
 
 This is public contract parity, not analyzer provenance. Stable analyzer/runtime origin remains owned by #54/#55; mutable `producer_id` is not trusted provenance. Subject binding, record/job identity, runtime-boundary consistency, and job-identity derivation remain separate contracts.
 
-## RED design and review finding
+## RED design, review finding, and prerequisite adoption
 
-Draft #130 is based exactly on #65 exact `1813b49fd908f111ba6f6a43066bacd5f84e836b` so schema-parity work does not move the prerequisite owner head.
+The initial #130 witness at `47a60a8f9f0ebcb5c6c49b3f0b61ddd37df9de94` recursively searched every descendant below `properties.evidence` for `contains` with adjacent `minContains` and `maxContains`. Review `5224839312` found a false-positive path: matching keywords could live in an unused `$defs` entry or an optional `anyOf`/`oneOf` branch without constraining every evidence array instance.
 
-The initial witness at `47a60a8f9f0ebcb5c6c49b3f0b61ddd37df9de94` recursively searched every descendant below `properties.evidence` for `contains` with adjacent `minContains` and `maxContains`. Review `5224839312` found a false-positive path: matching keywords could live in an unused `$defs` entry or an optional `anyOf`/`oneOf` branch without constraining every evidence array instance.
+Test-only repair `19e6b171a6e6b57d9f5ab048f903297fdc005a1a` therefore recognizes cardinality only when exact-count subschemas are directly composed under `properties.evidence.allOf`. This binds the structural witness to an unconditional conjunction rather than to keyword presence somewhere in the schema document. Production Rust and the public schema remain unchanged until the witness executes a causal RED.
 
-Test-only repair `19e6b171a6e6b57d9f5ab048f903297fdc005a1a` therefore recognizes cardinality only when exact-count subschemas are directly composed under `properties.evidence.allOf`. This binds the structural witness to an unconditional conjunction rather than to keyword presence somewhere in the schema document. Production Rust and the public schema remain unchanged until that exact lineage executes a causal RED.
+The prerequisite #65 branch subsequently advanced from historical `1813b49fd908f111ba6f6a43066bacd5f84e836b` to `598a65562968a48ce1fa61814fee1cbc96f7fff8` after review found stale contract fixtures under the new Rust cardinality invariant. #130 adopted that exact prerequisite through ordinary non-force two-parent commit `7240a80f392e5660d728f8ba0c2df829adba4d87`, preserving this lane's test and TRACEABILITY blobs while inheriting #65's fixture repairs. No schema production change, force push, destructive rebase, or child-delta loss occurred.
+
+This adoption matters to causality: #130's schema RED must execute on the repaired prerequisite contract rather than on a stale #65 snapshot whose unrelated fixtures would fail first. Historical queued #130 runs do not transfer to the restacked head.
 
 ## Selected minimum repair after causal RED
 
@@ -34,6 +36,6 @@ APA 7th:
 
 ## Evidence and release gate
 
-The current #130 head must first execute the schema-cardinality witness for the intended missing-effective-constraint cause. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
+The current #130 head must first execute the schema-cardinality witness for the intended missing-effective-constraint cause on top of the repaired #65 prerequisite. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
 
 Neither #65 nor #129 is complete while Rust validation and the published v1 schema disagree or while either exact owner head lacks its own verification. No predecessor GREEN transfers across head movement.
