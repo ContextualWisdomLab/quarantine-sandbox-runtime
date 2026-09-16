@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, EvidenceBundle, EvidenceKind, EvidenceRecord,
-    RuntimeDisposition, RuntimeManifest,
+    AnalysisProfile, ArtifactDescriptor, ArtifactKind, EvidenceBundle, EvidenceKind,
+    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 use serde_json::Value;
 
@@ -93,9 +93,11 @@ fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
                 let Some(instance_object) = instance.as_object() else {
                     return false;
                 };
-                if required.iter().filter_map(Value::as_str).any(|property| {
-                    !instance_object.contains_key(property)
-                }) {
+                if required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|property| !instance_object.contains_key(property))
+                {
                     return false;
                 }
             }
@@ -175,7 +177,8 @@ fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
                 }
             }
 
-            if let Some(dependent_schemas) = object.get("dependentSchemas").and_then(Value::as_object)
+            if let Some(dependent_schemas) =
+                object.get("dependentSchemas").and_then(Value::as_object)
                 && let Some(instance_object) = instance.as_object()
             {
                 for (property, dependent_schema) in dependent_schemas {
@@ -238,10 +241,9 @@ fn evidence_bundle_schema_executes_tool_failure_disposition_semantics() {
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
             .expect("checked-in evidence schema must be valid JSON");
-    let inconclusive = serde_json::to_value(bundle_with_tool_failure(
-        RuntimeDisposition::Inconclusive,
-    ))
-    .expect("inconclusive fixture must serialize");
+    let inconclusive =
+        serde_json::to_value(bundle_with_tool_failure(RuntimeDisposition::Inconclusive))
+            .expect("inconclusive fixture must serialize");
     let completed = serde_json::to_value(bundle_with_tool_failure(RuntimeDisposition::Completed))
         .expect("completed fixture must serialize");
 
