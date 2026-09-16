@@ -15,6 +15,43 @@
     "evidence",
     "limitations"
   ],
+  "allOf": [
+    {
+      "not": {
+        "allOf": [
+          {
+            "required": [
+              "disposition"
+            ],
+            "properties": {
+              "disposition": {
+                "const": "completed"
+              }
+            }
+          },
+          {
+            "required": [
+              "evidence"
+            ],
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "required": [
+                    "evidence_kind"
+                  ],
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "tool_failure"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "const": "1.0.0"
