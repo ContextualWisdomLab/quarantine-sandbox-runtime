@@ -223,7 +223,7 @@ where
             child.terminate().map_err(|_| BoundedCommandError::Wait)?;
             Err(BoundedCommandError::OutputLimit)
         }
-        Err(error) => Err(error),
+        Err(_) => unreachable!("capture wait only reports output-limit errors"),
     }
 }
 
