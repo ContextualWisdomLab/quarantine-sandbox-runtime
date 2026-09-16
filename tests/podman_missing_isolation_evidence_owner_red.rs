@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 const GOOD_TOP: &str = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n";
+const OWNED_NETWORK_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "b".repeat(64))
@@ -105,9 +106,10 @@ impl Default for Fixture {
     }
 }
 
-fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
+fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf) {
     let program = temporary_path("missing-isolation-evidence-owner-podman");
     let log = temporary_path("missing-isolation-evidence-owner-log");
+    let identity_inspect_marker = temporary_path("missing-isolation-evidence-owner-identity-inspect");
     let info = json!({
         "host": {
             "security": {
@@ -123,12 +125,14 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let container = fixture.container.to_string();
     let network = fixture.network.to_string();
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        info,
-        network,
-        container,
-        GOOD_TOP,
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{log}'\nidentity_inspect_marker='{identity_inspect_marker}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{info}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect)\n    if [ ! -f \"$identity_inspect_marker\" ]; then\n      printf 'seen\\n' > \"$identity_inspect_marker\"\n      printf '[{{\"name\":\"%s\",\"id\":\"{network_id}\",\"internal\":true,\"dns_enabled\":false,\"containers\":{{}}}}]\\n' \"${{5:-}}\"\n    else\n      printf '%s\\n' '{network}'\n    fi\n    ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{container}' ;;\n  create:--name) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{good_top}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        log = log.display(),
+        identity_inspect_marker = identity_inspect_marker.display(),
+        info = info,
+        network_id = OWNED_NETWORK_ID,
+        network = network,
+        container = container,
+        good_top = GOOD_TOP,
     );
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -136,7 +140,7 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
         .permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    (program, log)
+    (program, log, identity_inspect_marker)
 }
 
 fn launch(
@@ -145,12 +149,13 @@ fn launch(
     Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError>,
     String,
 ) {
-    let (program, log) = write_fake_podman(&fixture);
+    let (program, log, identity_inspect_marker) = write_fake_podman(&fixture);
     let result =
         RootlessPodmanAdapter::new(program.clone()).launch_at(&request(), &policy(), 1_780_000_000);
     let calls = fs::read_to_string(&log).unwrap_or_default();
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
+    let _ = fs::remove_file(identity_inspect_marker);
     (result, calls)
 }
 
