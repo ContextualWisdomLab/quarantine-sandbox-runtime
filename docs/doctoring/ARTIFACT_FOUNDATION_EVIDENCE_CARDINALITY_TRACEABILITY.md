@@ -8,7 +8,9 @@ The narrowed cardinality RED was executed on exact `5b7d3d2b8d122c4f3828632c91f6
 
 Production commit `701097b97205d630869344d0d23df8d0505c6c50` adds the smallest v1 validator: after each record passes its own validation, the bundle counts `ArtifactIdentity`, `FileFormat`, and `PolicyBoundary` and rejects any count other than one through typed `InvalidFoundationEvidenceCardinality { evidence_kind, actual_count }`. It does not inspect `producer_id`, insert/rewrite evidence, change positions, or alter optional evidence kinds. Test commit `f27a98fdbb6a0ce7662bb8e744e1560c9a91befc` formats the focused regression and binds the missing/duplicate cases to counts `0` and `2` for each stable evidence-kind wire code.
 
-Current exact head is `f27a98fdbb6a0ce7662bb8e744e1560c9a91befc`; exact-head CI run `35106908249` is the validation authority. Predecessor GREEN or failure states do not transfer to this moved head.
+Review of that candidate found a valid fixture-compatibility defect before exact-head GREEN: three shared `valid_bundle()` fixtures still contained only `ArtifactIdentity`, and the private `trusted_fixture_engine` exercised the bundled-runtime path without the required `FormatAnalyzer`. The production cardinality invariant was correct, but these stale fixtures would fail before the assertions they were intended to exercise. Ordinary fast-forward repair commits `14fdbea7a06477ebee8c385961a1e836a8e42305`, `febd990791d1ffefda434a9d4b0f8febab5e8d89`, and `f8d8706e5881e367bcba36203e9a82fe59ce8a5c` add exactly one `FileFormat` and one `PolicyBoundary` record to the affected contract fixtures with contiguous sequence numbers. Test-only runtime commit `e5e440531aeb5334d88f8421fd1ed75cc841978b` prepends `FormatAnalyzer` inside the private `#[cfg(test)]` bundled fixture and updates its evidence-count expectation. It does not add production normalization or change runtime composition semantics.
+
+The current candidate must execute again after these fixture repairs. Earlier RED/repair evidence remains historical evidence for the cardinality defect, but no predecessor GREEN or coverage conclusion transfers to the moved head.
 
 ## Problem and contract authority
 
@@ -16,13 +18,21 @@ Current exact head is `f27a98fdbb6a0ce7662bb8e744e1560c9a91befc`; exact-head CI 
 
 This invariant is separate from #58/#59 subject-content binding, #60/#61 record/job identity, #62/#63 `PolicyBoundary`/`RuntimeManifest` value binding, and #54/#55 analyzer provenance. Those controls cannot restore a foundation fact that is absent, and provenance must not be simulated with display metadata.
 
-The regression rewrites both `sequence_number` and the canonical `<analysis_job_id>:evidence:<sequence>` identity after removal/duplication. This prevents #60/#61 from becoming the accidental failure reason.
+The focused regression rewrites both `sequence_number` and the canonical `<analysis_job_id>:evidence:<sequence>` identity after removal/duplication. This prevents #60/#61 from becoming the accidental failure reason. Legacy/shared fixtures are intentionally repaired only to satisfy #64's currently implemented foundation set; they do not pre-adopt #61's still-unexecuted record/job identity GREEN contract.
 
-## Review finding: cardinality is not provenance
+## Review findings and repair boundaries
+
+### Cardinality is not provenance
 
 The serialized `producer_id` field is attribution text. The current public receipt has no signature, trusted attestation context, or versioned origin discriminator that lets `EvidenceBundle::validate()` prove that a deserialized record genuinely came from the runtime composition boundary. A validator that hard-codes `runtime_core` or `format_analyzer` would satisfy a display-name test while still trusting attacker-rewritable metadata.
 
 For that reason #64/#65 owns structural v1 cardinality only. Trusted analyzer/runtime origin stays with #54/#55 and any future signed/provenance contract. The current v1 count is explicit contract behavior; if a later contract needs both one authoritative bundled `FileFormat` record and additional same-kind analyzer evidence, that contract must introduce a versioned trusted-origin discriminator instead of overloading `producer_id`.
+
+### Contract changes must carry their fixtures
+
+The aggregate invariant changes which `EvidenceBundle` instances are valid. Tests whose purpose is to probe unrelated top-level, runtime, attribute, or limitation failures therefore need a baseline fixture that satisfies the new aggregate preconditions; otherwise cardinality becomes an accidental earlier failure reason. `tests/contracts.rs`, `tests/contract_boundaries.rs`, and `tests/coverage_contracts.rs` now each carry the three foundation kinds before mutating their intended field.
+
+Likewise, the private `trusted_fixture_engine` deliberately opts into `AnalyzerExecutionPath::BundledRuntime`; it must therefore exercise the same foundation composition as that path. Adding `FormatAnalyzer` to the private test helper preserves the intended production contract while leaving caller-specific fixture analyzers and their findings unchanged. Adding a production fallback that synthesizes missing `FileFormat` would instead mask composition defects and was rejected.
 
 ## DDD ownership
 
@@ -41,7 +51,7 @@ The focused contract requires:
 
 The production repair deliberately runs cardinality after individual record validation. Malformed records therefore still fail at their own causal boundary before aggregate cardinality is considered. It does not solve the problem with `evidence.len() >= 3`, fixed positions, silent normalization, or producer-name matching.
 
-The JSON Schema continues to describe per-record structure and `minItems`; this commit does not claim JSON-Schema cardinality parity because no schema-parity RED has yet executed. Runtime `EvidenceBundle::validate()` is the executed #64 contract authority. A future schema-parity change must first add a causal schema validation witness rather than silently broadening this executed repair.
+The JSON Schema continues to describe per-record structure and `minItems`; this lane does not claim JSON-Schema cardinality parity. Issue #129 / PR #130 owns a separate causal schema-validation witness for that public-wire gap.
 
 ## Evidence basis
 
@@ -57,4 +67,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Release effect
 
-No artifact-analysis receipt is release-authoritative until current exact-head validation proves the cardinality repair together with required review/security/coverage gates and protected integration. A GREEN for #64 would not establish trusted producer origin and would not waive #49/#50/#52/#54/#56/#58/#60/#62, real positive isolation, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
+No artifact-analysis receipt is release-authoritative until the current exact head re-executes the cardinality repair together with fixture compatibility, required review/security/coverage gates, and protected integration. A GREEN for #64 would not establish trusted producer origin and would not waive #49/#50/#52/#54/#56/#58/#60/#62, real positive isolation, protected integration, SBOM/provenance/reproducibility, rollback, or immutable release requirements.
