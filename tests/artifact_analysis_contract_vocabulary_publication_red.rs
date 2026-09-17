@@ -158,7 +158,7 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
     let boundary = assert_serialized_vector(
         &vectors,
         "max_serialized_utf8_bytes_normalized_boundary",
-        1_003,
+        1_004,
         1_024,
         true,
     );
