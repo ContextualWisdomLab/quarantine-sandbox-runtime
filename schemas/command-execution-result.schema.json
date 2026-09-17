@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/command-execution-result-1.0.0.schema.json",
+  "title": "Bounded Command Execution Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "image_reference",
+    "backend_id",
+    "backend_version",
+    "sandbox_id",
+    "exit_code",
+    "timed_out",
+    "stdout",
+    "stdout_truncated",
+    "stderr",
+    "stderr_truncated",
+    "started_at_epoch_seconds",
+    "finished_at_epoch_seconds"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "image_reference": { "type": "string", "minLength": 73, "maxLength": 512 },
+    "backend_id": { "type": "string", "minLength": 1 },
+    "backend_version": { "type": "string" },
+    "sandbox_id": { "type": "string", "minLength": 1 },
+    "exit_code": { "type": "integer" },
+    "timed_out": { "type": "boolean" },
+    "stdout": { "type": "string" },
+    "stdout_truncated": { "type": "boolean" },
+    "stderr": { "type": "string" },
+    "stderr_truncated": { "type": "boolean" },
+    "started_at_epoch_seconds": { "type": "integer", "minimum": 0 },
+    "finished_at_epoch_seconds": { "type": "integer", "minimum": 0 }
+  }
+}

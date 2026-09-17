@@ -1,7 +1,12 @@
 //! Supporting bounded context for launching an approved application as an isolated service.
 
+mod command_execution;
 mod coordinator;
 
+pub use command_execution::{
+    CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
+    CommandExecutionResult, execute_command,
+};
 pub use coordinator::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ExpiredLeaseCleanupResult, LeaseOwnerId,
