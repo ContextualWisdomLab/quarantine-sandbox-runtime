@@ -96,7 +96,7 @@ pub enum EvidenceKind {
     ArtifactIdentity,
     /// Non-executing format classification.
     FileFormat,
-    /// Declared security boundary and runtime policy evidence.
+    /// Runtime-owned security boundary and policy evidence.
     PolicyBoundary,
     /// Capability inferred by a static analyzer.
     StaticCapability,
@@ -453,6 +453,9 @@ impl EvidenceBundle {
 
         for (index, record) in self.evidence.iter().enumerate() {
             record.validate(index + 1)?;
+            if record.evidence_kind == EvidenceKind::PolicyBoundary {
+                validate_policy_boundary_binding(record, &self.runtime)?;
+            }
         }
 
         let mut unique_limitations = BTreeSet::new();
@@ -467,6 +470,29 @@ impl EvidenceBundle {
 
         Ok(())
     }
+}
+
+/// Require every runtime policy-boundary record to repeat manifest facts canonically.
+fn validate_policy_boundary_binding(
+    record: &EvidenceRecord,
+    runtime: &RuntimeManifest,
+) -> Result<(), ContractError> {
+    for (attribute_name, expected_value) in [
+        (
+            "dynamic_execution_performed",
+            runtime.dynamic_execution_performed,
+        ),
+        ("network_access_performed", runtime.network_access_performed),
+        ("credentials_available", runtime.credentials_available),
+    ] {
+        let expected_value = expected_value.to_string();
+        if record.attributes.get(attribute_name) != Some(&expected_value) {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: attribute_name,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Contract validation failure.
