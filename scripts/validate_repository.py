@@ -64,6 +64,173 @@ FORBIDDEN_DATABASE_NAME = re.compile(
     re.IGNORECASE,
 )
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
+BLOCK_SCALAR_START = re.compile(
+    r"^\s*(?:-\s*)?(?:[A-Za-z_][A-Za-z0-9_.-]*|\"[^\"]+\"|'[^']+')"
+    r"\s*:\s*[>|](?:[1-9]?[+-]?|[+-]?[1-9]?)\s*$"
+)
+
+
+def _normalize_workflow_mapping_key(raw_key: str) -> str:
+    """Normalize simple YAML mapping keys and reject ambiguous complex-key syntax."""
+
+    key = raw_key.strip()
+    if key.startswith("-"):
+        key = key[1:].strip()
+    if key.startswith("?"):
+        raise ValueError(f"unsupported explicit YAML mapping key: {key}")
+    if key.startswith(("!", "&", "*")):
+        raise ValueError(f"unsupported complex YAML mapping key: {key}")
+    if key.startswith('"'):
+        if not key.endswith('"'):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        try:
+            decoded = json.loads(key)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}") from exc
+        if not isinstance(decoded, str):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        return decoded
+    if key.startswith("'"):
+        if not key.endswith("'"):
+            raise ValueError(f"unsupported quoted YAML mapping key: {key}")
+        return key[1:-1].replace("''", "'")
+    return key
+
+
+def _workflow_uses_targets(workflow: str) -> list[str]:
+    """Return admitted workflow `uses` values from block or YAML flow mappings."""
+
+    targets: list[str] = []
+    block_scalar_indent: int | None = None
+    flow_mapping_depth = 0
+    in_expression = False
+
+    for raw_line in workflow.splitlines():
+        if not raw_line.strip():
+            continue
+
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if block_scalar_indent is not None:
+            if indent > block_scalar_indent:
+                continue
+            block_scalar_indent = None
+
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+        curly_depth = flow_mapping_depth
+        comment_at = len(raw_line)
+        separators = [0]
+        colons: list[int] = []
+        index = 0
+
+        while index < len(raw_line):
+            character = raw_line[index]
+            if in_expression:
+                if raw_line.startswith("}}", index):
+                    in_expression = False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            if in_single_quote:
+                if character == "'":
+                    if index + 1 < len(raw_line) and raw_line[index + 1] == "'":
+                        index += 2
+                        continue
+                    in_single_quote = False
+                index += 1
+                continue
+            if in_double_quote:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_double_quote = False
+                index += 1
+                continue
+            if raw_line.startswith("${{", index):
+                in_expression = True
+                index += 3
+                continue
+            if character == "#" and (index == 0 or raw_line[index - 1].isspace()):
+                comment_at = index
+                break
+            if character == "'":
+                in_single_quote = True
+            elif character == '"':
+                in_double_quote = True
+            elif character == "{":
+                curly_depth += 1
+                separators.append(index + 1)
+            elif character == "}":
+                curly_depth = max(0, curly_depth - 1)
+            elif character == "," and curly_depth > 0:
+                separators.append(index + 1)
+            elif character == ":":
+                colons.append(index)
+            index += 1
+
+        visible = raw_line[:comment_at]
+        if BLOCK_SCALAR_START.fullmatch(visible):
+            block_scalar_indent = indent
+
+        structural_line = visible.lstrip()
+        if structural_line.startswith("-"):
+            structural_line = structural_line[1:].lstrip()
+        if structural_line.startswith("?"):
+            raise ValueError(
+                f"unsupported explicit YAML mapping key: {structural_line}"
+            )
+
+        for colon in colons:
+            if colon >= comment_at:
+                continue
+            segment_start = max(
+                separator for separator in separators if separator <= colon
+            )
+            key = _normalize_workflow_mapping_key(
+                visible[segment_start:colon]
+            )
+            if key != "uses":
+                continue
+
+            remaining = visible[colon + 1 :].lstrip()
+            if not remaining:
+                targets.append("")
+                continue
+            if remaining[0] not in {"'", '"'}:
+                targets.append(re.split(r"[\s,}]", remaining, maxsplit=1)[0])
+                continue
+
+            quote = remaining[0]
+            value: list[str] = []
+            cursor = 1
+            while cursor < len(remaining):
+                character = remaining[cursor]
+                if quote == "'" and character == "'":
+                    if cursor + 1 < len(remaining) and remaining[cursor + 1] == "'":
+                        value.append("'")
+                        cursor += 2
+                        continue
+                    break
+                if quote == '"' and character == "\\":
+                    if cursor + 1 >= len(remaining):
+                        value.append("\\")
+                        break
+                    value.append(remaining[cursor + 1])
+                    cursor += 2
+                    continue
+                if character == quote:
+                    break
+                value.append(character)
+                cursor += 1
+            targets.append("".join(value))
+
+        flow_mapping_depth = curly_depth
+
+    return targets
 
 
 def main() -> int:
@@ -146,19 +313,47 @@ def main() -> int:
         if schema.get("additionalProperties") is not False:
             errors.append(f"top-level schema must fail closed: {schema_path.name}")
 
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    uses_lines = [
-        line.strip()
-        for line in workflow.splitlines()
-        if line.strip().startswith("uses:")
-    ]
-    for uses_line in uses_lines:
-        if "@" not in uses_line:
-            errors.append(f"workflow action is unpinned: {uses_line}")
+    workflow_root = ROOT / ".github/workflows"
+    try:
+        workflow_paths = sorted(
+            path
+            for path in workflow_root.iterdir()
+            if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}
+        )
+    except OSError as exc:
+        errors.append(f"workflow directory is unreadable: {exc}")
+        workflow_paths = []
+
+    if not workflow_paths:
+        errors.append("workflow directory contains no .yml or .yaml workflow files")
+
+    for workflow_path in workflow_paths:
+        try:
+            workflow = workflow_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(
+                f"workflow file is unreadable: {workflow_path.relative_to(ROOT)}: {exc}"
+            )
             continue
-        reference = uses_line.rsplit("@", maxsplit=1)[1].split()[0]
-        if not re.fullmatch(r"[0-9a-f]{40}", reference):
-            errors.append(f"workflow action is not pinned by commit SHA: {uses_line}")
+        try:
+            uses_targets = _workflow_uses_targets(workflow)
+        except ValueError as exc:
+            errors.append(
+                "workflow dependency syntax is unsupported for fail-closed validation: "
+                f"{workflow_path.relative_to(ROOT)}: {exc}"
+            )
+            continue
+        for uses_target in uses_targets:
+            if uses_target.startswith("$/"):
+                continue
+            if "@" not in uses_target:
+                errors.append(f"workflow action is unpinned: {uses_target}")
+                continue
+            reference = uses_target.rsplit("@", maxsplit=1)[1]
+            if not re.fullmatch(r"[0-9a-f]{40}", reference):
+                errors.append(
+                    f"workflow action is not pinned by commit SHA: {uses_target}"
+                )
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
