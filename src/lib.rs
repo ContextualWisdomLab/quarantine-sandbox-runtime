@@ -23,12 +23,14 @@ pub use application_service::{
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
-    AnalyzerFinding, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION,
-    ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError, ContractError,
-    EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact, IngestionError,
-    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes,
-    to_pretty_json,
+    AnalyzerFinding, AnalyzerWorkerContractError, AnalyzerWorkerExecutionError,
+    AnalyzerWorkerExecutionPort, AnalyzerWorkerFinding, AnalyzerWorkerIdentity,
+    AnalyzerWorkerOutcome, AnalyzerWorkerReceipt, AnalyzerWorkerRequest, ArtifactDescriptor,
+    ArtifactKind, BoundedSourceContext, CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE,
+    CONTRACT_SCHEMA_VERSION, ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError,
+    ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact,
+    IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer,
+    ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 pub use pr_source_artifact::{
@@ -37,7 +39,8 @@ pub use pr_source_artifact::{
 };
 pub use sandbox_execution::{
     IsolationControlStatus, IsolationPolicy, ResourceRequest, SandboxExecutionError,
-    VerifiedIsolationState,
+    SandboxWorkerBudget, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerTerminationState, VerifiedIsolationState,
 };
 
 impl From<SandboxExecutionError> for ApplicationServiceError {

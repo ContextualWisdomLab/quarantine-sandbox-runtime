@@ -2,16 +2,30 @@
 
 use std::fs;
 
+fn section_end(workflow: &str, body_start: usize) -> usize {
+    let remainder = &workflow[body_start..];
+    let mut offset = 0;
+    for line in remainder.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches('\n');
+        let sibling_header = line_without_newline.starts_with("  ")
+            && !line_without_newline.starts_with("   ")
+            && !line_without_newline.trim().is_empty();
+        let top_level = !line_without_newline.is_empty() && !line_without_newline.starts_with(' ');
+        if sibling_header || top_level {
+            return body_start + offset;
+        }
+        offset += line.len();
+    }
+    workflow.len()
+}
+
 fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     let marker = format!("\n  {job_name}:\n");
     let start = workflow
         .find(&marker)
         .unwrap_or_else(|| panic!("missing CI job {job_name}"));
     let body_start = start + marker.len();
-    let remainder = &workflow[body_start..];
-    let end = remainder
-        .find("\n  ")
-        .map_or(workflow.len(), |offset| body_start + offset);
+    let end = section_end(workflow, body_start);
     &workflow[start..end]
 }
 
@@ -21,18 +35,12 @@ fn event_section<'a>(workflow: &'a str, event_name: &str) -> &'a str {
         .find(&marker)
         .unwrap_or_else(|| panic!("missing CI event {event_name}"));
     let body_start = start + marker.len();
-    let remainder = &workflow[body_start..];
-    let end = remainder
-        .match_indices('\n')
-        .find_map(|(offset, _)| {
-            let next_line = &remainder[offset + 1..];
-            let line = next_line.lines().next().unwrap_or_default();
-            let next_event = line.starts_with("  ") && !line.starts_with("    ");
-            let next_top_level = !line.is_empty() && !line.starts_with(' ');
-            (next_event || next_top_level).then_some(body_start + offset)
-        })
-        .unwrap_or(workflow.len());
+    let end = section_end(workflow, body_start);
     &workflow[start..end]
+}
+
+fn leading_spaces(line: &str) -> usize {
+    line.len() - line.trim_start_matches(' ').len()
 }
 
 #[test]
@@ -51,6 +59,36 @@ fn ordinary_hosted_ci_uses_explicit_supported_runner_image() {
             "{job_name} must not depend on the floating hosted runner selector"
         );
     }
+}
+
+#[test]
+fn every_checkout_discards_persisted_credentials() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+    let lines: Vec<&str> = workflow.lines().collect();
+    let mut checkout_count = 0;
+
+    for (index, line) in lines.iter().enumerate() {
+        if !line.trim_start().starts_with("- uses: actions/checkout@") {
+            continue;
+        }
+        checkout_count += 1;
+        let step_indent = leading_spaces(line);
+        let step_body = lines[index + 1..].iter().take_while(|candidate| {
+            candidate.trim().is_empty() || leading_spaces(candidate) > step_indent
+        });
+        assert!(
+            step_body
+                .clone()
+                .any(|candidate| candidate.trim() == "persist-credentials: false"),
+            "every checkout step must disable persisted Git credentials"
+        );
+    }
+
+    assert!(
+        checkout_count > 0,
+        "CI must contain at least one checkout step"
+    );
 }
 
 #[test]
