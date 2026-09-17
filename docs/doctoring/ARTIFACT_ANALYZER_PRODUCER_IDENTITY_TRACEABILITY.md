@@ -2,7 +2,7 @@
 
 ## Decision scope
 
-This note covers artifact-analysis producer identity admission on parent PR #18 exact `c0647152ec052d82969b2ae078891e25e6d4d69a` and Issue #99. It does not change analyzer isolation, evidence taxonomy, Wardnet verdict authority, or consumer authorization authority.
+This note covers artifact-analysis producer identity admission on current parent PR #18 exact `703b4b1a047321bb08d1d6cb1de78d01cb350696` and Issue #99. It does not change analyzer isolation, evidence taxonomy, Wardnet verdict authority, or consumer authorization authority.
 
 Repository-wide `docs/product-technical-gap-baseline.md` is a single-writer ledger owned by canonical gap-baseline lane #121, not by this focused producer-identity leaf.
 
@@ -28,9 +28,13 @@ Native CI `34246495133` executed exact `c34b6f74378187d9466f6061293ea1ee74838d8f
 
 The broader workspace later failed in inherited `backend_security_info` command/runtime ancestry. That is a separate process-boundary prerequisite and does not justify weakening producer identity.
 
-## Single-writer gap-ledger repair
+## Single-writer gap-ledger repair and current-parent adoption
 
-Review `5229258443` found that #100 still carried a historical `docs/product-technical-gap-baseline.md` delta despite #121 repository-wide ownership. Ordinary fast-forward `5212d0881be40f70a23f02fea0e9330f6c58ded1` restores the global baseline byte-for-byte to exact #18 base blob `ea0310394a3d842246bae380977a30c72c18cbf9` while preserving the producer-reservation production/test/TRACEABILITY delta. The current documentation head records this ownership repair locally. No predecessor execution transfers after branch movement.
+Review `5229258443` found that #100 still carried a historical `docs/product-technical-gap-baseline.md` delta despite #121 repository-wide ownership. Ordinary fast-forward `5212d0881be40f70a23f02fea0e9330f6c58ded1` restored the global baseline byte-for-byte to the then-current #18 base while preserving the producer-reservation production/test/TRACEABILITY delta.
+
+Parent #18 later advanced from `c0647152ec052d82969b2ae078891e25e6d4d69a` to `703b4b1a047321bb08d1d6cb1de78d01cb350696` with exactly two owner-boundary commits: `docs/doctoring/ARTIFACT_ANALYSIS_GAP_OWNER_REPAIR.md` was added and the repository-wide Gap ledger was restored to its canonical base authority. Ordinary two-parent, non-force adoption `aff7030fbc31dd6c0e21740487fc305157230ecc` takes that parent movement while preserving #100's three owned paths. No source copy, force update, destructive rebase, or predecessor-result transfer is used.
+
+Fresh compare from current #18 to the adoption head contains only `src/artifact_analysis/runtime.rs`, `tests/artifact_analysis_reserved_producer_id_red.rs`, and this TRACEABILITY file. The global Gap ledger is therefore absent from the leaf delta.
 
 ## Security and DDD rationale
 
@@ -38,7 +42,7 @@ NIST SI-10 requires validating system inputs against defined syntax, semantics, 
 
 ## Current gate
 
-The moved head must independently reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, dependency-safe non-force adoption by #18, positive effective-isolation evidence where applicable, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication.
+The moved head must independently reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, current parent integration, positive effective-isolation evidence where applicable, protected integration, and immutable version/package/SBOM/provenance/reproducibility/rollback publication. Historical focused GREEN remains causal evidence only.
 
 ## References
 
