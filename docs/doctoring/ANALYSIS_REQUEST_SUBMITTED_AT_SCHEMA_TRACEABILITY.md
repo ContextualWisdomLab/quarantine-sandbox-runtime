@@ -17,9 +17,9 @@ The public `schemas/analysis-request.schema.json` instead declares the stock Dra
 Test `tests/artifact_analysis_submitted_at_schema_contract_red.rs` keeps two concerns separate:
 
 - the existing Rust validator must reject 2026-02-31 and non-leap 2023-02-29 while accepting 2024-02-29;
-- the published schema must bind its named CWL RFC 3339 profile to an executable/fail-closed dialect rather than the stock annotation-only authority.
+- the published schema must bind its named CWL RFC 3339 profile to the canonical #101/#102 dialect, whose CWL contract vocabulary is required and whose meta-schema recognizes `x-cwl-rfc3339Profile`.
 
-The RED intentionally does not reference a not-yet-landed dialect file or implementation type. Its failing condition is the current public schema authority itself.
+Review `5237628204` found a false-GREEN in the initial RED: merely requiring `$schema` to differ from the stock Draft 2020-12 URI would allow an arbitrary non-stock URI to pass without proving canonical dialect/vocabulary adoption. Test-only commit `cd39c38a864f66bc4d51584dcf60f13cb9c574e4` hardens the witness to require the exact canonical CWL dialect URI, the required CWL vocabulary, and recognition of the RFC3339 profile keyword. Production Rust and public schema remain unchanged. On the current parent, the intended first failure remains the stock `$schema` authority itself; the dialect artifact is read only after that exact owner assertion passes.
 
 ## Standards basis
 
@@ -35,11 +35,12 @@ The selected architecture is therefore not “make the regex larger.” The cano
 - **Encode calendar validity only with a regex.** Rejected because leap-year arithmetic is not a stable or reviewable regex contract and would duplicate the existing runtime validator.
 - **Weaken the Rust validator to the structural regex.** Rejected because that admits impossible dates and violates the existing bounded source-metadata contract.
 - **Create a second CWL dialect in this lane.** Rejected because #101/#102 already owns the dialect and duplicate vocabularies would create competing public authorities.
+- **Accept any non-stock `$schema` URI as GREEN.** Rejected because it would not prove adoption of the canonical required vocabulary and would let a documentation-only URI substitution satisfy the regression.
 - **Treat `x-cwl-rfc3339Profile` as documentation only.** Rejected because the schema advertises it as a contract property while unsupported schema consumers would silently ignore it.
 
 ## GREEN and release gate
 
-After this exact RED executes for the intended missing-authority cause, the smallest owner-safe GREEN is to adopt the #101/#102 dialect into current #18 ancestry and define `utc_z_only_with_gregorian_day_validation_no_leap_second_notation` normatively in that required vocabulary. Unsupported validators must fail closed or consume the released runtime validator. Positive controls must include a Gregorian leap day; hostile controls must include impossible month/day combinations and non-leap February 29.
+After the hardened exact RED executes for the intended missing-authority cause, the smallest owner-safe GREEN is to adopt the #101/#102 dialect into current #18 ancestry and define `utc_z_only_with_gregorian_day_validation_no_leap_second_notation` normatively in that required vocabulary. Unsupported validators must fail closed or consume the released runtime validator. Positive controls must include a Gregorian leap day; hostile controls must include impossible month/day combinations and non-leap February 29.
 
 GREEN on this focused contract does not transfer predecessor CI and does not waive repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc, 100% owned production statement/function/region/branch/edge coverage, qualifying review/thread/security gates, protected integration, positive runtime-isolation evidence where applicable, or immutable dialect/schema/runtime publication with SBOM, provenance, reproducibility, and rollback evidence.
 
