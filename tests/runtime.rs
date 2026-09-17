@@ -1,7 +1,5 @@
 //! Integration tests for deterministic runtime evidence orchestration.
 
-use std::collections::BTreeMap;
-
 use quarantine_sandbox_runtime::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
     AnalyzerFinding, ArtifactKind, BoundedSourceContext, EvidenceKind, FormatAnalyzer,
@@ -25,13 +23,12 @@ fn request(profile: AnalysisProfile) -> AnalysisRequest {
 
 #[test]
 fn static_analysis_returns_attributable_evidence_without_a_verdict() {
-    let engine = AnalysisEngine::new(
+    let engine = AnalysisEngine::with_bundled_static_analyzers(
         IngestionPolicy::default(),
         "foundation_policy_v1",
         "revision_test",
-        vec![Box::new(FormatAnalyzer)],
     )
-    .expect("valid engine configuration must succeed");
+    .expect("valid bundled engine configuration must succeed");
 
     let bundle = engine
         .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"MZ\x90\x00")
@@ -91,75 +88,34 @@ fn unavailable_dynamic_profiles_fail_closed_as_inconclusive() {
     }
 }
 
-struct SuccessfulAnalyzer;
+struct ExternalAnalyzer;
 
-impl StaticAnalyzer for SuccessfulAnalyzer {
+impl StaticAnalyzer for ExternalAnalyzer {
     fn analyzer_id(&self) -> &'static str {
-        "successful_analyzer"
+        "external_analyzer"
     }
 
     fn analyze(
         &self,
         _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
     ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
-        Ok(vec![AnalyzerFinding {
-            evidence_kind: EvidenceKind::StaticCapability,
-            summary: "Fixture capability detected.".to_owned(),
-            attributes: BTreeMap::from([("capability_code".to_owned(), "test".to_owned())]),
-        }])
-    }
-}
-
-struct FailingAnalyzer;
-
-impl StaticAnalyzer for FailingAnalyzer {
-    fn analyzer_id(&self) -> &'static str {
-        "failing_analyzer"
-    }
-
-    fn analyze(
-        &self,
-        _artifact: &quarantine_sandbox_runtime::IngestedArtifact,
-    ) -> Result<Vec<AnalyzerFinding>, AnalyzerFailure> {
-        Err(AnalyzerFailure::new(self.analyzer_id(), "fixture_failure"))
+        panic!("externally supplied analyzer must not execute in the runtime host process")
     }
 }
 
 #[test]
-fn analyzer_findings_are_ordered_and_failures_are_preserved_as_evidence() {
+fn externally_supplied_analyzers_require_isolated_worker_execution() {
     let engine = AnalysisEngine::new(
         IngestionPolicy::default(),
         "foundation_policy_v1",
         "revision_test",
-        vec![Box::new(SuccessfulAnalyzer), Box::new(FailingAnalyzer)],
+        vec![Box::new(ExternalAnalyzer)],
     )
-    .expect("valid engine configuration must succeed");
+    .expect("otherwise-valid external analyzer configuration must remain representable");
 
-    let bundle = engine
-        .analyze_bytes(&request(AnalysisProfile::StaticOnly), b"safe text")
-        .expect("analyzer failures must not erase available evidence");
-
-    assert_eq!(bundle.disposition, RuntimeDisposition::Inconclusive);
-    assert!(
-        bundle
-            .evidence
-            .iter()
-            .any(|record| record.evidence_kind == EvidenceKind::StaticCapability)
-    );
-    let failure = bundle
-        .evidence
-        .iter()
-        .find(|record| record.evidence_kind == EvidenceKind::ToolFailure)
-        .expect("tool failure evidence must be present");
-    assert_eq!(failure.producer_id, "failing_analyzer");
     assert_eq!(
-        failure.attributes.get("failure_code"),
-        Some(&"fixture_failure".to_owned())
-    );
-    assert!(
-        bundle
-            .limitations
-            .contains(&"static_analyzer_failure".to_owned())
+        engine.analyze_bytes(&request(AnalysisProfile::StaticOnly), b"safe text"),
+        Err(AnalysisError::IsolatedAnalyzerWorkerRequired)
     );
 }
 
