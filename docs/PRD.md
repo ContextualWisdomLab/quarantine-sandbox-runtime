@@ -28,7 +28,7 @@ The runtime is deliberately not the authority for the consumer's business decisi
 
 - As an Agent control plane, after I authorize a specific application digest, I can request a bounded service and receive only a loopback endpoint plus lease/attestation.
 - As a security operator, I can prove the standard application profile did not grant privileged mode, host namespaces/devices, runtime sockets, broad host mounts, arbitrary Internet egress, or ambient credentials.
-- As an orchestrator, I can terminate a lease on every task terminal state and receive cleanup evidence.
+- As an orchestrator connected to the issuing runtime, I can terminate a runtime-issued lease on every task terminal state and receive cleanup evidence; serialized lease evidence alone cannot authorize destructive cleanup.
 - As an operator, I can fail closed when rootless execution, resource enforcement, readiness, or cleanup cannot be proven.
 
 ## Functional requirements
@@ -37,9 +37,9 @@ The runtime is deliberately not the authority for the consumer's business decisi
 
 - Validate operator isolation policy before starting work.
 - Apply consumer resource requests only within operator maxima.
-- Give each sandbox a deterministic/auditable identity without exposing raw caller text as infrastructure names.
+- Give each runtime invocation a fresh, auditable resource identity without exposing raw caller text as infrastructure names or treating caller correlation fields as destructive authority.
 - Record backend/runtime identity, immutable workload identity, canonical effective-policy identity, resource bounds, timestamps, endpoint where applicable, and isolation facts.
-- Support explicit termination and bounded failure cleanup.
+- Support explicit termination and bounded failure cleanup through runtime-owned authority.
 - Keep backend-specific implementation behind the sandbox boundary.
 
 ### Application-service P0
@@ -52,7 +52,7 @@ The runtime is deliberately not the authority for the consumer's business decisi
 - Create a per-sandbox internal DNS-disabled network and publish exactly one service to host IPv4 loopback on a random port.
 - Invoke the application without a shell.
 - Return an endpoint only after bounded readiness.
-- Return a versioned lease and cleanup receipt.
+- Return a versioned lease and cleanup receipt; consumer-visible lease fields are evidence/correlation and do not recreate cleanup authority after serialization.
 - Provide no request fields for credentials, arbitrary environment variables, broad host mounts, devices, privileged mode, host namespaces, runtime sockets, or arbitrary Internet egress.
 
 ### Artifact-analysis foundation

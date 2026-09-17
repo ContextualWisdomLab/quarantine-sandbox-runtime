@@ -210,6 +210,34 @@ impl IsolationAttestation {
     }
 }
 
+/// Runtime-only capability that selects resources this invocation may destroy.
+///
+/// This type is deliberately crate-private and non-serializable. Public lease
+/// fields remain correlation/evidence and cannot recreate cleanup authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApplicationServiceCleanupAuthority {
+    sandbox_id: String,
+    network_id: String,
+    shutdown_grace_seconds: u32,
+}
+
+impl ApplicationServiceCleanupAuthority {
+    /// Return the runtime-owned container selector retained for cleanup.
+    pub(crate) fn sandbox_id(&self) -> &str {
+        &self.sandbox_id
+    }
+
+    /// Return the runtime-owned network selector retained for cleanup.
+    pub(crate) fn network_id(&self) -> &str {
+        &self.network_id
+    }
+
+    /// Return the bounded stop grace period captured when the lease was created.
+    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
+        self.shutdown_grace_seconds
+    }
+}
+
 /// Attested lease for one ready isolated application service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplicationServiceLease {
@@ -226,14 +254,23 @@ pub struct ApplicationServiceLease {
     expires_at_epoch_seconds: u64,
     shutdown_grace_seconds: u32,
     isolation_attestation: IsolationAttestation,
+    #[serde(skip)]
+    cleanup_authority: Option<ApplicationServiceCleanupAuthority>,
 }
 
 impl ApplicationServiceLease {
-    pub(crate) fn new(
+    /// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.
+    pub(crate) fn new_with_cleanup_sandbox_id(
         request: &ApplicationServiceRequest,
         metadata: RuntimeLeaseMetadata,
+        cleanup_sandbox_id: String,
         endpoint: ServiceEndpoint,
     ) -> Self {
+        let cleanup_authority = ApplicationServiceCleanupAuthority {
+            sandbox_id: cleanup_sandbox_id,
+            network_id: metadata.network_id.clone(),
+            shutdown_grace_seconds: metadata.shutdown_grace_seconds,
+        };
         Self {
             schema_version: APPLICATION_SERVICE_LEASE_SCHEMA_VERSION.to_owned(),
             request_id: request.request_id.clone(),
@@ -248,6 +285,7 @@ impl ApplicationServiceLease {
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
             isolation_attestation: IsolationAttestation::p0(),
+            cleanup_authority: Some(cleanup_authority),
         }
     }
 
@@ -317,8 +355,9 @@ impl ApplicationServiceLease {
         self.expires_at_epoch_seconds
     }
 
-    pub(crate) const fn shutdown_grace_seconds(&self) -> u32 {
-        self.shutdown_grace_seconds
+    /// Return runtime-only cleanup authority when this lease originated in this process.
+    pub(crate) const fn cleanup_authority(&self) -> Option<&ApplicationServiceCleanupAuthority> {
+        self.cleanup_authority.as_ref()
     }
 
     /// Return the P0 isolation attestation.
@@ -436,6 +475,9 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
+    /// The runtime could not obtain operating-system entropy for an invocation identity.
+    #[error("application service runtime identity entropy is unavailable")]
+    RuntimeIdentityUnavailable,
     /// The configured Podman executable could not be invoked.
     #[error("Podman invocation failed during {operation}")]
     BackendInvocationFailed {
@@ -481,6 +523,9 @@ pub enum ApplicationServiceError {
     /// The service did not become reachable before the bounded readiness deadline.
     #[error("application service readiness timed out")]
     ReadinessTimeout,
+    /// Consumer-visible lease evidence lacks the non-serializable runtime cleanup authority.
+    #[error("application service cleanup authority is unavailable")]
+    CleanupAuthorityUnavailable,
     /// Cleanup could not prove removal of all runtime-owned resources.
     #[error("sandbox cleanup failed")]
     CleanupFailed,

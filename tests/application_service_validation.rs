@@ -1,4 +1,4 @@
-//! Exhaustive validation and deterministic-plan tests for application-service contracts.
+//! Exhaustive validation and launch-plan tests for application-service contracts.
 
 use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
@@ -244,19 +244,31 @@ fn resource_request_rejects_zero_and_over_policy_for_every_dimension() {
 }
 
 #[test]
-fn launch_plan_is_deterministic_and_rejects_invalid_requests_and_expiry_overflow() {
+fn launch_plan_uses_fresh_runtime_identity_and_rejects_invalid_requests_and_expiry_overflow() {
     let first = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_000)
         .expect("valid plan should be created");
     let second = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_000)
-        .expect("same inputs should create a plan");
-    assert_eq!(first, second);
-    assert!(first.sandbox_name().starts_with("qsr-app-"));
-    assert!(first.network_name().starts_with("qsr-net-"));
+        .expect("same consumer inputs should create another runtime invocation plan");
+    assert_ne!(
+        first.sandbox_name(),
+        second.sandbox_name(),
+        "runtime-owned resource identity must not alias same-request same-second invocations"
+    );
+    assert_ne!(first.network_name(), second.network_name());
 
-    let different_time = RootlessPodmanAdapter::plan_at(&request(), &policy(), 1_001)
-        .expect("different start time should still create a plan");
-    assert_ne!(first.sandbox_name(), different_time.sandbox_name());
-    assert_ne!(first.network_name(), different_time.network_name());
+    for plan in [&first, &second] {
+        let identity = plan
+            .sandbox_name()
+            .strip_prefix("qsr-app-")
+            .expect("sandbox name must use qsr-app prefix");
+        assert_eq!(identity.len(), 32);
+        assert!(
+            identity
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        );
+        assert_eq!(plan.network_name(), format!("qsr-net-{identity}"));
+    }
 
     let mut invalid_request = request();
     invalid_request.container_port = 0;
