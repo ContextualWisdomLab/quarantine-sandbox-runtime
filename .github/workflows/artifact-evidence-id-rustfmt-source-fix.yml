@@ -1,0 +1,49 @@
+name: Artifact Evidence ID Rustfmt Source Fix
+
+on:
+  push:
+    branches:
+      - test/artifact-analysis-evidence-id-binding-red
+
+permissions:
+  contents: write
+
+jobs:
+  source-fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify exact repair parent and test blob
+        env:
+          EXPECTED_PARENT_SHA: 6b04e292ccf5cb2fa8a4fcb9b8c8ef5a247c2775
+          EXPECTED_TEST_BLOB: 7a10a1ffedd9356abe8a4d910cea9a9a826c1f88
+        run: |
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT_SHA"
+          test "$(git hash-object tests/artifact_analysis_evidence_id_binding_red.rs)" = "$EXPECTED_TEST_BLOB"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Apply and bound rustfmt repair
+        run: |
+          cargo fmt --all
+          test "$(git diff --name-only)" = "tests/artifact_analysis_evidence_id_binding_red.rs"
+          cargo fmt --all --check
+          git diff --check
+      - name: Commit formatter repair and remove one-shot workflow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: test/artifact-analysis-evidence-id-binding-red
+        run: |
+          rm .github/workflows/artifact-evidence-id-rustfmt-source-fix.yml
+          git add tests/artifact_analysis_evidence_id_binding_red.rs .github/workflows/artifact-evidence-id-rustfmt-source-fix.yml
+          test "$(git diff --cached --name-only | sort)" = "$(printf '%s\n%s' '.github/workflows/artifact-evidence-id-rustfmt-source-fix.yml' 'tests/artifact_analysis_evidence_id_binding_red.rs' | sort)"
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'style(artifact-analysis): apply evidence ID RED rustfmt'
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${TARGET_BRANCH}"
