@@ -106,25 +106,29 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
         .as_object()
         .expect("serialized-byte vector instance must be a JSON object");
     assert_eq!(
-        instance_object["source_channel_code"]
-            .as_str()
+        instance_object
+            .get("source_channel_code")
+            .and_then(Value::as_str)
             .map(str::len),
         Some(64)
     );
-    let original_file_name = instance_object["original_file_name"]
-        .as_str()
+    let original_file_name = instance_object
+        .get("original_file_name")
+        .and_then(Value::as_str)
         .expect("normalization vector must contain original_file_name");
     assert_eq!(original_file_name.len(), 227);
     assert!(original_file_name.bytes().all(|byte| byte == b'"'));
     assert_eq!(
-        instance_object["declared_media_type"]
-            .as_str()
+        instance_object
+            .get("declared_media_type")
+            .and_then(Value::as_str)
             .map(str::len),
         Some(255)
     );
     assert_eq!(
-        instance_object["host_artifact_reference"]
-            .as_str()
+        instance_object
+            .get("host_artifact_reference")
+            .and_then(Value::as_str)
             .map(str::len),
         Some(128)
     );
