@@ -44,6 +44,10 @@ Formal review `5240880301` found a further publication-witness false-GREEN on ex
 
 Test-only `54fa1813758f4ba75cc46812e9a252177bdbd233` hardens the publication RED in two ways. First, the future normative specification must explicitly define UTF-8-octet counting, inclusive `count <= keyword_value` admission, compact UTF-8 JSON serialization, and materialization of every missing nullable `BoundedSourceContext` property as JSON `null` before serialized-byte measurement. Second, conformance publication must contain both positive boundary and negative overflow vectors for each byte keyword, with byte counts derived from the fixture instance rather than self-reported totals. Immediate self-review found an arithmetic typo in the positive serialized boundary's raw size; test-only `eaaa96d9c5252557b316c5bada71928946ecfa73` corrects the expected raw compact size to 1,004 bytes so materializing `,"submitted_at":null` yields the exact 1,024-byte accepted boundary. The existing overflow remains 1,005 raw / 1,025 canonical and invalid.
 
+Formal review `5241478053` found that the strengthened wording still did not define one interoperable byte representation for `x-cwl-maxSerializedUtf8Bytes`. RFC 8259 permits multiple JSON spellings for the same parsed string; for example, a reverse solidus may be encoded as either the two-character escape `\\` or the six-character Unicode escape `\u005C`. Therefore “compact JSON encoded as UTF-8” can produce different octet counts for semantically identical instances, and two otherwise conforming vocabulary implementations can disagree at a byte boundary.
+
+RFC 8785 JSON Canonicalization Scheme (JCS) supplies a deterministic JSON representation by defining strict primitive/string serialization, deterministic property sorting, and UTF-8 output. Test-only `97c9eaed45824fab495db969235450dbd8e30198` hardens the RED accordingly. The future vocabulary specification must apply RFC 8785 JCS after the existing CWL missing-nullable-field materialization and count the UTF-8 octets of that canonical representation. The conformance publication must also include `max_serialized_utf8_bytes_jcs_escaping_boundary`: a `BoundedSourceContext` whose `original_file_name` contains non-ASCII `é`, a reverse solidus, and a quotation mark while the other nullable fields are omitted. The witness pins the exact JCS representation, verifies that it parses back to the CWL-materialized object, and derives its 136-byte UTF-8 boundary from the canonical representation rather than trusting a fixture-reported byte total. This prevents generic JSON escaping choices from false-GREENing the serialized-byte contract.
+
 These changes are RED hardening only. Production Rust, `analysis-request.schema.json`, the dialect meta-schema, and repository-policy behavior are unchanged. The missing specification/vector publication remains the intended first failure, and semantic publication artifacts must not be added before the current hardened exact head executes that cause.
 
 Issue #134 / Draft #135 separately owns the Gregorian semantics of `x-cwl-rfc3339Profile`. #102 may publish the extension point and byte-keyword semantics, but it must not preempt #135's hardened Gregorian RED or copy mutable #135 source.
@@ -61,6 +65,10 @@ GREEN requires the unchanged exact candidate head to pass repository validation,
 Immutable publication additionally requires the dialect, request schema, normative vocabulary specification, conformance vectors, package/tag, SBOM/provenance, reproducibility evidence, and rollback target. Mutable branch artifacts are never consumer dependencies.
 
 ## References (APA 7th)
+
+Bray, T. (2017). *The JavaScript Object Notation (JSON) Data Interchange Format (RFC 8259).* RFC Editor. https://www.rfc-editor.org/rfc/rfc8259.html
+
+Rundgren, A., Jordan, B., & Erdtman, S. (2020). *JSON Canonicalization Scheme (JCS) (RFC 8785).* RFC Editor. https://www.rfc-editor.org/rfc/rfc8785.html
 
 Wright, A., Andrews, H., Hutton, B., & Dennis, G. (2022). *JSON Schema: A media type for describing JSON documents (Draft 2020-12).* https://json-schema.org/draft/2020-12/json-schema-core
 
