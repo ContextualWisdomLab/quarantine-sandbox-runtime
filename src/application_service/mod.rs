@@ -12,14 +12,14 @@ use thiserror::Error;
 
 use crate::{
     CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest,
-    sandbox_execution::RuntimeLeaseMetadata,
+    sandbox_execution::{RuntimeLeaseMetadata, VerifiedIsolationState},
 };
 
 const MAX_REQUEST_IDENTIFIER_BYTES: usize = 128;
 const MAX_IMAGE_REFERENCE_BYTES: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 64;
 const MAX_COMMAND_ARGUMENT_BYTES: usize = 1_024;
-const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.1.0";
+const APPLICATION_SERVICE_LEASE_SCHEMA_VERSION: &str = "1.2.0";
 
 /// Service protocol exposed on the consumer-visible loopback endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,81 +141,8 @@ impl ServiceEndpoint {
     }
 }
 
-/// Security-boundary facts guaranteed by the P0 application-service profile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IsolationAttestation {
-    rootless: bool,
-    read_only_root_filesystem: bool,
-    all_capabilities_dropped: bool,
-    no_new_privileges: bool,
-    isolated_user_namespace: bool,
-    external_egress_denied: bool,
-    loopback_only_publication: bool,
-    credentials_available: bool,
-}
-
-impl IsolationAttestation {
-    pub(crate) const fn p0() -> Self {
-        Self {
-            rootless: true,
-            read_only_root_filesystem: true,
-            all_capabilities_dropped: true,
-            no_new_privileges: true,
-            isolated_user_namespace: true,
-            external_egress_denied: true,
-            loopback_only_publication: true,
-            credentials_available: false,
-        }
-    }
-
-    /// Whether the container backend was verified to run rootless.
-    #[must_use]
-    pub const fn rootless(self) -> bool {
-        self.rootless
-    }
-
-    /// Whether the application root filesystem was mounted read-only.
-    #[must_use]
-    pub const fn read_only_root_filesystem(self) -> bool {
-        self.read_only_root_filesystem
-    }
-
-    /// Whether all Linux capabilities were dropped from the application.
-    #[must_use]
-    pub const fn all_capabilities_dropped(self) -> bool {
-        self.all_capabilities_dropped
-    }
-
-    /// Whether the no-new-privileges security option was enforced.
-    #[must_use]
-    pub const fn no_new_privileges(self) -> bool {
-        self.no_new_privileges
-    }
-
-    /// Whether the application uses an isolated user namespace.
-    #[must_use]
-    pub const fn isolated_user_namespace(self) -> bool {
-        self.isolated_user_namespace
-    }
-
-    /// Whether the standard profile denies externally routed application egress.
-    #[must_use]
-    pub const fn external_egress_denied(self) -> bool {
-        self.external_egress_denied
-    }
-
-    /// Whether the service was published exclusively on host loopback.
-    #[must_use]
-    pub const fn loopback_only_publication(self) -> bool {
-        self.loopback_only_publication
-    }
-
-    /// Whether consumer/provider credentials were made available to the application.
-    #[must_use]
-    pub const fn credentials_available(self) -> bool {
-        self.credentials_available
-    }
-}
+/// Backend-neutral effective isolation facts attached to an application-service lease.
+pub type IsolationAttestation = VerifiedIsolationState;
 
 /// Attested lease for one ready isolated application service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +151,7 @@ pub struct ApplicationServiceLease {
     request_id: String,
     image_reference: String,
     backend_id: String,
+    backend_version: String,
     sandbox_id: String,
     network_id: String,
     policy_id: String,
@@ -246,6 +174,7 @@ impl ApplicationServiceLease {
             request_id: request.request_id.clone(),
             image_reference: request.image_reference.clone(),
             backend_id: metadata.backend_id.to_owned(),
+            backend_version: metadata.backend_version,
             sandbox_id: metadata.sandbox_id,
             network_id: metadata.network_id,
             policy_id: metadata.policy_id,
@@ -254,7 +183,7 @@ impl ApplicationServiceLease {
             started_at_epoch_seconds: metadata.started_at_epoch_seconds,
             expires_at_epoch_seconds: metadata.expires_at_epoch_seconds,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
-            isolation_attestation: IsolationAttestation::p0(),
+            isolation_attestation: metadata.isolation_state,
         }
     }
 
@@ -280,6 +209,12 @@ impl ApplicationServiceLease {
     #[must_use]
     pub fn backend_id(&self) -> &str {
         &self.backend_id
+    }
+
+    /// Return the inspected backend version bound to this lease.
+    #[must_use]
+    pub fn backend_version(&self) -> &str {
+        &self.backend_version
     }
 
     /// Return the opaque sandbox identifier.
@@ -328,7 +263,7 @@ impl ApplicationServiceLease {
         self.shutdown_grace_seconds
     }
 
-    /// Return the P0 isolation attestation.
+    /// Return effective isolation evidence verified by the runtime backend.
     #[must_use]
     pub const fn isolation_attestation(&self) -> IsolationAttestation {
         self.isolation_attestation
@@ -443,32 +378,32 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
-    /// The configured Podman executable could not be invoked.
-    #[error("Podman invocation failed during {operation}")]
+    /// The configured sandbox backend executable could not be invoked.
+    #[error("sandbox backend invocation failed during {operation}")]
     BackendInvocationFailed {
         /// Stable operation code.
         operation: &'static str,
     },
-    /// Podman exceeded the bounded wall-clock budget for a required operation.
-    #[error("Podman command timed out during {operation}")]
+    /// The sandbox backend exceeded the bounded wall-clock budget for a required operation.
+    #[error("sandbox backend command timed out during {operation}")]
     BackendCommandTimedOut {
         /// Stable operation code.
         operation: &'static str,
     },
-    /// Podman exceeded the bounded retained-output budget for a required operation.
-    #[error("Podman command exceeded output limit during {operation}")]
+    /// The sandbox backend exceeded the bounded retained-output budget for a required operation.
+    #[error("sandbox backend command exceeded output limit during {operation}")]
     BackendOutputLimitExceeded {
         /// Stable operation code.
         operation: &'static str,
     },
-    /// Podman returned a nonzero exit status for a required operation.
-    #[error("Podman command failed during {operation}")]
+    /// The sandbox backend returned a nonzero exit status for a required operation.
+    #[error("sandbox backend command failed during {operation}")]
     BackendCommandFailed {
         /// Stable operation code.
         operation: &'static str,
     },
     /// The backend did not attest that it is running rootless.
-    #[error("Podman backend is not rootless")]
+    #[error("sandbox backend is not rootless")]
     BackendNotRootless,
     /// A required effective isolation control was not positively verified.
     #[error("effective isolation verification failed for {control_name}")]
@@ -476,14 +411,14 @@ pub enum ApplicationServiceError {
         /// Stable isolation-control code.
         control_name: &'static str,
     },
-    /// Podman inspection output was malformed, contradictory, or bound to another sandbox.
-    #[error("malformed Podman isolation inspection during {operation}")]
+    /// Backend inspection output was malformed, contradictory, or bound to another sandbox.
+    #[error("malformed sandbox isolation inspection during {operation}")]
     MalformedIsolationInspection {
         /// Stable inspection operation code.
         operation: &'static str,
     },
-    /// Podman returned a service publication other than one IPv4 loopback port.
-    #[error("invalid Podman loopback port mapping")]
+    /// The backend returned a service publication other than one IPv4 loopback port.
+    #[error("invalid sandbox loopback port mapping")]
     InvalidPortMapping,
     /// The service did not become reachable before the bounded readiness deadline.
     #[error("application service readiness timed out")]

@@ -22,10 +22,11 @@ impl ApplicationServiceBackend for FailingCleanupBackend {
         started_at_epoch_seconds: u64,
     ) -> Result<ApplicationServiceLease, ApplicationServiceError> {
         let lease = json!({
-            "schema_version": "1.1.0",
+            "schema_version": "1.2.0",
             "request_id": request.request_id.clone(),
             "image_reference": request.image_reference.clone(),
             "backend_id": "failing_cleanup_test_backend",
+            "backend_version": "test-1",
             "sandbox_id": format!("sandbox-{}", request.request_id),
             "network_id": format!("network-{}", request.request_id),
             "policy_id": policy.policy_id.clone(),
@@ -40,13 +41,16 @@ impl ApplicationServiceBackend for FailingCleanupBackend {
                 + u64::from(request.resources.lease_seconds),
             "shutdown_grace_seconds": policy.shutdown_grace_seconds,
             "isolation_attestation": {
-                "rootless": true,
-                "read_only_root_filesystem": true,
-                "all_capabilities_dropped": true,
-                "no_new_privileges": true,
-                "isolated_user_namespace": true,
-                "external_egress_denied": true,
-                "loopback_only_publication": true,
+                "rootless": "verified",
+                "read_only_root_filesystem": "verified",
+                "all_capabilities_dropped": "verified",
+                "no_new_privileges": "verified",
+                "isolated_user_namespace": "verified",
+                "external_egress_denied": "verified",
+                "loopback_only_publication": "verified",
+                "seccomp_enforced": "verified",
+                "lsm_enforced": "verified",
+                "resource_limits_verified": "verified",
                 "credentials_available": false
             }
         });

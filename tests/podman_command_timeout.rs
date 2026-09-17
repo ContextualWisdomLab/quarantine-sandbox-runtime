@@ -86,7 +86,7 @@ fn hanging_backend_command_is_killed_reaped_and_reported_as_timeout() {
     assert_eq!(
         adapter.launch_at(&request(), &policy(), 1_780_000_000),
         Err(ApplicationServiceError::BackendCommandTimedOut {
-            operation: "rootless_probe",
+            operation: "backend_security_info",
         })
     );
     assert!(

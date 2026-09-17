@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.1.0.schema.json",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/application-service-lease-1.2.0.schema.json",
   "title": "Isolated Application Service Lease",
   "type": "object",
   "additionalProperties": false,
@@ -9,6 +9,7 @@
     "request_id",
     "image_reference",
     "backend_id",
+    "backend_version",
     "sandbox_id",
     "network_id",
     "policy_id",
@@ -20,7 +21,7 @@
     "isolation_attestation"
   ],
   "properties": {
-    "schema_version": { "const": "1.1.0" },
+    "schema_version": { "const": "1.2.0" },
     "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
     "image_reference": {
       "type": "string",
@@ -30,6 +31,12 @@
     "backend_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{1,63}$"
+    },
+    "backend_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$"
     },
     "sandbox_id": {
       "type": "string",
@@ -72,18 +79,29 @@
         "isolated_user_namespace",
         "external_egress_denied",
         "loopback_only_publication",
+        "seccomp_enforced",
+        "lsm_enforced",
+        "resource_limits_verified",
         "credentials_available"
       ],
       "properties": {
-        "rootless": { "const": true },
-        "read_only_root_filesystem": { "const": true },
-        "all_capabilities_dropped": { "const": true },
-        "no_new_privileges": { "const": true },
-        "isolated_user_namespace": { "const": true },
-        "external_egress_denied": { "const": true },
-        "loopback_only_publication": { "const": true },
+        "rootless": { "$ref": "#/$defs/control_status" },
+        "read_only_root_filesystem": { "$ref": "#/$defs/control_status" },
+        "all_capabilities_dropped": { "$ref": "#/$defs/control_status" },
+        "no_new_privileges": { "$ref": "#/$defs/control_status" },
+        "isolated_user_namespace": { "$ref": "#/$defs/control_status" },
+        "external_egress_denied": { "$ref": "#/$defs/control_status" },
+        "loopback_only_publication": { "$ref": "#/$defs/control_status" },
+        "seccomp_enforced": { "$ref": "#/$defs/control_status" },
+        "lsm_enforced": { "$ref": "#/$defs/control_status" },
+        "resource_limits_verified": { "$ref": "#/$defs/control_status" },
         "credentials_available": { "const": false }
       }
+    }
+  },
+  "$defs": {
+    "control_status": {
+      "enum": ["verified", "not_applicable", "unavailable"]
     }
   }
 }

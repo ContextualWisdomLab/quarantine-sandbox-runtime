@@ -56,11 +56,11 @@ fn request() -> ApplicationServiceRequest {
 }
 
 fn write_fake_podman(program: &Path, log: &Path, mode: &str, ready_port: u16) {
-    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.6.2"}}"#;
     let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$MODE\" = slow_rootless ] && [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then sleep 1; fi\nif [ \"$MODE\" = fail_rootless ] && [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then exit 20; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$MODE\" = slow_rootless ] && [ \"${{1:-}}\" = info ]; then sleep 1; fi\nif [ \"$MODE\" = fail_rootless ] && [ \"${{1:-}}\" = info ]; then exit 20; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter 0000000000000000 0000000000000000 0000000000000000 0000000000000000 0000000000000000 containers-default (enforce)\n' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
@@ -229,7 +229,7 @@ fn failed_launch_releases_idempotency_reservation_for_retry() {
         coordinator.launch_at(&owner, &request(), &policy(), 1_780_000_000),
         Err(ApplicationServiceCoordinatorError::Backend(
             ApplicationServiceError::BackendCommandFailed {
-                operation: "rootless_probe",
+                operation: "backend_security_info",
             }
         ))
     );
@@ -265,7 +265,7 @@ fn concurrent_duplicate_launch_is_rejected_while_first_launch_is_in_flight() {
     let worker = thread::spawn(move || {
         worker_coordinator.launch_at(&worker_owner, &request(), &policy(), 1_780_000_000)
     });
-    wait_until_log_contains(&log, "info --format");
+    wait_until_log_contains(&log, "info --format json");
 
     assert_eq!(
         coordinator.launch_at(&owner, &request(), &policy(), 1_780_000_001),
