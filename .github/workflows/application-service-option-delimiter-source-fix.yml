@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - name: Verify exact repair parent and source blob
         env:
-          EXPECTED_PARENT_SHA: e24de6de162e1a823879cdf40f803a5165f9f8fb
+          EXPECTED_PARENT_SHA: 2f82c9695b4fa09f364b720039140b4fe93005d3
           EXPECTED_SOURCE_BLOB: cd025e12795da7e86f449b5258ff2dfd68a72c9a
         run: |
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT_SHA"
@@ -31,15 +31,11 @@ jobs:
 
           path = Path("src/infrastructure/podman.rs")
           text = path.read_text()
-          old = '''            format!(
-                          "org.contextualwisdomlab.sandbox.policy_sha256={}",
-                          policy.effective_policy_sha256()
+          old = '''                policy.effective_policy_sha256()
                       ),
                       request.image_reference.clone(),
           '''
-          new = '''            format!(
-                          "org.contextualwisdomlab.sandbox.policy_sha256={}",
-                          policy.effective_policy_sha256()
+          new = '''                policy.effective_policy_sha256()
                       ),
                       "--".to_owned(),
                       request.image_reference.clone(),
