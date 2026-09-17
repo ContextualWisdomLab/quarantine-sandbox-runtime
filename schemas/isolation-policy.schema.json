@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/isolation-policy-1.0.0.schema.json",
+  "title": "Sandbox Isolation Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policy_id",
+    "maximum_memory_bytes",
+    "maximum_cpu_millicores",
+    "maximum_processes",
+    "maximum_lease_seconds",
+    "maximum_tmpfs_bytes",
+    "readiness_timeout_millis",
+    "readiness_poll_interval_millis",
+    "shutdown_grace_seconds",
+    "run_as_user_id",
+    "run_as_group_id"
+  ],
+  "properties": {
+    "policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+      "x-cwl-maxUtf8Bytes": 128
+    },
+    "maximum_memory_bytes": { "type": "integer", "minimum": 1 },
+    "maximum_cpu_millicores": { "type": "integer", "minimum": 1 },
+    "maximum_processes": { "type": "integer", "minimum": 1 },
+    "maximum_lease_seconds": { "type": "integer", "minimum": 1 },
+    "maximum_tmpfs_bytes": { "type": "integer", "minimum": 1 },
+    "readiness_timeout_millis": { "type": "integer", "minimum": 1 },
+    "readiness_poll_interval_millis": { "type": "integer", "minimum": 1 },
+    "shutdown_grace_seconds": { "type": "integer", "minimum": 1 },
+    "run_as_user_id": { "type": "integer", "minimum": 1 },
+    "run_as_group_id": { "type": "integer", "minimum": 1 }
+  }
+}
