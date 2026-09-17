@@ -23,13 +23,14 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Rootless Podman P0 adapter with immutable image/no-pull policy, internal DNS-disabled network, loopback-only publication, read-only rootfs, bounded tmpfs, host-proxy inheritance disabled, capability drop, no-new-privileges, isolated namespaces, numeric non-root identity, CPU/RAM/PID/TTL bounds, readiness gating, and cleanup.
 - Versioned `ApplicationServiceLease`, `IsolationAttestation`, and `CleanupReceipt` evidence contracts.
 - Canonical effective-policy SHA-256 bound to both Podman ownership labels and application-service leases.
-- Application-service lease schema `1.1.0`; request and cleanup contracts remain `1.0.0`.
+- Application-service lease schema `1.2.0`, including inspected backend version and effective seccomp/LSM/resource-control status; request and cleanup contracts remain `1.0.0`.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
 - Real rootless-Podman acceptance covering the pinned backend, immutable fixture pre-pull, effective isolation, bounded HTTP readiness, explicit cleanup, and final container/network leak rejection on the reviewed source head.
 - Caller-scoped `LeaseOwnerId`, `ApplicationServiceBackend` port, and process-local `ApplicationServiceCoordinator` for active-lease ownership, idempotent replay, bounded expiry cleanup, and backend-neutral lifecycle coordination.
-- Regression coverage for duplicate retry suppression, changed-request conflicts, effective-policy conflicts, wrong-owner termination, concurrent duplicate launch, failed-launch reservation release, expired-lease attribution, and cleanup-failure fairness across more than one bounded cleanup batch.
+- Regression coverage for duplicate retry suppression, changed-request conflicts, effective-policy conflicts, wrong-owner termination, concurrent duplicate launch, failed-launch reservation release, expired-lease attribution, cleanup-failure fairness across more than one bounded cleanup batch, and residual bounding capabilities.
 - Consumer owner-path integration issue for `contextual-orchestrator` so Chat/Agent domain code consumes the published lease contract rather than directly invoking Podman/containerd.
 - Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
+- Fail-closed `RELEASE.md` runbook, tag-driven release workflow, and versioned release-evidence schema binding exact protected source, full coverage, an LSM-capable real runtime acceptance, byte-reproducible Cargo package, SPDX 3 SBOM, SHA-256 checksums, GitHub attestations, and GitHub Release assets.
 
 ### Changed
 
@@ -46,6 +47,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Required free-form source metadata was replaced by a closed typed context capped at 1,024 serialized UTF-8 bytes.
 - Source timestamp and media-type validation trace to RFC 3339 and BCP 13 (RFC 6838 as updated by RFC 9694).
 - Architecture now separates Core `sandbox_execution` from Supporting `artifact_analysis` and `application_service` and treats Podman/gVisor/containerd/Kubernetes mechanisms as infrastructure adapters.
+- Repository authority is the protected/default `develop` branch. Native CI still has a stale `main`-only push trigger; issue #24 carries the focused RED requiring exact post-integration `develop` evidence before release authority. The release preflight likewise remains Draft behind its protected-default-source RED and must not treat `main` as authoritative while the repository default is `develop`.
+- Production consumers are required to pin a released package checksum and provenance/SBOM evidence rather than a transient pull-request head or branch artifact.
 
 ### Security
 
@@ -56,14 +59,18 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Mutable/tag-only OCI image references fail closed.
 - Standard application-service contract exposes no privileged mode, host namespace, device, runtime socket, arbitrary mount, arbitrary environment, credential, wildcard bind, or arbitrary Internet-egress capability.
 - Podman backend must report rootless mode; service publication is validated as IPv4 loopback before a lease is returned.
+- Effective isolation is inspected after container start; read-only rootfs, no-new-privileges, private namespaces, seccomp, an LSM, resource limits, internal networking, and loopback publication must be positively verified for the P0 lease path.
+- Capability-drop attestation requires both Podman effective and bounding capability sets to be empty; residual bounding capability such as `CAP_SYS_ADMIN` fails closed and triggers cleanup.
 - Podman host proxy environment inheritance is explicitly disabled so `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` values cannot become ambient application inputs.
-- Partial-launch/readiness failures attempt cleanup and cleanup uncertainty becomes `CleanupFailed` rather than being hidden.
+- Partial-launch/readiness/attestation failures attempt cleanup and cleanup uncertainty becomes `CleanupFailed` rather than being hidden.
 - Lease ownership is scoped by authenticated command context rather than an untrusted request field; wrong-owner cleanup fails before the backend is invoked.
 - Application-service replay is bound to both immutable request content and the full effective isolation policy, so a changed policy cannot silently reuse a lease created under older limits.
 - Repeated cleanup failures cannot monopolize the bounded expiry-cleanup window and indefinitely hide other expired application-service leases.
+- Release publication requires a dedicated no-production-secret, SELinux-capable rootless Podman runner or a separately reviewed stronger isolation backend; an LSM-unavailable hosted runner cannot be promoted to passing release evidence.
 
 ### Not yet release evidence
 
-- The real rootless-Podman lane passed on the reviewed source head, but final release readiness still requires the same acceptance to remain green on the unchanged release head together with verify, complete coverage, security, SAST, review, SBOM, provenance, and protected-merge evidence. Fake-process tests alone remain insufficient isolation proof.
+- No protected product release exists yet. `0.1.0` remains the package version under development until the complete stacked runtime integrates and a dated changelog section is reviewed on the exact protected stable candidate.
+- The GitHub-hosted Ubuntu 24.04 rootless Podman lane correctly fails closed because it cannot prove the required effective LSM on the current candidate. `ContextualWisdomLab/.github#1590` owns provisioning of the dedicated LSM-capable release/security runner; that external infrastructure prerequisite is not bypassed here.
 - Caller-scoped lease ownership is currently process-local; authenticated transport binding, durable restart/orphan reclamation, distributed admission/resource reservation, stable wire errors, and signed durable receipts remain follow-on work.
 - gVisor/containerd/Kubernetes adapters, controlled egress, secret broker, and stronger dynamic-detonation profiles remain follow-on work.

@@ -1,0 +1,402 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quarantine-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact protected-main release source
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git fetch --no-tags --depth=1 origin main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_SHA"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.protected')" = "true"
+      - name: Verify tag, Cargo version, and dated changelog identity
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+              raise SystemExit("release tag must be canonical vX.Y.Z")
+          version = tag[1:]
+          cargo = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))
+          if cargo["package"]["version"] != version:
+              raise SystemExit("release tag does not match Cargo package version")
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if re.search(
+              rf"^## \[{re.escape(version)}\] - [0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$",
+              changelog,
+              re.MULTILINE,
+          ) is None:
+              raise SystemExit("dated changelog section for release version is missing")
+          PY
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: Verify dependency lock
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Validate repository policy
+        run: python3 scripts/validate_repository.py
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Test exact release source
+        run: cargo test --locked --workspace --all-targets
+      - name: Lint exact release source
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Build warning-free documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
+
+  statement-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+          components: llvm-tools-preview
+      - name: Install pinned coverage tool
+        run: cargo install cargo-llvm-cov --locked --version 0.8.6
+      - name: Generate and enforce complete production statement coverage
+        run: |
+          cargo llvm-cov --workspace --lib --tests --json --output-path coverage.json
+          python3 scripts/check_coverage.py coverage.json
+      - name: Retain statement coverage evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-statement-coverage-${{ github.sha }}
+          path: coverage.json
+          if-no-files-found: error
+          retention-days: 90
+
+  branch-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: nightly-2026-07-01
+          components: llvm-tools-preview
+      - name: Install pinned coverage tool
+        run: cargo +nightly-2026-07-01 install cargo-llvm-cov --locked --version 0.8.6
+      - name: Generate and enforce complete production branch coverage
+        run: |
+          cargo +nightly-2026-07-01 llvm-cov --branch --workspace --lib --tests --json --output-path branch-coverage.json
+          python3 scripts/check_coverage.py --require-branches branch-coverage.json
+      - name: Retain branch coverage evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-branch-coverage-${{ github.sha }}
+          path: branch-coverage.json
+          if-no-files-found: error
+          retention-days: 90
+
+  hostile-runtime-e2e:
+    runs-on: [self-hosted, linux, x64, cwl-hostile-workload, selinux]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      backend-version: ${{ steps.runtime-identity.outputs.backend_version }}
+      security-profile: ${{ steps.runtime-identity.outputs.security_profile }}
+    env:
+      QSR_PODMAN_E2E_IMAGE: docker.io/library/python@sha256:94457973ea8a27a799f0b8ea1fe3e3147fcbebaed63497a8af63b28195a08108
+      QSR_HOST_SECRET_CANARY: release-e2e-canary-must-not-enter-workload
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+      - name: Verify rootless Podman seccomp and SELinux runner contract
+        id: runtime-identity
+        run: |
+          test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
+          test "$(podman info --format '{{.Host.Security.SeccompEnabled}}')" = "true"
+          test -n "$(podman info --format '{{.Host.Security.SeccompProfilePath}}')"
+          test "$(podman info --format '{{.Host.Security.SelinuxEnabled}}')" = "true"
+          backend_version="$(podman --version | sed 's/^podman version //')"
+          test -n "$backend_version"
+          echo "backend_version=$backend_version" >> "$GITHUB_OUTPUT"
+          echo "security_profile=rootless_podman_selinux" >> "$GITHUB_OUTPUT"
+      - name: Pre-pull immutable fixture outside the application launch path
+        run: |
+          podman pull --quiet "$QSR_PODMAN_E2E_IMAGE"
+          podman image inspect "$QSR_PODMAN_E2E_IMAGE" >/dev/null
+      - name: Execute real rootless Podman isolation and cleanup acceptance
+        run: >-
+          cargo test --locked
+          --test podman_rootless_e2e
+          -- --ignored --exact rootless_podman_effective_isolation_and_cleanup --nocapture
+      - name: Reject leaked runtime-owned resources
+        if: always()
+        run: |
+          leaked_containers="$(podman ps -a --filter label=org.contextualwisdomlab.sandbox.identity --format '{{.ID}}')"
+          test -z "$leaked_containers"
+          leaked_networks="$(podman network ls --format '{{.Name}}' | grep '^qsr-net-' || true)"
+          test -z "$leaked_networks"
+
+  package-evidence:
+    needs: [preflight, statement-coverage, branch-coverage, hostile-runtime-e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate into first clean tree
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: source-a
+          persist-credentials: false
+      - name: Checkout exact candidate into second clean tree
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: source-b
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable installer
+        with:
+          toolchain: 1.97.1
+      - name: Verify exact clean source identity and dependency locks
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git -C source-a rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C source-b rev-parse HEAD)" = "$EXPECTED_SHA"
+          (cd source-a && cargo metadata --locked --no-deps --format-version 1 > /dev/null)
+          (cd source-b && cargo metadata --locked --no-deps --format-version 1 > /dev/null)
+      - name: Build two independent Cargo source packages
+        id: package
+        run: |
+          (cd source-a && cargo package --locked)
+          (cd source-b && cargo package --locked)
+          version="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('source-a/Cargo.toml').read_text(encoding='utf-8'))['package']['version'])
+          PY
+          )"
+          package_file="quarantine-sandbox-runtime-${version}.crate"
+          package_dir="source-a/target/package/quarantine-sandbox-runtime-${version}"
+          test -f "source-a/target/package/${package_file}"
+          test -f "source-b/target/package/${package_file}"
+          test -d "$package_dir"
+          cmp "source-a/target/package/${package_file}" "source-b/target/package/${package_file}"
+          mkdir dist
+          cp "source-a/target/package/${package_file}" dist/
+          {
+            echo "version=$version"
+            echo "package_file=$package_file"
+            echo "package_dir=$package_dir"
+          } >> "$GITHUB_OUTPUT"
+      - name: Generate SPDX 3 JSON SBOM from the packaged source tree
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: ${{ steps.package.outputs.package_dir }}
+          format: spdx-json@3.0
+          output-file: dist/quarantine-sandbox-runtime.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+          syft-version: v1.51.0
+      - name: Validate SBOM and create exact release evidence manifest
+        env:
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+          PACKAGE_FILE: ${{ steps.package.outputs.package_file }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          BACKEND_VERSION: ${{ needs.hostile-runtime-e2e.outputs.backend-version }}
+          SECURITY_PROFILE: ${{ needs.hostile-runtime-e2e.outputs.security-profile }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          dist = Path('dist')
+          package_path = dist / os.environ['PACKAGE_FILE']
+          sbom_path = dist / 'quarantine-sandbox-runtime.spdx.json'
+          sbom = json.loads(sbom_path.read_text(encoding='utf-8'))
+          if sbom.get('@context') != 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld':
+              raise SystemExit('SBOM is not SPDX 3.0.1 JSON-LD')
+          graph = sbom.get('@graph')
+          if not isinstance(graph, list) or not graph:
+              raise SystemExit('SPDX SBOM graph is empty')
+
+          def sha256(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          evidence = {
+              'schema_version': '1.0.0',
+              'repository': 'ContextualWisdomLab/quarantine-sandbox-runtime',
+              'source_sha': os.environ['SOURCE_SHA'],
+              'source_ref': os.environ['SOURCE_REF'],
+              'package_version': os.environ['PACKAGE_VERSION'],
+              'package_file': os.environ['PACKAGE_FILE'],
+              'package_sha256': sha256(package_path),
+              'sbom_file': sbom_path.name,
+              'sbom_sha256': sha256(sbom_path),
+              'runtime_backend_id': 'rootless_podman',
+              'runtime_backend_version': os.environ['BACKEND_VERSION'],
+              'runtime_security_profile': os.environ['SECURITY_PROFILE'],
+              'workflow_run_id': int(os.environ['WORKFLOW_RUN_ID']),
+          }
+          if evidence['runtime_security_profile'] != 'rootless_podman_selinux':
+              raise SystemExit('release runtime security profile was not positively verified')
+          (dist / 'release-evidence.json').write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          (
+            cd dist
+            sha256sum "${PACKAGE_FILE}" quarantine-sandbox-runtime.spdx.json release-evidence.json > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+      - name: Retain exact release package evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quarantine-release-evidence-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 90
+
+  attest-and-release:
+    needs: package-evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download exact release package evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: quarantine-release-evidence-${{ github.sha }}
+          path: evidence
+      - name: Verify retained checksums and source identity
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          (cd evidence && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = json.loads(Path('evidence/release-evidence.json').read_text(encoding='utf-8'))
+          if evidence['source_sha'] != os.environ['EXPECTED_SHA']:
+              raise SystemExit('release evidence source SHA does not match exact checkout')
+          PY
+      - name: Attest SLSA build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: evidence/*.crate
+      - name: Attest SPDX SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: evidence/*.crate
+          predicate-type: https://spdx.dev/Document/v3
+          predicate-path: evidence/quarantine-sandbox-runtime.spdx.json
+      - name: Verify signed package attestations before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package_file="$(find evidence -maxdepth 1 -type f -name '*.crate' -print -quit)"
+          test -n "$package_file"
+          gh attestation verify "$package_file" -R "${GITHUB_REPOSITORY}"
+          gh attestation verify "$package_file" -R "${GITHUB_REPOSITORY}" --predicate-type https://spdx.dev/Document/v3
+      - name: Build release notes from the exact dated changelog section
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ['RELEASE_TAG'][1:]
+          changelog = Path('CHANGELOG.md').read_text(encoding='utf-8')
+          match = re.search(
+              rf"^## \[{re.escape(version)}\] - [0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}\n(?P<body>.*?)(?=^## \[|\Z)",
+              changelog,
+              re.MULTILINE | re.DOTALL,
+          )
+          if match is None:
+              raise SystemExit('cannot derive release notes from dated changelog section')
+          Path('release-notes.md').write_text(match.group('body').strip() + '\n', encoding='utf-8')
+          PY
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          evidence/*.crate
+          evidence/quarantine-sandbox-runtime.spdx.json
+          evidence/SHA256SUMS
+          evidence/release-evidence.json
+          --verify-tag
+          --title "${GITHUB_REF_NAME}"
+          --notes-file release-notes.md
