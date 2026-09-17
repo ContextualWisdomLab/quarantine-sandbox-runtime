@@ -57,10 +57,16 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
     );
 
     let multibyte = vector_by_id(&vectors, "max_utf8_bytes_multibyte_overflow");
-    assert_eq!(multibyte["keyword"].as_str(), Some("x-cwl-maxUtf8Bytes"));
+    assert_eq!(
+        multibyte["keyword"].as_str(),
+        Some("x-cwl-maxUtf8Bytes")
+    );
     assert_eq!(multibyte["keyword_value"].as_u64(), Some(128));
-    assert_eq!(multibyte["instance"].as_str().map(str::chars).map(Iterator::count), Some(65));
-    assert_eq!(multibyte["instance"].as_str().map(str::len), Some(130));
+    let multibyte_instance = multibyte["instance"]
+        .as_str()
+        .expect("UTF-8 overflow vector must contain a string instance");
+    assert_eq!(multibyte_instance.chars().count(), 65);
+    assert_eq!(multibyte_instance.len(), 130);
     assert_eq!(multibyte["valid"].as_bool(), Some(false));
 
     let serialized = vector_by_id(
@@ -72,11 +78,15 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
         Some("x-cwl-maxSerializedUtf8Bytes")
     );
     assert_eq!(serialized["keyword_value"].as_u64(), Some(1_024));
-    assert!(
-        serialized["canonical_serialized_utf8_bytes"]
-            .as_u64()
-            .is_some_and(|bytes| bytes > 1_024),
-        "serialized-byte conformance must pin normalization at the aggregate boundary"
+    assert_eq!(
+        serialized["instance_serialized_utf8_bytes"].as_u64(),
+        Some(1_005),
+        "the source JSON data model fits before CWL domain normalization"
+    );
+    assert_eq!(
+        serialized["canonical_serialized_utf8_bytes"].as_u64(),
+        Some(1_025),
+        "the vocabulary must pin missing nullable-property normalization used by the runtime contract"
     );
     assert_eq!(serialized["valid"].as_bool(), Some(false));
 }
