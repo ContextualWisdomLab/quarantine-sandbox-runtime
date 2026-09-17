@@ -2,7 +2,7 @@
 
 ## Current regression and bounded-context ownership
 
-Canonical application-service/network successor #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f` validates a consumer-supplied immutable image reference, then places that string directly after Podman `create` options and before consumer command argv. The current plan has no explicit `--` terminator before the image positional operand.
+Canonical application-service/network parent #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f` validates a consumer-supplied immutable image reference, then places that string directly after Podman `create` options and before consumer command argv without an explicit `--` terminator. Draft successor #133 repairs that lost boundary on the current #127 ancestry rather than transplanting an older owner tree.
 
 The request validator accepts a repository component beginning with `-` and containing `=` when the overall value ends in a valid lower-case `@sha256:<64-hex>` digest. A Podman-shaped token such as `--annotation=qsr.boundary=value@sha256:<digest>` therefore reaches the infrastructure plan as domain-valid image data.
 
@@ -16,7 +16,7 @@ Minimum production commit `1b1026a92b7d9ef23a709564c1e22aa0421179ff` inserted ex
 
 Canonical command-runtime #14 later succeeded the application-service delimiter, the focused regression and refreshed `PODMAN_OPTION_TERMINATOR_TRACEABILITY.md`, and added independent runtime-gate/command-path coverage. Exact #14 `6df79290321f697b2a23c9cf246575a4d13c5740`, CI `34489161644`, had verify `102911078197` GREEN through exact checkout, repository policy, rustfmt, full locked workspace/all-target tests, Clippy and rustdoc; hosted negative rootless/AppArmor `102911078027` was also GREEN.
 
-Issue #90 and PR #91 were therefore legitimately completed at that point. Fresh inspection of #127 shows the verified delimiter has subsequently fallen out of the current canonical application-service/network ancestry, so #90 is reopened.
+Issue #90 and PR #91 were therefore legitimately completed at that point. Fresh inspection of #127 showed the verified delimiter had subsequently fallen out of the canonical application-service/network ancestry, so #90 was reopened.
 
 ## Parser evidence
 
@@ -24,7 +24,7 @@ Podman's current `cmd/podman/containers/create.go` declares `create [options] IM
 
 The request also contains consumer-controlled command argv. If the accepted image token is consumed as a Podman option, a following command token can become the first positional `IMAGE`. The SHA-256 identity validated by the runtime can then cease to describe the workload operand presented to Podman.
 
-## Current-owner regression replay
+## Current-owner regression replay and repair
 
 Issue #132 / Draft #133 is the current regression-instance lane. Test-only `088fd10e794b5c02a13ed45e082d509dc77ccfb9` adds `tests/podman_application_service_option_delimiter_red.rs` on exact #127 parent `1a3cd0427bbf99e41c1d8bd4089747561237071f`.
 
@@ -36,11 +36,15 @@ The witness:
 - requires exactly one literal `--` immediately before the exact validated image reference;
 - requires command argv after the image to remain entry-preserving.
 
-The current-owner witness has not yet executed: CI `35188809146` was queued when this record was updated. Do not call #133 current-head RED or GREEN from checked-in source alone. The executed #90/#91 run is the causal RED authority for restoring this exact semantic; #133 must independently prove the restoration survives the current #127 ancestry.
+Historical #90/#91 execution remains the causal RED authority for restoring this semantic. Current-owner production commit `3f84f02b46e44aac61092a520fcbc35cb05aa2f1` performs the minimum repair on the evolved #127 source: its complete source diff is one added `"--".to_owned()` immediately before `request.image_reference.clone()`. It changes no network selector, cleanup/lifecycle authority, typed spawn mapping, digest validation, image text, command entries, or no-shell behavior.
 
-## Minimum current repair
+Commit `6a763370250957c6fc92108bca1e27a9146bc48c` removes the temporary one-shot source-fix workflow after the direct exact-blob write path became available. The workflow is therefore not part of current release authority. Older source-fix runs from superseded heads cannot establish current branch status or safely move the current ref.
 
-Restore one literal `--` immediately before `request.image_reference` in the application-service `podman create` argv. Preserve the current image value, command entries, network selector, isolation flags, digest validation, `--pull=never`, lifecycle/cleanup authority and no-shell contract.
+The first CI materialized after source repair plus workflow removal is `35203360276`. Its verify, coverage, branch-coverage, hosted negative rootless/AppArmor, and positive-LSM jobs were still pre-runner queued when this record was refreshed. Do not call #133 current-head GREEN until an unchanged descendant containing this doctoring update executes the focused witness and the full required gates.
+
+## Applied minimum repair
+
+The current #133 source contains one literal `--` immediately before `request.image_reference` in the application-service `podman create` argv. Preserve the current image value, command entries, network selector, isolation flags, digest validation, `--pull=never`, lifecycle/cleanup authority and no-shell contract.
 
 Do not shell-join values, escape or rewrite the image identity, restore generated-name destructive authority, or transplant the stale #91/#14 tree wholesale. Tightening repository-name grammar may be useful defense in depth, but it is not a substitute for an unambiguous infrastructure CLI boundary.
 
@@ -54,7 +58,7 @@ Do not shell-join values, escape or rewrite the image identity, restore generate
 
 ## Verification and release gate
 
-Keep #90, #132 and #133 open until a current canonical-owner descendant restores the delimiter, the focused #133 witness executes GREEN on unchanged current ancestry, and all valid #127 network/lifecycle deltas remain intact. One unchanged exact head must then reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy with warnings denied, rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security gates, applicable real rootless/positive-LSM evidence, protected integration and immutable publication evidence.
+Keep #90, #132 and #133 open until one unchanged current canonical-owner exact head contains the source repair and this current doctoring record, executes the focused #133 witness GREEN, and proves all valid #127 network/lifecycle deltas remain intact. That exact head must also reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy with warnings denied, rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security gates, applicable real rootless/positive-LSM evidence, protected integration and immutable publication evidence.
 
 ## References
 
