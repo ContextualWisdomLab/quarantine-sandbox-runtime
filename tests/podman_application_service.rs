@@ -44,7 +44,7 @@ fn request() -> ApplicationServiceRequest {
         request_id: "process_boundary_request".to_owned(),
         image_reference: digest_image(),
         container_port: 8_080,
-        protocol: ServiceProtocol::Http,
+        protocol: ServiceProtocol::Tcp,
         command: vec!["serve".to_owned()],
         resources: ResourceRequest {
             memory_bytes: 256 * 1024 * 1024,
@@ -120,7 +120,7 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
     assert_eq!(lease.request_id(), "process_boundary_request");
     assert_eq!(lease.endpoint().host(), "127.0.0.1");
     assert_eq!(lease.endpoint().port(), ready_port);
-    assert_eq!(lease.endpoint().protocol(), ServiceProtocol::Http);
+    assert_eq!(lease.endpoint().protocol(), ServiceProtocol::Tcp);
     assert_eq!(lease.image_reference(), digest_image());
     assert_eq!(lease.backend_id(), "rootless_podman");
     assert_eq!(lease.policy_id(), "process_boundary_policy_v1");
