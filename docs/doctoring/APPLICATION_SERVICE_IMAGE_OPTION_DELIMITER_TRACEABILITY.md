@@ -1,52 +1,64 @@
 # Application-service image option-delimiter traceability
 
-## Problem and bounded-context ownership
+## Current regression and bounded-context ownership
 
-Canonical application-service successor #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f` validates a consumer-supplied immutable image reference, then places that string directly after Podman `create` options and before consumer command argv. The plan has no explicit `--` terminator before the image positional operand.
+Canonical application-service/network successor #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f` validates a consumer-supplied immutable image reference, then places that string directly after Podman `create` options and before consumer command argv. The current plan has no explicit `--` terminator before the image positional operand.
 
-The application-service request validator currently accepts a repository component beginning with `-` and containing `=` when the overall value ends in a valid lower-case `@sha256:<64-hex>` digest. Therefore a Podman-shaped token such as `--annotation=qsr.boundary=value@sha256:<digest>` is accepted as an image reference even though it begins with CLI option syntax.
+The request validator accepts a repository component beginning with `-` and containing `=` when the overall value ends in a valid lower-case `@sha256:<64-hex>` digest. A Podman-shaped token such as `--annotation=qsr.boundary=value@sha256:<digest>` therefore reaches the infrastructure plan as domain-valid image data.
 
-This is an infrastructure-adapter argv-boundary defect under the `application_service` Supporting context. It does not transfer Podman option syntax into the domain model and does not change consumer authorization. The invariant is that the digest-validated workload identity must remain Podman's image positional operand.
+This is not a new control. It is a succession regression of reopened issue #90 / historical PR #91. `application_service` owns immutable workload intent; `infrastructure::podman` owns translation into Podman's CLI grammar. The invariant is that the digest-validated workload identity remains Podman's image positional operand and cannot be reinterpreted as provider control syntax.
+
+## Historical causal evidence
+
+PR #91 supplied the original focused application-service witness. Native CI `34202917157`, coverage job `101985631210`, executed `tests/podman_option_terminator_red.rs` and observed the policy-SHA label immediately before a domain-valid option-shaped image instead of literal `--`.
+
+Minimum production commit `1b1026a92b7d9ef23a709564c1e22aa0421179ff` inserted exactly one literal `--` immediately before `request.image_reference` while preserving the image and following command argv entry-for-entry.
+
+Canonical command-runtime #14 later succeeded the application-service delimiter, the focused regression and refreshed `PODMAN_OPTION_TERMINATOR_TRACEABILITY.md`, and added independent runtime-gate/command-path coverage. Exact #14 `6df79290321f697b2a23c9cf246575a4d13c5740`, CI `34489161644`, had verify `102911078197` GREEN through exact checkout, repository policy, rustfmt, full locked workspace/all-target tests, Clippy and rustdoc; hosted negative rootless/AppArmor `102911078027` was also GREEN.
+
+Issue #90 and PR #91 were therefore legitimately completed at that point. Fresh inspection of #127 shows the verified delimiter has subsequently fallen out of the current canonical application-service/network ancestry, so #90 is reopened.
 
 ## Parser evidence
 
-Podman's current `cmd/podman/containers/create.go` declares `create [options] IMAGE [COMMAND [ARG...]]`. Its `createFlags` function calls `flags.SetInterspersed(false)`. pflag documents `--` as the flag-parsing terminator. With no explicit terminator, an accepted leading-dash image token is still eligible for option parsing before Podman reaches its first positional image argument.
+Podman's current `cmd/podman/containers/create.go` declares `create [options] IMAGE [COMMAND [ARG...]]` and configures pflag with `SetInterspersed(false)`. pflag treats `--` as the explicit flag-parsing terminator. A leading-dash token presented where the image should begin is still eligible for option parsing until that boundary is terminated.
 
-That matters beyond a cosmetic parse failure. The request also contains consumer-controlled command argv. If the image token is consumed as a valid Podman option, the next command token can become Podman's first positional `IMAGE`, so the SHA-256 identity validated by the runtime no longer necessarily describes the workload operand presented to Podman.
+The request also contains consumer-controlled command argv. If the accepted image token is consumed as a Podman option, a following command token can become the first positional `IMAGE`. The SHA-256 identity validated by the runtime can then cease to describe the workload operand presented to Podman.
 
-## Checked-in RED
+## Current-owner regression replay
 
-Issue #132 owns this defect. Test-only child `088fd10e794b5c02a13ed45e082d509dc77ccfb9` adds `tests/podman_application_service_option_delimiter_red.rs` on exact #127 parent `1a3cd0427bbf99e41c1d8bd4089747561237071f`.
+Issue #132 / Draft #133 is the current regression-instance lane. Test-only `088fd10e794b5c02a13ed45e082d509dc77ccfb9` adds `tests/podman_application_service_option_delimiter_red.rs` on exact #127 parent `1a3cd0427bbf99e41c1d8bd4089747561237071f`.
 
 The witness:
 
-- builds an otherwise-valid request with `--annotation=...@sha256:<digest>` as the accepted image reference;
-- proves request validation succeeds before inspecting backend argv;
-- supplies a following image-shaped consumer command token to make positional displacement explicit;
-- requires exactly one literal `--` immediately before the validated image reference;
+- builds an otherwise-valid request with `--annotation=...@sha256:<digest>` as the image reference;
+- independently proves request validation succeeds before inspecting backend argv;
+- supplies a following image-shaped consumer command token so positional displacement is explicit;
+- requires exactly one literal `--` immediately before the exact validated image reference;
 - requires command argv after the image to remain entry-preserving.
 
-Current production contains no such terminator, so this is a checked-in RED candidate. It is not causal executed RED until an exact CI job reaches the assertion and fails for the missing delimiter.
+The current-owner witness has not yet executed: CI `35188809146` was queued when this record was updated. Do not call #133 current-head RED or GREEN from checked-in source alone. The executed #90/#91 run is the causal RED authority for restoring this exact semantic; #133 must independently prove the restoration survives the current #127 ancestry.
 
-## Minimum repair after executed RED
+## Minimum current repair
 
-The smallest causal repair is one literal `--` immediately before `request.image_reference` in the application-service `podman create` argv. Preserve the existing image value, command entries, network selector, isolation flags, digest validation, `--pull=never`, and no-shell contract.
+Restore one literal `--` immediately before `request.image_reference` in the application-service `podman create` argv. Preserve the current image value, command entries, network selector, isolation flags, digest validation, `--pull=never`, lifecycle/cleanup authority and no-shell contract.
 
-Tightening repository-name validation to reject leading-dash or otherwise non-OCI grammar may be useful defense in depth, but validator hardening alone is not chosen as the causal repair. The backend argv boundary should remain unambiguous even if accepted domain syntax evolves.
+Do not shell-join values, escape or rewrite the image identity, restore generated-name destructive authority, or transplant the stale #91/#14 tree wholesale. Tightening repository-name grammar may be useful defense in depth, but it is not a substitute for an unambiguous infrastructure CLI boundary.
 
 ## Rejected alternatives
 
-- Joining image/command text into one shell string: breaks direct argv and creates a larger injection boundary.
-- Escaping or prefixing the image token: mutates workload identity rather than delimiting CLI syntax.
-- Relying on current repository validation: the demonstrated accepted token contradicts that assumption and future validation changes should not reopen CLI ambiguity.
-- Treating a backend parse error as sufficient containment: fail-closed errors do not prove that the validated image remains the actual image operand for every accepted request.
-- Moving this defect into #46 or #47: applied image-digest verification and ENTRYPOINT semantics are separate controls after/create-process interpretation.
+- Joining image/command text into one shell string enlarges the injection boundary and breaks direct argv.
+- Escaping or prefixing the image token mutates workload identity instead of delimiting provider syntax.
+- Relying on current repository validation is insufficient because the demonstrated option-shaped token is accepted, and future validation changes must not reopen the CLI boundary.
+- Treating a backend parse error as containment does not prove the validated image remains the actual image operand.
+- Folding this into #46 or #47 would conflate applied image-digest attestation or ENTRYPOINT semantics with provider CLI parsing.
 
 ## Verification and release gate
 
-After causal RED execution, the one-token production repair must make the focused witness GREEN and retain all #127 network/lifecycle evidence. One unchanged exact head must then pass repository validation, rustfmt, full locked workspace/all-target tests, Clippy with warnings denied, rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security gates, applicable real rootless/positive-LSM evidence, protected integration, and immutable publication evidence before release authority.
+Keep #90, #132 and #133 open until a current canonical-owner descendant restores the delimiter, the focused #133 witness executes GREEN on unchanged current ancestry, and all valid #127 network/lifecycle deltas remain intact. One unchanged exact head must then reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy with warnings denied, rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security gates, applicable real rootless/positive-LSM evidence, protected integration and immutable publication evidence.
 
 ## References
+
+MITRE. (2026). *CWE-88: Improper neutralization of argument delimiters in a command ('Argument Injection')* (CWE 4.20). https://cwe.mitre.org/data/definitions/88.html
 
 Podman Authors. (2026). *Podman container create command source*. https://github.com/podman-container-tools/podman/blob/main/cmd/podman/containers/create.go
 
