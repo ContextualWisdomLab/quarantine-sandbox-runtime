@@ -12,14 +12,24 @@ use quarantine_sandbox_runtime::{
 use serde_json::Value;
 
 const STOCK_DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+const CWL_DIALECT: &str = "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const CWL_CONTRACT_VOCABULARY: &str =
+    "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0";
 const CWL_RFC3339_PROFILE: &str =
     "utc_z_only_with_gregorian_day_validation_no_leap_second_notation";
 
+fn schema(path: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+    let text = fs::read_to_string(path).expect("published schema must be readable");
+    serde_json::from_str(&text).expect("published schema must be valid JSON")
+}
+
 fn analysis_request_schema() -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/analysis-request.schema.json");
-    let text = fs::read_to_string(path)
-        .expect("published analysis-request schema must be readable");
-    serde_json::from_str(&text).expect("published analysis-request schema must be valid JSON")
+    schema("schemas/analysis-request.schema.json")
+}
+
+fn cwl_contract_dialect() -> Value {
+    schema("schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json")
 }
 
 fn request_with_submitted_at(value: &str) -> AnalysisRequest {
@@ -54,9 +64,9 @@ fn runtime_gregorian_profile_rejects_impossible_dates_and_accepts_leap_day() {
 
 #[test]
 fn published_schema_requires_fail_closed_gregorian_validation_authority() {
-    let schema = analysis_request_schema();
+    let request_schema = analysis_request_schema();
     let submitted_at =
-        &schema["properties"]["bounded_source_context"]["properties"]["submitted_at"];
+        &request_schema["properties"]["bounded_source_context"]["properties"]["submitted_at"];
 
     assert_eq!(
         submitted_at["x-cwl-rfc3339Profile"].as_str(),
@@ -71,9 +81,30 @@ fn published_schema_requires_fail_closed_gregorian_validation_authority() {
         "the current structural regex admits day 01..31 independently of month/year"
     );
 
+    assert_eq!(
+        request_schema["$schema"].as_str(),
+        Some(CWL_DIALECT),
+        "analysis-request must adopt the canonical #101/#102 CWL dialect; an arbitrary non-stock URI would not prove fail-closed vocabulary semantics"
+    );
     assert_ne!(
-        schema["$schema"].as_str(),
+        request_schema["$schema"].as_str(),
+        Some(STOCK_DRAFT_2020_12_DIALECT)
+    );
+
+    let dialect = cwl_contract_dialect();
+    assert_eq!(
+        dialect["$schema"].as_str(),
         Some(STOCK_DRAFT_2020_12_DIALECT),
-        "stock Draft 2020-12 treats format as annotation by default and cannot make the CWL Gregorian profile executable; require a dialect/vocabulary that unsupported consumers must reject"
+        "the CWL dialect itself must be defined over stock Draft 2020-12"
+    );
+    assert_eq!(
+        dialect["$vocabulary"][CWL_CONTRACT_VOCABULARY].as_bool(),
+        Some(true),
+        "the CWL contract vocabulary must be required so unsupported validators fail closed"
+    );
+    assert_eq!(
+        dialect["properties"]["x-cwl-rfc3339Profile"]["type"].as_str(),
+        Some("string"),
+        "the canonical dialect must recognize the RFC3339 profile keyword owned by the required CWL vocabulary"
     );
 }
