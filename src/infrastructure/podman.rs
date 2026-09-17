@@ -52,9 +52,9 @@ struct ContainerInspection {
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
     process_label: String,
-    #[serde(default, rename = "EffectiveCaps")]
+    #[serde(rename = "EffectiveCaps")]
     effective_caps: Vec<String>,
-    #[serde(default, rename = "BoundingCaps")]
+    #[serde(rename = "BoundingCaps")]
     bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
@@ -93,7 +93,6 @@ struct ContainerHostConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct NetworkInspection {
     internal: bool,
-    #[serde(default)]
     dns_enabled: bool,
 }
 
