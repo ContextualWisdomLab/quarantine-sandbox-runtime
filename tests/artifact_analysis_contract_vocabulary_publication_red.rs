@@ -14,6 +14,13 @@ const VOCABULARY_SPEC_PATH: &str =
     "docs/contracts/cwl_artifact_analysis_contract_vocabulary_1_0_0.md";
 const CONFORMANCE_VECTORS_PATH: &str =
     "tests/fixtures/cwl_artifact_analysis_contract_vocabulary_1_0_0_vectors.json";
+const BOUNDED_SOURCE_CONTEXT_FIELDS: [&str; 5] = [
+    "source_channel_code",
+    "original_file_name",
+    "declared_media_type",
+    "host_artifact_reference",
+    "submitted_at",
+];
 
 fn repository_path(relative_path: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path)
@@ -36,6 +43,17 @@ fn vector_by_id<'a>(vectors: &'a Value, vector_id: &str) -> &'a Value {
         .unwrap_or_else(|| {
             panic!("missing required vocabulary conformance vector {vector_id}")
         })
+}
+
+fn canonical_bounded_source_context(instance: &Value) -> Value {
+    let mut object = instance
+        .as_object()
+        .expect("serialized-byte vector instance must be a JSON object")
+        .clone();
+    for field_name in BOUNDED_SOURCE_CONTEXT_FIELDS {
+        object.entry(field_name.to_owned()).or_insert(Value::Null);
+    }
+    Value::Object(object)
 }
 
 #[test]
@@ -82,15 +100,52 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
         Some("x-cwl-maxSerializedUtf8Bytes")
     );
     assert_eq!(serialized["keyword_value"].as_u64(), Some(1_024));
+
+    let instance = &serialized["instance"];
+    let instance_object = instance
+        .as_object()
+        .expect("serialized-byte vector instance must be a JSON object");
     assert_eq!(
-        serialized["instance_serialized_utf8_bytes"].as_u64(),
-        Some(1_005),
+        instance_object["source_channel_code"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    let original_file_name = instance_object["original_file_name"]
+        .as_str()
+        .expect("normalization vector must contain original_file_name");
+    assert_eq!(original_file_name.len(), 227);
+    assert!(original_file_name.bytes().all(|byte| byte == b'"'));
+    assert_eq!(
+        instance_object["declared_media_type"]
+            .as_str()
+            .map(str::len),
+        Some(255)
+    );
+    assert_eq!(
+        instance_object["host_artifact_reference"]
+            .as_str()
+            .map(str::len),
+        Some(128)
+    );
+    assert!(!instance_object.contains_key("submitted_at"));
+
+    let instance_bytes = serde_json::to_vec(instance)
+        .expect("serialized-byte source instance must be serializable")
+        .len();
+    assert_eq!(
+        instance_bytes, 1_005,
         "the source JSON data model fits before CWL domain normalization"
     );
+
+    let canonical_instance = canonical_bounded_source_context(instance);
+    let canonical_bytes = serde_json::to_vec(&canonical_instance)
+        .expect("canonical bounded source context must be serializable")
+        .len();
     assert_eq!(
-        serialized["canonical_serialized_utf8_bytes"].as_u64(),
-        Some(1_025),
-        "the vocabulary must pin missing nullable-property normalization used by the runtime contract"
+        canonical_bytes, 1_025,
+        "CWL normalization must materialize the omitted nullable property before measuring bytes"
     );
+    assert!(canonical_bytes > 1_024);
     assert_eq!(serialized["valid"].as_bool(), Some(false));
 }
