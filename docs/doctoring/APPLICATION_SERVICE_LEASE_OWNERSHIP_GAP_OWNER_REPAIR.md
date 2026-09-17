@@ -23,3 +23,11 @@ The repair is therefore migration-first:
 3. keep repository-wide live Gap updates in #121 rather than copying the latest #121 file into this leaf.
 
 No production Rust, public contract, fixture, or test semantics are changed by this ownership repair. No force push or destructive rebase is permitted. Historical CI does not transfer to the moved head; the resulting exact head must reacquire its own repository, formatting, full-test, Clippy/rustdoc, coverage, review/security, applicable positive-isolation, protected-integration, and immutable-release evidence.
+
+## Live-root adoption repair
+
+Fresh review `5230412333` found that the remaining root adoption cannot be represented safely by preferring either parent tree. Live root `feat/runtime-foundation-tdd@5c6a44bb2b35eb17d0315d72db242f4488c3c426` is 33 commits ahead of the PR's recorded base snapshot `0f765af1a4eea83029febee3b24c55cd7e7ce4e1`, and three paths carry independent valid deltas on both sides: `.github/workflows/ci.yml`, `src/application_service/mod.rs`, and `tests/runtime_boundary_regressions.rs`.
+
+The first overlap has an unambiguous successor. Root CI changes the push target to protected `develop` and sets `persist-credentials: false` on every checkout. Child exact `ecdd84836d1d04660f620156f2190d8eb5664837` already carried the `develop` target but not the credential hardening. Commit `a08a786e7744f6697d93da6f41a1a04796cad10e` therefore adopts the root CI blob `d172e830706afc290696c818730e1cf570df2be6` by ordinary fast-forward without changing production or test semantics.
+
+The two semantic overlaps remain intentionally unresolved rather than hidden in an evil merge. Root `application_service/mod.rs` contains the current parser-dominated repository-name simplification required by the exact coverage contract, while #6 adds the coordinator module/export. Root `runtime_boundary_regressions.rs` binds fake container identity to the current safe-identifier grammar, while #6 independently moved process fixtures into isolated `tempfile` directories. The eventual two-parent adoption must preserve both intents explicitly, make `5c6a44bb2b35eb17d0315d72db242f4488c3c426` an actual ancestor, and then reacquire exact-head CI. Predecessor GREEN is not transferable.
