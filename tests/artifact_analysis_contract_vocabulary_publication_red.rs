@@ -21,7 +21,9 @@ fn repository_path(relative_path: &str) -> std::path::PathBuf {
 
 fn read_text(relative_path: &str) -> String {
     fs::read_to_string(repository_path(relative_path)).unwrap_or_else(|error| {
-        panic!("required vocabulary publication artifact {relative_path} must be readable: {error}")
+        panic!(
+            "required vocabulary publication artifact {relative_path} must be readable: {error}"
+        )
     })
 }
 
@@ -31,7 +33,9 @@ fn vector_by_id<'a>(vectors: &'a Value, vector_id: &str) -> &'a Value {
         .expect("vocabulary conformance publication must contain a cases array")
         .iter()
         .find(|case| case["id"].as_str() == Some(vector_id))
-        .unwrap_or_else(|| panic!("missing required vocabulary conformance vector {vector_id}"))
+        .unwrap_or_else(|| {
+            panic!("missing required vocabulary conformance vector {vector_id}")
+        })
 }
 
 #[test]
