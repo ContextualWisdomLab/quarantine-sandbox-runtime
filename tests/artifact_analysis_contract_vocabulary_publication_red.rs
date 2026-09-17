@@ -21,6 +21,14 @@ const BOUNDED_SOURCE_CONTEXT_FIELDS: [&str; 5] = [
     "host_artifact_reference",
     "submitted_at",
 ];
+const REQUIRED_SPECIFICATION_CLAUSES: [&str; 6] = [
+    "MUST count UTF-8 octets of the JSON string value",
+    "MUST accept the instance if and only if the UTF-8 octet count is less than or equal to the keyword value",
+    "MUST serialize the normalized instance as compact JSON encoded as UTF-8",
+    "MUST materialize every missing nullable BoundedSourceContext property as JSON null before serialization",
+    "MUST count the UTF-8 octets of that compact serialization",
+    "MUST accept the instance if and only if the serialized UTF-8 octet count is less than or equal to the keyword value",
+];
 
 fn repository_path(relative_path: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path)
@@ -56,6 +64,54 @@ fn canonical_bounded_source_context(instance: &Value) -> Value {
     Value::Object(object)
 }
 
+fn assert_utf8_vector(
+    vectors: &Value,
+    vector_id: &str,
+    expected_characters: usize,
+    expected_bytes: usize,
+    expected_valid: bool,
+) {
+    let vector = vector_by_id(vectors, vector_id);
+    assert_eq!(vector["keyword"].as_str(), Some("x-cwl-maxUtf8Bytes"));
+    assert_eq!(vector["keyword_value"].as_u64(), Some(128));
+    let instance = vector["instance"]
+        .as_str()
+        .expect("UTF-8 byte vector must contain a string instance");
+    assert_eq!(instance.chars().count(), expected_characters);
+    assert_eq!(instance.len(), expected_bytes);
+    assert_eq!(vector["valid"].as_bool(), Some(expected_valid));
+}
+
+fn assert_serialized_vector(
+    vectors: &Value,
+    vector_id: &str,
+    expected_raw_bytes: usize,
+    expected_canonical_bytes: usize,
+    expected_valid: bool,
+) -> Value {
+    let vector = vector_by_id(vectors, vector_id);
+    assert_eq!(
+        vector["keyword"].as_str(),
+        Some("x-cwl-maxSerializedUtf8Bytes")
+    );
+    assert_eq!(vector["keyword_value"].as_u64(), Some(1_024));
+
+    let instance = &vector["instance"];
+    let raw_bytes = serde_json::to_vec(instance)
+        .expect("serialized-byte source instance must be serializable")
+        .len();
+    assert_eq!(raw_bytes, expected_raw_bytes);
+
+    let canonical_instance = canonical_bounded_source_context(instance);
+    let canonical_bytes = serde_json::to_vec(&canonical_instance)
+        .expect("canonical bounded source context must be serializable")
+        .len();
+    assert_eq!(canonical_bytes, expected_canonical_bytes);
+    assert_eq!(vector["valid"].as_bool(), Some(expected_valid));
+
+    canonical_instance
+}
+
 #[test]
 fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
     let specification = read_text(VOCABULARY_SPEC_PATH);
@@ -69,6 +125,12 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
             "vocabulary specification must define {required_term}"
         );
     }
+    for required_clause in REQUIRED_SPECIFICATION_CLAUSES {
+        assert!(
+            specification.contains(required_clause),
+            "vocabulary specification must normatively define: {required_clause}"
+        );
+    }
 
     let vectors: Value = serde_json::from_str(&read_text(CONFORMANCE_VECTORS_PATH))
         .expect("vocabulary conformance vectors must be valid JSON");
@@ -78,29 +140,41 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
         "conformance vectors must bind the exact required vocabulary identity"
     );
 
-    let multibyte = vector_by_id(&vectors, "max_utf8_bytes_multibyte_overflow");
-    assert_eq!(
-        multibyte["keyword"].as_str(),
-        Some("x-cwl-maxUtf8Bytes")
+    assert_utf8_vector(
+        &vectors,
+        "max_utf8_bytes_multibyte_boundary",
+        64,
+        128,
+        true,
     );
-    assert_eq!(multibyte["keyword_value"].as_u64(), Some(128));
-    let multibyte_instance = multibyte["instance"]
-        .as_str()
-        .expect("UTF-8 overflow vector must contain a string instance");
-    assert_eq!(multibyte_instance.chars().count(), 65);
-    assert_eq!(multibyte_instance.len(), 130);
-    assert_eq!(multibyte["valid"].as_bool(), Some(false));
+    assert_utf8_vector(
+        &vectors,
+        "max_utf8_bytes_multibyte_overflow",
+        65,
+        130,
+        false,
+    );
+
+    let boundary = assert_serialized_vector(
+        &vectors,
+        "max_serialized_utf8_bytes_normalized_boundary",
+        1_003,
+        1_024,
+        true,
+    );
+    let boundary_object = boundary
+        .as_object()
+        .expect("serialized-byte boundary vector must normalize to an object");
+    assert_eq!(
+        boundary_object.get("submitted_at"),
+        Some(&Value::Null),
+        "boundary vector must prove missing nullable fields are materialized before counting"
+    );
 
     let serialized = vector_by_id(
         &vectors,
         "max_serialized_utf8_bytes_missing_nullable_normalization",
     );
-    assert_eq!(
-        serialized["keyword"].as_str(),
-        Some("x-cwl-maxSerializedUtf8Bytes")
-    );
-    assert_eq!(serialized["keyword_value"].as_u64(), Some(1_024));
-
     let instance = &serialized["instance"];
     let instance_object = instance
         .as_object()
@@ -134,22 +208,17 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
     );
     assert!(!instance_object.contains_key("submitted_at"));
 
-    let instance_bytes = serde_json::to_vec(instance)
-        .expect("serialized-byte source instance must be serializable")
-        .len();
-    assert_eq!(
-        instance_bytes, 1_005,
-        "the source JSON data model fits before CWL domain normalization"
+    let canonical_instance = assert_serialized_vector(
+        &vectors,
+        "max_serialized_utf8_bytes_missing_nullable_normalization",
+        1_005,
+        1_025,
+        false,
     );
-
-    let canonical_instance = canonical_bounded_source_context(instance);
-    let canonical_bytes = serde_json::to_vec(&canonical_instance)
-        .expect("canonical bounded source context must be serializable")
-        .len();
-    assert_eq!(
-        canonical_bytes, 1_025,
-        "CWL normalization must materialize the omitted nullable property before measuring bytes"
+    assert!(
+        serde_json::to_vec(&canonical_instance)
+            .expect("canonical overflow vector must be serializable")
+            .len()
+            > 1_024
     );
-    assert!(canonical_bytes > 1_024);
-    assert_eq!(serialized["valid"].as_bool(), Some(false));
 }
