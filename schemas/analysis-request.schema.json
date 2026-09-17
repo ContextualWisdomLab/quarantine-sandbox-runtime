@@ -86,7 +86,59 @@
           "x-cwl-maxUtf8Bytes": 30,
           "x-cwl-rfc3339Profile": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "source_channel_code"
+          ],
+          "properties": {
+            "source_channel_code": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "original_file_name"
+          ],
+          "properties": {
+            "original_file_name": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "declared_media_type"
+          ],
+          "properties": {
+            "declared_media_type": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "host_artifact_reference"
+          ],
+          "properties": {
+            "host_artifact_reference": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "submitted_at"
+          ],
+          "properties": {
+            "submitted_at": {
+              "type": "string"
+            }
+          }
+        }
+      ]
     }
   }
 }
