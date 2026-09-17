@@ -21,14 +21,16 @@ const BOUNDED_SOURCE_CONTEXT_FIELDS: [&str; 5] = [
     "host_artifact_reference",
     "submitted_at",
 ];
-const REQUIRED_SPECIFICATION_CLAUSES: [&str; 6] = [
+const REQUIRED_SPECIFICATION_CLAUSES: [&str; 7] = [
     "MUST count UTF-8 octets of the JSON string value",
     "MUST accept the instance if and only if the UTF-8 octet count is less than or equal to the keyword value",
-    "MUST serialize the normalized instance as compact JSON encoded as UTF-8",
     "MUST materialize every missing nullable BoundedSourceContext property as JSON null before serialization",
-    "MUST count the UTF-8 octets of that compact serialization",
+    "MUST apply RFC 8785 JSON Canonicalization Scheme (JCS) after CWL nullable-field materialization",
+    "MUST encode the RFC 8785 canonical representation as UTF-8 before counting octets",
+    "MUST count the UTF-8 octets of that canonical serialization",
     "MUST accept the instance if and only if the serialized UTF-8 octet count is less than or equal to the keyword value",
 ];
+const JCS_ESCAPE_CANONICAL_JSON: &str = r#"{"declared_media_type":null,"host_artifact_reference":null,"original_file_name":"é\\\"","source_channel_code":null,"submitted_at":null}"#;
 
 fn repository_path(relative_path: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path)
@@ -110,6 +112,48 @@ fn assert_serialized_vector(
     assert_eq!(vector["valid"].as_bool(), Some(expected_valid));
 
     canonical_instance
+}
+
+fn assert_jcs_serialization_vector(vectors: &Value) {
+    let vector = vector_by_id(vectors, "max_serialized_utf8_bytes_jcs_escaping_boundary");
+    assert_eq!(
+        vector["keyword"].as_str(),
+        Some("x-cwl-maxSerializedUtf8Bytes")
+    );
+    assert_eq!(vector["keyword_value"].as_u64(), Some(136));
+    assert_eq!(vector["valid"].as_bool(), Some(true));
+
+    let instance = &vector["instance"];
+    let instance_object = instance
+        .as_object()
+        .expect("JCS escaping vector instance must be a JSON object");
+    assert_eq!(
+        instance_object
+            .get("original_file_name")
+            .and_then(Value::as_str),
+        Some("é\\\"")
+    );
+    for omitted_field in [
+        "source_channel_code",
+        "declared_media_type",
+        "host_artifact_reference",
+        "submitted_at",
+    ] {
+        assert!(
+            !instance_object.contains_key(omitted_field),
+            "JCS vector must exercise CWL materialization before canonical serialization: {omitted_field}"
+        );
+    }
+
+    let canonical_json = vector["canonical_json"]
+        .as_str()
+        .expect("JCS vector must publish the exact canonical JSON representation");
+    assert_eq!(canonical_json, JCS_ESCAPE_CANONICAL_JSON);
+    assert_eq!(canonical_json.as_bytes().len(), 136);
+
+    let canonical_value: Value = serde_json::from_str(canonical_json)
+        .expect("published JCS representation must remain valid JSON");
+    assert_eq!(canonical_value, canonical_bounded_source_context(instance));
 }
 
 #[test]
@@ -221,4 +265,6 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
             .len()
             > 1_024
     );
+
+    assert_jcs_serialization_vector(&vectors);
 }
