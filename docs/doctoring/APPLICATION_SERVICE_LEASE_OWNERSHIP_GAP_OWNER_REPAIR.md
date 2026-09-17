@@ -16,18 +16,20 @@ The #6 lineage also removed an unsupported generic `Command::spawn` retry after 
 
 Review `5230212241` found that #6 still changed the repository-wide Gap ledger against exact PR base `0f765af1a4eea83029febee3b24c55cd7e7ce4e1`. The stale delta mixed valid #6 ownership/idempotency history with inherited root state, so deleting it without migration would lose causal context.
 
-The repair is therefore migration-first:
+The repair was migration-first:
 
 1. preserve the #6-specific ownership/idempotency, coverage, and inherited-prerequisite distinctions in this owner-local record;
-2. restore only `docs/product-technical-gap-baseline.md` byte-for-byte to exact-base blob `5f17a748cf92810963ea67b30ce54675a7c6d919`;
+2. restore only `docs/product-technical-gap-baseline.md` byte-for-byte to the then-exact base blob `5f17a748cf92810963ea67b30ce54675a7c6d919`;
 3. keep repository-wide live Gap updates in #121 rather than copying the latest #121 file into this leaf.
 
-No production Rust, public contract, fixture, or test semantics are changed by this ownership repair. No force push or destructive rebase is permitted. Historical CI does not transfer to the moved head; the resulting exact head must reacquire its own repository, formatting, full-test, Clippy/rustdoc, coverage, review/security, applicable positive-isolation, protected-integration, and immutable-release evidence.
+No production Rust, public contract, fixture, or test semantics were changed by that ownership repair. Historical CI does not transfer to moved heads.
 
 ## Live-root adoption repair
 
-Fresh review `5230412333` found that the remaining root adoption cannot be represented safely by preferring either parent tree. Live root `feat/runtime-foundation-tdd@5c6a44bb2b35eb17d0315d72db242f4488c3c426` is 33 commits ahead of the PR's recorded base snapshot `0f765af1a4eea83029febee3b24c55cd7e7ce4e1`, and three paths carry independent valid deltas on both sides: `.github/workflows/ci.yml`, `src/application_service/mod.rs`, and `tests/runtime_boundary_regressions.rs`.
+Fresh review `5230412333` found that live root `feat/runtime-foundation-tdd@5c6a44bb2b35eb17d0315d72db242f4488c3c426` had advanced 33 commits beyond #6's recorded base and that a parent-tree preference would silently discard valid deltas. The independent overlaps were `.github/workflows/ci.yml`, `src/application_service/mod.rs`, and `tests/runtime_boundary_regressions.rs`.
 
-The first overlap has an unambiguous successor. Root CI changes the push target to protected `develop` and sets `persist-credentials: false` on every checkout. Child exact `ecdd84836d1d04660f620156f2190d8eb5664837` already carried the `develop` target but not the credential hardening. Commit `a08a786e7744f6697d93da6f41a1a04796cad10e` therefore adopts the root CI blob `d172e830706afc290696c818730e1cf570df2be6` by ordinary fast-forward without changing production or test semantics.
+The repair was staged and then completed without force/rebase. Commit `a08a786e7744f6697d93da6f41a1a04796cad10e` first adopted exact root CI blob `d172e830706afc290696c818730e1cf570df2be6`, including `persist-credentials: false` on every checkout. The final ordinary two-parent commit `64283e08d99b353430bc1ce97f20019d89f8fbd0` uses the live root tree as the merge-tree foundation so every root-only coverage/runtime delta survives, while overlaying the #6-owned coordinator, backend, package and focused-test deltas.
 
-The two semantic overlaps remain intentionally unresolved rather than hidden in an evil merge. Root `application_service/mod.rs` contains the current parser-dominated repository-name simplification required by the exact coverage contract, while #6 adds the coordinator module/export. Root `runtime_boundary_regressions.rs` binds fake container identity to the current safe-identifier grammar, while #6 independently moved process fixtures into isolated `tempfile` directories. The eventual two-parent adoption must preserve both intents explicitly, make `5c6a44bb2b35eb17d0315d72db242f4488c3c426` an actual ancestor, and then reacquire exact-head CI. Predecessor GREEN is not transferable.
+The two semantic overlaps were merged explicitly rather than hidden by an evil merge. `src/application_service/mod.rs` blob `74270f29a1fe60b6e3a739514a5f17ab685bb3b4` keeps the #6 coordinator module/export and the root parser/coverage simplification (`split_once`, descendant `skip(1)`, parser-dominated no-colon success). `tests/runtime_boundary_regressions.rs` blob `78b11bf8aebcd08dda86b9137963e16e2fc2e0e8` keeps #6's isolated `tempfile` fixtures while binding fake runtime identity to the root-safe 64-character lower-hex container identifier. Root-only `docs/product-technical-gap-baseline.md`, coverage scripts/tests and Podman/root coverage deltas remain inherited from `5c6a44...`; they are not re-authored as #6-owned changes.
+
+This makes `5c6a44bb2b35eb17d0315d72db242f4488c3c426` an actual ancestor of #6. The resulting exact head must reacquire repository, formatting, full-test, Clippy/rustdoc, complete coverage, review/security, applicable positive-isolation, protected-integration and immutable-release evidence. Predecessor GREEN never transfers. Descendants must adopt this moved parent normally and preserve any overlapping effective-isolation/runtime deltas before they are considered current.
