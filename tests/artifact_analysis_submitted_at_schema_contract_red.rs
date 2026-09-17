@@ -17,7 +17,8 @@ const CWL_RFC3339_PROFILE: &str =
 
 fn analysis_request_schema() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/analysis-request.schema.json");
-    let text = fs::read_to_string(path).expect("published analysis-request schema must be readable");
+    let text = fs::read_to_string(path)
+        .expect("published analysis-request schema must be readable");
     serde_json::from_str(&text).expect("published analysis-request schema must be valid JSON")
 }
 
