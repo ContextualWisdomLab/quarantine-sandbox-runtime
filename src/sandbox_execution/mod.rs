@@ -237,6 +237,15 @@ pub struct SandboxWorkerTerminationEvidence {
     pub state: SandboxWorkerTerminationState,
 }
 
+/// Runtime-owned cleanup evidence bound to one exact worker identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxWorkerCleanupEvidence {
+    /// Runtime-owned worker invocation identifier whose resources were cleaned.
+    pub worker_id: String,
+    /// Whether runtime-owned cleanup completed for that exact worker.
+    pub completed: bool,
+}
+
 /// Runtime-owned isolation, lifecycle, and cleanup evidence for one worker.
 ///
 /// Shared effective controls are composed through [`VerifiedIsolationState`].
@@ -265,8 +274,8 @@ pub struct SandboxWorkerIsolationEvidence {
     pub uncontrolled_subprocess_performed: bool,
     /// Runtime-observed termination evidence for the exact worker.
     pub termination: SandboxWorkerTerminationEvidence,
-    /// Whether runtime-owned cleanup completed after terminal observation.
-    pub cleanup_completed: bool,
+    /// Runtime-observed cleanup evidence for the exact worker.
+    pub cleanup: SandboxWorkerCleanupEvidence,
 }
 
 impl SandboxWorkerIsolationEvidence {
@@ -279,6 +288,7 @@ impl SandboxWorkerIsolationEvidence {
                 self.runtime_backend_version.as_str(),
             ),
             ("termination_worker_id", self.termination.worker_id.as_str()),
+            ("cleanup_worker_id", self.cleanup.worker_id.as_str()),
         ] {
             if !is_valid_worker_identifier(value) {
                 return Some(field_name);
@@ -294,7 +304,10 @@ impl SandboxWorkerIsolationEvidence {
         if !self.termination.state.is_terminal() {
             return Some("termination_state");
         }
-        if !self.cleanup_completed {
+        if self.cleanup.worker_id != self.worker_id {
+            return Some("cleanup_worker_id");
+        }
+        if !self.cleanup.completed {
             return Some("cleanup_completed");
         }
         for (field_name, status) in [

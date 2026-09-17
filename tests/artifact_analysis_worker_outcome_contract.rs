@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use quarantine_sandbox_runtime::{
     AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
     AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, SandboxWorkerBudget,
-    SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerCleanupEvidence, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
     SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
 use serde_json::json;
@@ -62,7 +62,10 @@ fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
             worker_id: WORKER_ID.to_owned(),
             state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
         },
-        cleanup_completed: true,
+        cleanup: SandboxWorkerCleanupEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            completed: true,
+        },
     }
 }
 

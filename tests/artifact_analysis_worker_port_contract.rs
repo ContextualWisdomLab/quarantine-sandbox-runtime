@@ -6,7 +6,7 @@ use quarantine_sandbox_runtime::{
     AnalyzerWorkerContractError, AnalyzerWorkerExecutionError, AnalyzerWorkerExecutionPort,
     AnalyzerWorkerFinding, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome, AnalyzerWorkerReceipt,
     AnalyzerWorkerRequest, EvidenceKind, IngestionPolicy, SandboxWorkerBudget,
-    SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
+    SandboxWorkerCleanupEvidence, SandboxWorkerIsolationEvidence, SandboxWorkerTerminationEvidence,
     SandboxWorkerTerminationState, VerifiedIsolationState, ingest_bytes,
 };
 use serde_json::json;
@@ -64,7 +64,10 @@ fn isolation_evidence() -> SandboxWorkerIsolationEvidence {
             worker_id: WORKER_ID.to_owned(),
             state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
         },
-        cleanup_completed: true,
+        cleanup: SandboxWorkerCleanupEvidence {
+            worker_id: WORKER_ID.to_owned(),
+            completed: true,
+        },
     }
 }
 
@@ -328,7 +331,7 @@ fn worker_receipt_must_bind_exact_request_and_deny_ambient_capabilities() {
             "uncontrolled_subprocess_performed" => {
                 violated.isolation.uncontrolled_subprocess_performed = true;
             }
-            "cleanup_completed" => violated.isolation.cleanup_completed = false,
+            "cleanup_completed" => violated.isolation.cleanup.completed = false,
             _ => unreachable!(),
         }
         assert!(

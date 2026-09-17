@@ -1,7 +1,8 @@
-//! RED coverage for required Core isolation controls on analyzer-worker receipts.
+//! RED coverage binding worker cleanup evidence to the exact runtime-owned worker identity.
 //!
-//! `SandboxWorkerIsolationEvidence` composes `VerifiedIsolationState`; required
-//! P0 worker controls must fail closed when runtime inspection cannot verify them.
+//! Core owns worker lifecycle and cleanup evidence. `artifact_analysis` consumes
+//! that evidence but must not treat an unscoped cleanup-success boolean as proof
+//! that the exact terminated worker was cleaned.
 
 use quarantine_sandbox_runtime::{
     AnalyzerWorkerContractError, AnalyzerWorkerIdentity, AnalyzerWorkerOutcome,
@@ -14,7 +15,8 @@ use serde_json::json;
 
 const ISOLATION_POLICY_SHA256: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const WORKER_ID: &str = "worker_0123456789abcdef";
+const WORKER_ID: &str = "worker_cleanup_0123456789abcdef";
+const OTHER_WORKER_ID: &str = "worker_cleanup_fedcba9876543210";
 
 fn worker_budget() -> SandboxWorkerBudget {
     SandboxWorkerBudget {
@@ -27,8 +29,8 @@ fn worker_budget() -> SandboxWorkerBudget {
     }
 }
 
-fn isolation_state_with_unavailable(control_name: &str) -> VerifiedIsolationState {
-    let mut state = json!({
+fn verified_isolation_state() -> VerifiedIsolationState {
+    serde_json::from_value(json!({
         "rootless": "verified",
         "read_only_root_filesystem": "verified",
         "all_capabilities_dropped": "verified",
@@ -40,9 +42,13 @@ fn isolation_state_with_unavailable(control_name: &str) -> VerifiedIsolationStat
         "lsm_enforced": "verified",
         "resource_limits_verified": "verified",
         "credentials_available": false
-    });
-    state[control_name] = json!("unavailable");
-    serde_json::from_value(state).expect("fixture isolation state must deserialize")
+    }))
+    .expect("fixture isolation state must deserialize")
+}
+
+fn analyzer_identity() -> AnalyzerWorkerIdentity {
+    AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
+        .expect("valid immutable analyzer identity")
 }
 
 fn fixture_request<'a>(
@@ -59,10 +65,11 @@ fn fixture_request<'a>(
     .expect("valid worker request must be admitted")
 }
 
-fn fixture_receipt(
+fn receipt_with_cleanup(
     identity: &AnalyzerWorkerIdentity,
     artifact: &IngestedArtifact,
-    isolation_state: VerifiedIsolationState,
+    cleanup_worker_id: &str,
+    cleanup_completed: bool,
 ) -> AnalyzerWorkerReceipt {
     AnalyzerWorkerReceipt {
         analyzer: identity.clone(),
@@ -74,7 +81,7 @@ fn fixture_receipt(
             runtime_backend_version: "5.4.2".to_owned(),
             isolation_policy_sha256: ISOLATION_POLICY_SHA256.to_owned(),
             applied_budget: worker_budget(),
-            isolation_state,
+            isolation_state: verified_isolation_state(),
             host_loopback_access_performed: false,
             host_filesystem_access_performed: false,
             runtime_socket_access_performed: false,
@@ -84,50 +91,73 @@ fn fixture_receipt(
                 state: SandboxWorkerTerminationState::Exited { exit_code: 0 },
             },
             cleanup: SandboxWorkerCleanupEvidence {
-                worker_id: WORKER_ID.to_owned(),
-                completed: true,
+                worker_id: cleanup_worker_id.to_owned(),
+                completed: cleanup_completed,
             },
         },
-        outcome: AnalyzerWorkerOutcome::Failed {
-            failure_code: "analyzer_failed".to_owned(),
-        },
+        outcome: AnalyzerWorkerOutcome::Completed { findings: vec![] },
     }
 }
 
 #[test]
-fn receipt_rejects_unverified_required_worker_isolation_controls() {
+fn worker_receipt_rejects_cleanup_for_a_different_worker() {
     let artifact = ingest_bytes(
         "sample.bin",
         b"hostile-but-immutable-artifact",
         &IngestionPolicy::default(),
     )
     .expect("fixture ingestion must succeed");
-    let identity = AnalyzerWorkerIdentity::new("capa_analyzer", "7.0.0", &"a".repeat(64))
-        .expect("valid immutable analyzer identity");
+    let identity = analyzer_identity();
     let request = fixture_request(&identity, &artifact);
+    let receipt = receipt_with_cleanup(&identity, &artifact, OTHER_WORKER_ID, true);
 
-    for control_name in [
-        "rootless",
-        "read_only_root_filesystem",
-        "all_capabilities_dropped",
-        "no_new_privileges",
-        "isolated_user_namespace",
-        "seccomp_enforced",
-        "lsm_enforced",
-    ] {
-        let receipt = fixture_receipt(
-            &identity,
-            &artifact,
-            isolation_state_with_unavailable(control_name),
-        );
+    assert!(
+        matches!(
+            receipt.validate_against(&request),
+            Err(AnalyzerWorkerContractError::IsolationBoundaryViolated {
+                field_name: "cleanup_worker_id"
+            })
+        ),
+        "cleanup evidence for another worker must not authorize this worker receipt"
+    );
+}
 
-        assert!(
-            matches!(
-                receipt.validate_against(&request),
-                Err(AnalyzerWorkerContractError::IsolationBoundaryViolated { field_name })
-                    if field_name == control_name
-            ),
-            "worker receipt must fail closed when required Core control {control_name} is unavailable"
-        );
-    }
+#[test]
+fn worker_receipt_rejects_incomplete_cleanup_for_the_exact_worker() {
+    let artifact = ingest_bytes(
+        "sample.bin",
+        b"hostile-but-immutable-artifact",
+        &IngestionPolicy::default(),
+    )
+    .expect("fixture ingestion must succeed");
+    let identity = analyzer_identity();
+    let request = fixture_request(&identity, &artifact);
+    let receipt = receipt_with_cleanup(&identity, &artifact, WORKER_ID, false);
+
+    assert!(
+        matches!(
+            receipt.validate_against(&request),
+            Err(AnalyzerWorkerContractError::IsolationBoundaryViolated {
+                field_name: "cleanup_completed"
+            })
+        ),
+        "exact-worker cleanup must still fail closed while completion is unproven"
+    );
+}
+
+#[test]
+fn worker_receipt_accepts_completed_cleanup_for_the_exact_worker() {
+    let artifact = ingest_bytes(
+        "sample.bin",
+        b"hostile-but-immutable-artifact",
+        &IngestionPolicy::default(),
+    )
+    .expect("fixture ingestion must succeed");
+    let identity = analyzer_identity();
+    let request = fixture_request(&identity, &artifact);
+    let receipt = receipt_with_cleanup(&identity, &artifact, WORKER_ID, true);
+
+    receipt
+        .validate_against(&request)
+        .expect("exact-worker completed cleanup may admit an otherwise-valid receipt");
 }
