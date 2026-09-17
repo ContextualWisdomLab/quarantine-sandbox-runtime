@@ -7,6 +7,10 @@ pub use command_execution::{
     CommandExecutionBackend, CommandExecutionError, CommandExecutionRequest,
     CommandExecutionResult, execute_command,
 };
+// Crate-internal only: lets an infrastructure backend adapter (e.g.
+// `infrastructure::podman`) build a `CommandExecutionResult` without
+// exposing the intermediate outcome type as public API.
+pub(crate) use command_execution::CommandExecutionOutcome;
 pub use coordinator::{
     ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ExpiredLeaseCleanupResult, LeaseOwnerId,
@@ -338,6 +342,19 @@ impl CleanupReceipt {
     }
 }
 
+/// Stable consumer-visible class for an OS process-spawn failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendInvocationFailureKind {
+    /// The configured backend executable does not exist at invocation time.
+    NotFound,
+    /// The operating system denied permission to execute the backend.
+    PermissionDenied,
+    /// Local process or memory pressure prevented process creation.
+    ResourceExhausted,
+    /// Another current or future OS spawn error occurred.
+    Other,
+}
+
 /// Fail-closed application-service validation or runtime error.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ApplicationServiceError {
@@ -383,8 +400,16 @@ pub enum ApplicationServiceError {
     /// Adding lease duration to the start timestamp overflowed.
     #[error("application service lease expiry overflow")]
     LeaseExpiryOverflow,
-    /// The configured sandbox backend executable could not be invoked.
-    #[error("sandbox backend invocation failed during {operation}")]
+    /// The backend process could not be spawned; the bounded OS failure class is preserved.
+    #[error("backend process spawn failed during {operation}: {failure_kind:?}")]
+    BackendSpawnFailed {
+        /// Stable operation code.
+        operation: &'static str,
+        /// Bounded failure class; raw errno values and host paths are not exposed.
+        failure_kind: BackendInvocationFailureKind,
+    },
+    /// The configured backend could not complete an invocation after process creation.
+    #[error("backend invocation failed during {operation}")]
     BackendInvocationFailed {
         /// Stable operation code.
         operation: &'static str,

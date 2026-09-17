@@ -2,8 +2,12 @@
 
 use crate::{
     ApplicationServiceBackend, ApplicationServiceError, ApplicationServiceLease,
-    ApplicationServiceRequest, CleanupReceipt, IsolationPolicy, RootlessPodmanAdapter,
+    ApplicationServiceRequest, CleanupReceipt, CommandExecutionBackend, CommandExecutionError,
+    CommandExecutionRequest, CommandExecutionResult, IsolationPolicy, RootlessPodmanAdapter,
 };
+
+#[cfg(unix)]
+use crate::RuntimeGatePodmanAdapter;
 
 impl ApplicationServiceBackend for RootlessPodmanAdapter {
     fn launch_at(
@@ -21,5 +25,17 @@ impl ApplicationServiceBackend for RootlessPodmanAdapter {
         terminated_at_epoch_seconds: u64,
     ) -> Result<CleanupReceipt, ApplicationServiceError> {
         RootlessPodmanAdapter::terminate_at(self, lease, terminated_at_epoch_seconds)
+    }
+}
+
+#[cfg(unix)]
+impl CommandExecutionBackend for RuntimeGatePodmanAdapter {
+    fn run_to_completion_at(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        RuntimeGatePodmanAdapter::run_command_at(self, request, policy, started_at_epoch_seconds)
     }
 }

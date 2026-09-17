@@ -5,15 +5,18 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
-    ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
-    RootlessPodmanAdapter, ServiceProtocol,
+    ApplicationServiceError, ApplicationServiceRequest, BackendInvocationFailureKind,
+    IsolationPolicy, ResourceRequest, RootlessPodmanAdapter, ServiceProtocol,
 };
+
+static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "b".repeat(64))
@@ -58,10 +61,19 @@ fn temporary_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after the Unix epoch")
         .as_nanos();
+    let unique_id = NEXT_TEMP_PATH_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
+        "quarantine-sandbox-runtime-{name}-{}-{nanos}-{unique_id}",
         std::process::id()
     ))
+}
+
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
 }
 
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
@@ -78,18 +90,25 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  rootless_command_fail:info:*) exit 20 ;;\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  port_fail:port:*) exit 25 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
         container,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink should be creatable");
+    let script_path = fixture_sidecar(&program, "script");
+    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        fixture_sidecar(&program, "config"),
+        format!(
+            "MODE='source_script'\nLOG='{}'\nSCRIPT='{}'\n",
+            log.display(),
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
     (program, log)
 }
 
@@ -102,6 +121,8 @@ fn closed_loopback_port() -> u16 {
 }
 
 fn remove_fixture(program: PathBuf, log: PathBuf) {
+    let _ = fs::remove_file(fixture_sidecar(&program, "config"));
+    let _ = fs::remove_file(fixture_sidecar(&program, "script"));
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
 }
@@ -187,8 +208,9 @@ fn missing_or_non_rootless_backend_fails_before_isolation_resources_are_created(
     let missing = RootlessPodmanAdapter::new(temporary_path("missing-podman"));
     assert_eq!(
         missing.launch_at(&request(), &policy(50), 1_780_000_000),
-        Err(ApplicationServiceError::BackendInvocationFailed {
+        Err(ApplicationServiceError::BackendSpawnFailed {
             operation: "backend_security_info",
+            failure_kind: BackendInvocationFailureKind::NotFound,
         })
     );
 

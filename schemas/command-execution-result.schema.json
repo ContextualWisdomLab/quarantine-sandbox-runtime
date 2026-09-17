@@ -34,6 +34,39 @@
     "stderr": { "type": "string" },
     "stderr_truncated": { "type": "boolean" },
     "started_at_epoch_seconds": { "type": "integer", "minimum": 0 },
-    "finished_at_epoch_seconds": { "type": "integer", "minimum": 0 }
+    "finished_at_epoch_seconds": { "type": "integer", "minimum": 0 },
+    "source_artifact_receipt": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "revision_sha",
+            "tree_sha256",
+            "executable_files_stripped",
+            "regular_file_count",
+            "total_bytes",
+            "mounted_read_only",
+            "mounted_noexec"
+          ],
+          "properties": {
+            "revision_sha": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "tree_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "executable_files_stripped": { "type": "integer", "minimum": 0 },
+            "regular_file_count": { "type": "integer", "minimum": 0 },
+            "total_bytes": { "type": "integer", "minimum": 0 },
+            "mounted_read_only": { "type": "boolean" },
+            "mounted_noexec": { "type": "boolean" }
+          }
+        }
+      ]
+    }
   }
 }

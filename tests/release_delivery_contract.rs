@@ -17,13 +17,16 @@ fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     let body_start = start + marker.len();
     let remainder = &workflow[body_start..];
     let end = remainder
-        .match_indices("\n  ")
-        .find_map(|(offset, _)| {
-            let candidate = &remainder[offset + 3..];
-            let line = candidate.lines().next()?;
-            (line.ends_with(':') && !line.starts_with(' ')).then_some(body_start + offset)
+        .lines()
+        .scan(body_start, |offset, line| {
+            let line_start = *offset;
+            *offset += line.len() + 1;
+            Some((line_start, line))
         })
-        .unwrap_or(workflow.len());
+        .find(|(_, line)| {
+            line.starts_with("  ") && !line.starts_with("    ") && line.trim_end().ends_with(':')
+        })
+        .map_or(workflow.len(), |(offset, _)| offset);
     &workflow[start..end]
 }
 
@@ -33,8 +36,8 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))
         .expect("CI workflow must be readable");
     assert!(
-        ci.contains("branches: [develop, main]"),
-        "repository CI must cover both live develop integration and stable main"
+        ci.contains("branches: [develop]"),
+        "repository CI must cover the live protected integration branch"
     );
 
     let release_runbook = root.join("RELEASE.md");
@@ -50,7 +53,8 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     for required in [
         "tags:",
         "v*",
-        "refs/remotes/origin/main",
+        "default_branch",
+        ".protected",
         "cargo package --locked",
         "cargo llvm-cov",
         "--branch",

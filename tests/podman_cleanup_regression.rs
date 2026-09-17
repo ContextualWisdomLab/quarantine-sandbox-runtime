@@ -5,8 +5,8 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,6 +14,8 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
+
+static TEMPORARY_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn policy(timeout_millis: u64) -> IsolationPolicy {
     IsolationPolicy {
@@ -54,10 +56,19 @@ fn temporary_path(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after the Unix epoch")
         .as_nanos();
+    let sequence = TEMPORARY_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "quarantine-sandbox-runtime-{name}-{}-{nanos}",
+        "quarantine-sandbox-runtime-{name}-{}-{nanos}-{sequence}",
         std::process::id()
     ))
+}
+
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
 }
 
 fn closed_loopback_port() -> u16 {
@@ -71,26 +82,35 @@ fn closed_loopback_port() -> u16 {
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("cleanup-regression-podman");
     let log = temporary_path("cleanup-regression-log");
+    let script_path = fixture_sidecar(&program, "script");
+    let config_path = fixture_sidecar(&program, "config");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}},"version":{"Version":"5.6.2"}}"#;
     let container = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
     let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  termination_stop_fail:stop:*) exit 27 ;;\n  termination_remove_fail:rm:*) exit 32 ;;\n  termination_network_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        info,
-        network,
-        container,
+        "case \"$TEST_MODE:${{1:-}}:${{2:-}}\" in\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  termination_stop_fail:stop:*) exit 27 ;;\n  termination_remove_fail:rm:*) exit 32 ;;\n  termination_network_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        info, network, container,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+
+    fs::write(&log, b"").expect("fake Podman log sink should exist before process launch");
+    std::os::unix::fs::symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink should be creatable");
+    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        &config_path,
+        format!(
+            "MODE='source_script'\nTEST_MODE='{mode}'\nLOG='{}'\nSCRIPT='{}'\n",
+            log.display(),
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
     (program, log)
 }
 
 fn remove_fixture(program: PathBuf, log: PathBuf) {
+    let _ = fs::remove_file(fixture_sidecar(&program, "script"));
+    let _ = fs::remove_file(fixture_sidecar(&program, "config"));
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
 }

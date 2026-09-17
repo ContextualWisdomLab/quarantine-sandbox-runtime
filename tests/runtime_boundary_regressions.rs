@@ -5,7 +5,7 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::symlink,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -55,12 +55,23 @@ fn request(digest: &str) -> ApplicationServiceRequest {
 
 fn write_executable(fixture_directory: &Path, name: &str, script: &str) -> PathBuf {
     let program = fixture_directory.join(name);
-    fs::write(&program, script).expect("fake runtime executable should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake runtime executable metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake runtime executable should run");
+    let scenario = fixture_directory.join(format!("{name}.scenario"));
+    let dispatcher_log = fixture_directory.join(format!("{name}.dispatcher-calls"));
+    let config = PathBuf::from(format!("{}.config", program.display()));
+    let dispatcher =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh");
+
+    fs::write(&scenario, script).expect("fake runtime scenario should be writable");
+    fs::write(
+        &config,
+        format!(
+            "MODE=source_script\nLOG='{}'\nSCRIPT='{}'\n",
+            dispatcher_log.display(),
+            scenario.display()
+        ),
+    )
+    .expect("fake runtime dispatcher config should be writable");
+    symlink(&dispatcher, &program).expect("immutable fake Podman dispatcher should be linkable");
     program
 }
 
@@ -130,13 +141,14 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
         .port();
     let log = fixture.path().join("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:*) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 1024 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         ready_port
     );
     let program = write_executable(fixture.path(), "cleanup-output-limit-podman", &script);
-    let adapter =
-        RootlessPodmanAdapter::new(program.clone()).with_command_timeout(Duration::from_secs(1));
+    let adapter = RootlessPodmanAdapter::new(program.clone())
+        .with_command_output_limit_bytes(512)
+        .with_command_timeout(Duration::from_secs(1));
     let lease = adapter
         .launch_at(&request(&"a".repeat(64)), &policy(), 1_780_000_000)
         .expect("launch should succeed before bounded cleanup failure");

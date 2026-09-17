@@ -12,8 +12,19 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
   `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
   consumer that needs to run one command to completion and receive a structured exit status plus
   bounded output rather than a readiness-gated network endpoint. Ships as a validated contract, a
-  coordinator function, and a `#[cfg(test)]`-only fake backend; no production backend or CLI/HTTP
-  entrypoint yet (see ADR-0007).
+  coordinator function, and a `#[cfg(test)]`-only fake backend (see ADR-0007).
+- Production `CommandExecutionBackend`: `RootlessPodmanAdapter::run_command_at`
+  (`src/infrastructure/podman.rs`), reusing the P0 isolation profile and `BoundedCommandRunner` process
+  supervisor. The Draft carries real-rootless-Podman acceptance coverage but does not become release
+  evidence until the reconciled exact head executes all required gates (see ADR-0008).
+- First `[[bin]]` transport, `quarantine-sandbox-runtime run` (`src/main.rs`): a synchronous CLI that
+  validates a command-execution request against an operator policy ceiling, runs it through the Podman
+  backend, and prints the result as JSON while preserving the sandboxed command's exit status (see
+  ADR-0008).
+- `BoundedCommandRunner::run_to_completion` (`src/infrastructure/bounded_command.rs`): reports a
+  wall-clock timeout or retained-output overflow on a supervised workload as terminal facts
+  (`timed_out`/`stdout_truncated`/`stderr_truncated`) rather than discarding partial output as an
+  administrative runtime error.
 - Source-agnostic analysis request and evidence contracts.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
@@ -53,8 +64,14 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Required free-form source metadata was replaced by a closed typed context capped at 1,024 serialized UTF-8 bytes.
 - Source timestamp and media-type validation trace to RFC 3339 and BCP 13 (RFC 6838 as updated by RFC 9694).
 - Architecture now separates Core `sandbox_execution` from Supporting `artifact_analysis` and `application_service` and treats Podman/gVisor/containerd/Kubernetes mechanisms as infrastructure adapters.
-- Repository authority is the protected/default `develop` branch. Native CI still has a stale `main`-only push trigger; issue #24 carries the focused RED requiring exact post-integration `develop` evidence before release authority. The release preflight likewise remains Draft behind its protected-default-source RED and must not treat `main` as authoritative while the repository default is `develop`.
+- Repository authority is the protected/default `develop` branch. Native CI now triggers on pushes to `develop`; issue #24's causal trigger repair is retained on the active owner lineage. Release authority still requires native CI to execute on the exact protected integration SHA, and the Draft release preflight must verify that same protected source rather than a mutable PR head.
 - Production consumers are required to pin a released package checksum and provenance/SBOM evidence rather than a transient pull-request head or branch artifact.
+- The one-shot command runtime now acquires the exact created container identity, runs `podman init`, and rejects contradictory static/configured isolation while the payload is still initialized-but-not-started before invoking `podman start`; live process evidence remains a separate post-start verifier. This is a bounded partial repair for issue #25, not effective pre-payload attestation or release evidence.
+
+### Fixed
+
+- `production_source_has_no_panic_shortcuts` (`tests/ddd_architecture.rs`) excludes each source file's own `#[cfg(test)] mod tests` block before scanning for `.unwrap(`/`.expect(`/`panic!(` so legitimate test-only assertions are not classified as production shortcuts.
+- Podman inspection/process parsing accepts explicit JSON `null` capability fields, accepts the `io.podman.annotations.userns` annotation as effective user-namespace evidence when `HostConfig.UsernsMode` is empty, and strips a trailing NUL from `/proc/<pid>/attr/current`-derived LSM labels. These compatibility repairs affect the shared application-service verification path as well as command execution.
 
 ### Security
 
@@ -66,6 +83,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Standard application-service contract exposes no privileged mode, host namespace, device, runtime socket, arbitrary mount, arbitrary environment, credential, wildcard bind, or arbitrary Internet-egress capability.
 - Podman backend must report rootless mode; service publication is validated as IPv4 loopback before a lease is returned.
 - Effective isolation is inspected after container start; read-only rootfs, no-new-privileges, private namespaces, seccomp, an LSM, resource limits, internal networking, and loopback publication must be positively verified for the P0 lease path.
+- Command execution additionally fails closed when `podman init` is unavailable or initialized/static configuration already contradicts the command isolation profile before `start`. Initialized/static state is never promoted to effective seccomp/LSM/capability proof; issue #25 remains open until a runtime-owned effective hold/attest/release boundary proves those controls before hostile consumer release.
 - Capability-drop attestation requires both Podman effective and bounding capability sets to be empty; residual bounding capability such as `CAP_SYS_ADMIN` fails closed and triggers cleanup.
 - Podman host proxy environment inheritance is explicitly disabled so `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` values cannot become ambient application inputs.
 - Partial-launch/readiness/attestation failures attempt cleanup and cleanup uncertainty becomes `CleanupFailed` rather than being hidden.
@@ -77,6 +95,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 ### Not yet release evidence
 
 - No protected product release exists yet. `0.1.0` remains the package version under development until the complete stacked runtime integrates and a dated changelog section is reviewed on the exact protected stable candidate.
+- Command-runtime issue #25 is still a P0 release blocker. The executed hostile payload-side-effect RED proves post-start attestation is too late; the current `podman init` hold/configuration gate is only partial progress. Same-head runtime-owned effective hold/attest/release GREEN and real positive-LSM acceptance are required before command execution can be called release-ready.
 - The GitHub-hosted Ubuntu 24.04 rootless Podman lane correctly fails closed because it cannot prove the required effective LSM on the current candidate. `ContextualWisdomLab/.github#1590` owns provisioning of the dedicated LSM-capable release/security runner; that external infrastructure prerequisite is not bypassed here.
 - Caller-scoped lease ownership is currently process-local; authenticated transport binding, durable restart/orphan reclamation, distributed admission/resource reservation, stable wire errors, and signed durable receipts remain follow-on work.
 - gVisor/containerd/Kubernetes adapters, controlled egress, secret broker, and stronger dynamic-detonation profiles remain follow-on work.

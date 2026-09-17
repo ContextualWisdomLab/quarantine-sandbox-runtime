@@ -29,3 +29,7 @@ Do not add ambient credentials, arbitrary env/maps, public binds, devices, runti
 - Keep DDD paths aligned; artifact analysis belongs under `src/artifact_analysis/` and backend adapters must not become consumer/domain entities.
 - Preserve public contract compatibility explicitly; do not silently coerce unsupported input.
 - Keep docs and JSON Schemas code-current.
+
+## Command fixture triage
+
+Read `docs/OPERABILITY.md` section "Command namespace fixture failures" before repairing a positive CLI/backend fixture. Required namespace evidence must be explicit; preserve missing/host namespace counterexamples and keep fixture checks distinct from actual confinement evidence.

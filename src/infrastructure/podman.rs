@@ -1,26 +1,30 @@
 //! Rootless Podman infrastructure adapter for isolated application services.
 
 use std::{
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Output,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
-    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationControlStatus, IsolationPolicy, ServiceEndpoint, VerifiedIsolationState,
-    sandbox_execution::RuntimeLeaseMetadata,
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
+    BackendInvocationFailureKind, CleanupReceipt, CommandExecutionError, CommandExecutionRequest,
+    CommandExecutionResult, IsolationControlStatus, IsolationPolicy, ResourceRequest,
+    ServiceEndpoint, VerifiedIsolationState, application_service::CommandExecutionOutcome,
+    sandbox_execution::RuntimeLeaseMetadata, stage_pr_source_artifact,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
+const DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct PodmanInfo {
@@ -56,24 +60,64 @@ struct PodmanVersion {
 struct ContainerInspection {
     #[serde(rename = "Id")]
     id: String,
+    #[serde(default, rename = "ImageDigest")]
+    image_digest: Option<String>,
     #[serde(default, rename = "AppArmorProfile")]
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
     process_label: String,
-    #[serde(default, rename = "EffectiveCaps")]
+    #[serde(
+        default,
+        rename = "EffectiveCaps",
+        deserialize_with = "null_as_default"
+    )]
     effective_caps: Vec<String>,
-    #[serde(default, rename = "BoundingCaps")]
+    #[serde(default, rename = "BoundingCaps", deserialize_with = "null_as_default")]
     bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
     host_config: ContainerHostConfig,
+    #[serde(default, rename = "Mounts")]
+    mounts: Vec<ContainerMount>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerMount {
+    #[serde(rename = "Source")]
+    source: PathBuf,
+    #[serde(rename = "Type")]
+    mount_type: String,
+    #[serde(rename = "Destination")]
+    destination: String,
+    #[serde(default, rename = "Options")]
+    options: Vec<String>,
+    #[serde(rename = "RW")]
+    read_write: bool,
+}
+
+/// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
+///
+/// `#[serde(default)]` alone only covers a *missing* key. Podman has been
+/// observed (6.1.0, unlike the CI-pinned 5.8.4) to emit an explicit JSON
+/// `null` for `EffectiveCaps`/`BoundingCaps` once every capability is
+/// dropped, which `#[serde(default)]` alone does not tolerate for a
+/// non-`Option` field. Both representations mean the same fact -- no
+/// capabilities -- so both must deserialize to the same empty value.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct ContainerConfig {
     #[serde(rename = "User")]
     user: String,
+    #[serde(default, rename = "Timeout")]
+    timeout: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -86,16 +130,29 @@ struct ContainerHostConfig {
     security_opt: Option<Vec<String>>,
     #[serde(rename = "UsernsMode")]
     userns_mode: String,
+    // Podman 6.1.0 was observed to leave `HostConfig.UsernsMode` empty for a
+    // container created with `--userns=auto`, unlike the CI-pinned 5.8.4,
+    // recording the effective mode only as this annotation instead.
+    #[serde(default, rename = "Annotations")]
+    annotations: std::collections::BTreeMap<String, String>,
     #[serde(rename = "PidMode")]
     pid_mode: String,
     #[serde(rename = "IpcMode")]
     ipc_mode: String,
+    #[serde(default, rename = "NetworkMode")]
+    network_mode: String,
+    #[serde(default, rename = "UTSMode")]
+    uts_mode: Option<String>,
+    #[serde(default, rename = "CgroupMode")]
+    cgroup_mode: Option<String>,
     #[serde(rename = "Memory")]
     memory: u64,
     #[serde(rename = "NanoCpus")]
     nano_cpus: u64,
     #[serde(rename = "PidsLimit")]
     pids_limit: i64,
+    #[serde(default, rename = "Tmpfs")]
+    tmpfs: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -219,6 +276,16 @@ impl RootlessPodmanAdapter {
         PODMAN_BACKEND_ID
     }
 
+    /// Return the configured Podman-compatible executable to sibling infrastructure adapters.
+    pub(super) fn command_program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Return the per-operation wall-clock budget shared by sibling infrastructure adapters.
+    pub(super) const fn command_timeout(&self) -> Duration {
+        self.command_timeout
+    }
+
     /// Build a deterministic fail-closed Podman launch plan without executing it.
     ///
     /// # Errors
@@ -234,7 +301,12 @@ impl RootlessPodmanAdapter {
         let expires_at_epoch_seconds = started_at_epoch_seconds
             .checked_add(u64::from(request.resources.lease_seconds))
             .ok_or(ApplicationServiceError::LeaseExpiryOverflow)?;
-        let identity = sandbox_identity(request, policy, started_at_epoch_seconds);
+        let identity = sandbox_identity(
+            &request.request_id,
+            &request.image_reference,
+            &policy.policy_id,
+            started_at_epoch_seconds,
+        );
         let sandbox_name = format!("qsr-app-{identity}");
         let network_name = format!("qsr-net-{identity}");
 
@@ -298,6 +370,7 @@ impl RootlessPodmanAdapter {
                 "org.contextualwisdomlab.sandbox.policy_sha256={}",
                 policy.effective_policy_sha256()
             ),
+            "--".to_owned(),
             request.image_reference.clone(),
         ];
         container_create_args.extend(request.command.iter().cloned());
@@ -428,6 +501,578 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
+    /// Run one bounded command to completion inside a fresh isolated sandbox.
+    ///
+    /// Unlike [`Self::launch_at`], this does not create a per-sandbox network
+    /// or publish a port: the sandbox runs with no network namespace
+    /// attachment at all (`--network none`), which is a strictly stronger
+    /// egress denial than the service profile's internal, DNS-disabled
+    /// network and needs no separate network object to create or clean up.
+    ///
+    /// This method is compiled only with debug assertions so the legacy path remains testable
+    /// without being part of release artifacts. Production command callers must use
+    /// [`RuntimeGatePodmanAdapter`](super::podman_runtime_gate_binding::RuntimeGatePodmanAdapter),
+    /// which binds the verified runtime gate before any consumer process can run.
+    ///
+    /// Completion is observed with `podman wait` (bounded by the requested
+    /// lease) and output with `podman logs` against a `k8s-file`-backed log
+    /// driver, rather than by attaching to the workload's live pipes: a
+    /// detached `podman start --attach` on an already-running container does
+    /// not reliably mirror the container's own exit code (observed directly
+    /// against Podman 6.1.0), while `podman wait`'s stdout is the authoritative
+    /// post-exit code for both the ordinary and forcibly-killed-on-timeout path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandExecutionError`] when Podman cannot prove the
+    /// required P0 isolation invariants, the sandbox cannot be created, or
+    /// cleanup after the run cannot be proven complete.
+    #[cfg(debug_assertions)]
+    pub fn run_legacy_command_at_for_test(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+    ) -> Result<CommandExecutionResult, CommandExecutionError> {
+        self.run_command_with_binding_at(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            None,
+            |_| Ok(()),
+        )
+    }
+
+    /// Run a command with an already verified runtime-gate binding and release operation.
+    ///
+    /// The gate binding replaces hostile consumer argv as the initial OCI process. The release
+    /// callback is invoked only after static configuration and live effective process isolation
+    /// have both been verified against the exact acquired container ID.
+    pub(super) fn run_runtime_gate_command_at<F>(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+        runtime_gate_binding_args: &[String],
+        release_gate: F,
+    ) -> Result<CommandExecutionResult, CommandExecutionError>
+    where
+        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+    {
+        self.run_command_with_binding_at(
+            request,
+            policy,
+            started_at_epoch_seconds,
+            Some(runtime_gate_binding_args),
+            release_gate,
+        )
+    }
+
+    fn run_command_with_binding_at<F>(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        started_at_epoch_seconds: u64,
+        runtime_gate_binding_args: Option<&[String]>,
+        release_gate: F,
+    ) -> Result<CommandExecutionResult, CommandExecutionError>
+    where
+        F: FnOnce(&str) -> Result<(), CommandExecutionError>,
+    {
+        request.validate(policy)?;
+        let staged_source = request
+            .source_artifact
+            .as_ref()
+            .map(stage_pr_source_artifact)
+            .transpose()?;
+        let info_output = self.checked_output(
+            "backend_security_info",
+            &["info".to_owned(), "--format".to_owned(), "json".to_owned()],
+        )?;
+        let info: PodmanInfo = parse_json("backend_security_info", &info_output.stdout)?;
+        validate_backend_security(&info)?;
+
+        let identity = command_sandbox_identity(
+            &request.request_id,
+            &request.image_reference,
+            &policy.policy_id,
+            started_at_epoch_seconds,
+        )?;
+        let sandbox_name = format!("qsr-cmd-{identity}");
+        let create_receipt_directory = tempfile::Builder::new()
+            .prefix("qsr-command-create-")
+            .tempdir()
+            .map_err(|_| {
+                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                    operation: "container_create_receipt",
+                })
+            })?;
+        let create_receipt_path = create_receipt_directory.path().join("container-id");
+        let create_receipt_path_text =
+            create_receipt_path
+                .to_str()
+                .ok_or(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendInvocationFailed {
+                        operation: "container_create_receipt",
+                    },
+                ))?;
+
+        let mut create_args = vec![
+            "create".to_owned(),
+            "--name".to_owned(),
+            sandbox_name.clone(),
+            format!("--cidfile={create_receipt_path_text}"),
+            "--pull=never".to_owned(),
+            "--read-only".to_owned(),
+            "--read-only-tmpfs=false".to_owned(),
+            "--http-proxy=false".to_owned(),
+            "--image-volume=ignore".to_owned(),
+            "--no-hosts".to_owned(),
+            "--systemd=false".to_owned(),
+            "--sdnotify=ignore".to_owned(),
+            "--cap-drop=all".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+            "--userns=auto".to_owned(),
+            "--ipc=none".to_owned(),
+            "--pid=private".to_owned(),
+            "--uts=private".to_owned(),
+            "--cgroupns=private".to_owned(),
+            "--restart=no".to_owned(),
+            // Unlike the service profile's `--log-driver=none`: bounded
+            // command output is retrieved after the fact with `podman logs`,
+            // which needs a log driver that actually retains output. Keep the
+            // runtime-owned host file finite as a separate resource boundary;
+            // #31 still requires log-flood E2E and explicit incompleteness
+            // evidence before this cap is release-grade output attestation.
+            "--log-driver=k8s-file".to_owned(),
+            "--log-opt".to_owned(),
+            format!("max-size={DEFAULT_COMMAND_LOG_STORAGE_LIMIT_BYTES}b"),
+            "--network".to_owned(),
+            "none".to_owned(),
+            "--timeout".to_owned(),
+            request.resources.lease_seconds.to_string(),
+            "--user".to_owned(),
+            format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+            "--pids-limit".to_owned(),
+            request.resources.maximum_processes.to_string(),
+            "--memory".to_owned(),
+            request.resources.memory_bytes.to_string(),
+            "--cpus".to_owned(),
+            cpu_limit(request.resources.cpu_millicores),
+            "--tmpfs".to_owned(),
+            format!(
+                "/tmp:rw,noexec,nosuid,nodev,size={}",
+                request.resources.tmpfs_bytes
+            ),
+            "--label".to_owned(),
+            format!("org.contextualwisdomlab.sandbox.identity={identity}"),
+            "--label".to_owned(),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy={}",
+                policy.policy_id
+            ),
+            "--label".to_owned(),
+            format!(
+                "org.contextualwisdomlab.sandbox.policy_sha256={}",
+                policy.effective_policy_sha256()
+            ),
+        ];
+        if let Some(staged) = &staged_source {
+            create_args.push("--volume".to_owned());
+            create_args.push(format!(
+                "{}:/workspace:ro,noexec,nosuid,nodev,Z",
+                staged.path().display()
+            ));
+            create_args.push("--workdir".to_owned());
+            create_args.push("/workspace".to_owned());
+        }
+        if let Some(binding_args) = runtime_gate_binding_args {
+            create_args.extend(binding_args.iter().cloned());
+        } else {
+            let command_entrypoint = serde_json::Value::Array(
+                request
+                    .command
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            )
+            .to_string();
+            create_args.push(format!("--entrypoint={command_entrypoint}"));
+            create_args.push("--".to_owned());
+            create_args.push(request.image_reference.clone());
+        }
+
+        let create_output = match self.checked_output("container_create", &create_args) {
+            Ok(output) => output,
+            Err(error) => {
+                let original = CommandExecutionError::Backend(error);
+                let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                    .map_err(CommandExecutionError::Backend)?;
+                return match owned_container_id {
+                    Some(container_id) => {
+                        Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                    }
+                    None => Err(original),
+                };
+            }
+        };
+        let container_id = match parse_backend_identifier(&create_output.stdout) {
+            Some(identifier) => identifier,
+            None => {
+                let original = CommandExecutionError::Backend(
+                    ApplicationServiceError::MalformedIsolationInspection {
+                        operation: "container_create",
+                    },
+                );
+                let owned_container_id = read_command_create_receipt(&create_receipt_path)
+                    .map_err(CommandExecutionError::Backend)?;
+                return match owned_container_id {
+                    Some(container_id) => {
+                        Err(self.cleanup_owned_command_container_or_report(&container_id, original))
+                    }
+                    None => Err(original),
+                };
+            }
+        };
+
+        // Once create returns an acquired long ID, that immutable identity is
+        // the sole lifecycle/destructive authority. The generated name remains
+        // correlation/result metadata only; re-resolving it would reopen a
+        // same-principal name-rebinding TOCTOU window (#36).
+        if let Err(error) =
+            self.checked_output("container_init", &["init".to_owned(), container_id.clone()])
+        {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if let Err(error) = self.verify_command_prestart_configuration(
+            request,
+            policy,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if let Err(error) = self.checked_output(
+            "container_start",
+            &["start".to_owned(), container_id.clone()],
+        ) {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if let Err(error) = self.verify_command_isolation(
+            request,
+            policy,
+            &info,
+            &container_id,
+            staged_source.as_ref().map(|staged| staged.path()),
+        ) {
+            return Err(self.cleanup_owned_command_container_or_report(&container_id, error.into()));
+        }
+
+        if runtime_gate_binding_args.is_some() {
+            release_gate(&container_id).map_err(|error| {
+                self.cleanup_owned_command_container_or_report(&container_id, error)
+            })?;
+        }
+
+        let (exit_code, timed_out) = match self.wait_for_command(&container_id, request) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return Err(self.cleanup_owned_command_container_or_report(&container_id, error));
+            }
+        };
+
+        let logs_runner =
+            BoundedCommandRunner::new(self.command_timeout, self.command_output_limit_bytes);
+        let logs_outcome = match logs_runner
+            .run_to_completion(&self.program, &["logs".to_owned(), container_id.clone()])
+        {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return Err(self.cleanup_owned_command_container_or_report(
+                    &container_id,
+                    CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "container_logs",
+                        },
+                    ),
+                ));
+            }
+        };
+        if logs_outcome.timed_out {
+            // The log driver failing to hand back already-written output
+            // promptly is an infrastructure fault, not a fact about the
+            // workload (whose own timeout is already captured above).
+            return Err(self.cleanup_owned_command_container_or_report(
+                &container_id,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandTimedOut {
+                    operation: "container_logs",
+                }),
+            ));
+        }
+        // A `None` status only occurs on the timeout/output-budget kill
+        // paths already handled above (or by the truncation flags on
+        // success); anything else is `podman logs` itself failing (e.g. the
+        // log driver or container state is broken) and is an infrastructure
+        // fault, not empty workload output.
+        if !logs_outcome.status.is_none_or(|status| status.success()) {
+            return Err(self.cleanup_owned_command_container_or_report(
+                &container_id,
+                CommandExecutionError::Backend(ApplicationServiceError::BackendCommandFailed {
+                    operation: "container_logs",
+                }),
+            ));
+        }
+
+        if self.cleanup_owned_command_container(&container_id).is_err() {
+            return Err(CommandExecutionError::Backend(
+                ApplicationServiceError::CleanupFailed,
+            ));
+        }
+
+        let stdout = String::from_utf8(logs_outcome.stdout)
+            .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stdout" })?;
+        let stderr = String::from_utf8(logs_outcome.stderr)
+            .map_err(|_| CommandExecutionError::InvalidOutputEncoding { stream: "stderr" })?;
+        let finished_at_epoch_seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(started_at_epoch_seconds, |duration| duration.as_secs());
+
+        Ok(CommandExecutionResult::new(
+            request,
+            CommandExecutionOutcome {
+                backend_id: PODMAN_BACKEND_ID,
+                backend_version: info.version.version,
+                sandbox_id: sandbox_name,
+                exit_code,
+                timed_out,
+                stdout,
+                stdout_truncated: logs_outcome.stdout_truncated,
+                stderr,
+                stderr_truncated: logs_outcome.stderr_truncated,
+                started_at_epoch_seconds,
+                finished_at_epoch_seconds,
+                source_artifact_receipt: staged_source
+                    .as_ref()
+                    .map(|staged| staged.receipt().clone()),
+            },
+        ))
+    }
+
+    /// Wait for the running sandbox to exit, bounded by its requested lease,
+    /// and return its authoritative `(exit_code, timed_out)`.
+    ///
+    /// On a wall-clock timeout the sandbox is force-killed and waited on
+    /// again (bounded by the adapter's ordinary short administrative
+    /// timeout) to obtain the post-kill exit code. The `podman wait` process
+    /// itself must succeed and stay within its tiny output budget before its
+    /// stdout is accepted as workload evidence; wrapper failure is a backend
+    /// failure, never a workload exit status.
+    fn wait_for_command(
+        &self,
+        container_id: &str,
+        request: &CommandExecutionRequest,
+    ) -> Result<(i32, bool), CommandExecutionError> {
+        let run_timeout = Duration::from_secs(u64::from(request.resources.lease_seconds));
+        let wait_runner = BoundedCommandRunner::new(run_timeout, self.command_output_limit_bytes);
+        let wait_outcome = wait_runner
+            .run_to_completion(&self.program, &["wait".to_owned(), container_id.to_owned()])
+            .map_err(|_| {
+                CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+                    operation: "command_wait",
+                })
+            })?;
+
+        if !wait_outcome.timed_out {
+            if wait_outcome.stdout_truncated || wait_outcome.stderr_truncated {
+                return Err(CommandExecutionError::Backend(
+                    ApplicationServiceError::BackendOutputLimitExceeded {
+                        operation: "command_wait",
+                    },
+                ));
+            }
+            match wait_outcome.status {
+                Some(status) if status.success() => {
+                    return Ok((
+                        parse_wait_exit_code(&wait_outcome.stdout, "command_wait")?,
+                        false,
+                    ));
+                }
+                Some(_) => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendCommandFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+                None => {
+                    return Err(CommandExecutionError::Backend(
+                        ApplicationServiceError::BackendInvocationFailed {
+                            operation: "command_wait",
+                        },
+                    ));
+                }
+            }
+        }
+
+        self.checked_output(
+            "command_kill",
+            &["kill".to_owned(), container_id.to_owned()],
+        )
+        .map_err(CommandExecutionError::Backend)?;
+        let post_kill = self
+            .checked_output(
+                "command_wait_after_kill",
+                &["wait".to_owned(), container_id.to_owned()],
+            )
+            .map_err(CommandExecutionError::Backend)?;
+        Ok((
+            parse_wait_exit_code(&post_kill.stdout, "command_wait_after_kill")?,
+            true,
+        ))
+    }
+
+    /// Verify configuration evidence while the exact acquired command container
+    /// is initialized but still held before the consumer payload is released.
+    ///
+    /// This rejects configured state that already disproves required controls;
+    /// it is deliberately not effective-process attestation. Seccomp mode,
+    /// capability sets and the LSM label remain subject to the post-start live
+    /// verifier until a stronger runtime-owned hold/attest/release primitive is
+    /// proven for issue #25.
+    fn verify_command_prestart_configuration(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        container_id: &str,
+        staged_source_path: Option<&Path>,
+    ) -> Result<(), ApplicationServiceError> {
+        let container = self.inspect_command_container(container_id)?;
+        verify_command_container_configuration(request, policy, &container, staged_source_path)
+    }
+
+    fn inspect_command_container(
+        &self,
+        container_id: &str,
+    ) -> Result<ContainerInspection, ApplicationServiceError> {
+        let container_args = [
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            container_id.to_owned(),
+        ];
+        let container_output = self.checked_output("container_inspect", &container_args)?;
+        let container: ContainerInspection =
+            parse_single_inspection("container_inspect", &container_output.stdout)?;
+        if container.id != container_id {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: "container_inspect",
+            });
+        }
+        Ok(container)
+    }
+
+    /// Verify the same P0 isolation invariants as [`Self::verify_effective_isolation`]
+    /// for a command-execution sandbox, minus the network/port controls that
+    /// do not apply to a `--network none` one-shot command.
+    ///
+    /// A bounded command may exit before `podman top` samples its live PID 1.
+    /// That race does not authorize weaker evidence: static `container inspect`
+    /// records configured/requested state, not the effective per-process
+    /// seccomp/LSM/capability state required at this security boundary. When
+    /// live process evidence is unavailable this method therefore fails closed.
+    /// Supporting extremely short-lived commands in the future requires a
+    /// reviewed start/hold/attest/release handshake (or an equivalent stronger
+    /// backend primitive), not a static-only attestation fallback.
+    fn verify_command_isolation(
+        &self,
+        request: &CommandExecutionRequest,
+        policy: &IsolationPolicy,
+        info: &PodmanInfo,
+        container_id: &str,
+        staged_source_path: Option<&Path>,
+    ) -> Result<(), ApplicationServiceError> {
+        let container = self.inspect_command_container(container_id)?;
+        verify_command_container_configuration(request, policy, &container, staged_source_path)?;
+        let security_options = container
+            .host_config
+            .security_opt
+            .as_deref()
+            .unwrap_or_default();
+
+        let process_args = [
+            "top".to_owned(),
+            container_id.to_owned(),
+            "pid".to_owned(),
+            "seccomp".to_owned(),
+            "capeff".to_owned(),
+            "capbnd".to_owned(),
+            "capinh".to_owned(),
+            "capprm".to_owned(),
+            "capamb".to_owned(),
+            "label".to_owned(),
+        ];
+        // A one-shot command can exit before `top` samples it, unlike the
+        // long-lived service-lease path this mirrors (`verify_effective_isolation`),
+        // which never falls back either. Static `container inspect` configuration
+        // proves what was requested, not the effective per-process seccomp/LSM/
+        // capability state the release boundary requires positive proof of --
+        // fail closed instead of downgrading to it when live evidence is gone.
+        let live_process_output = self.checked_output("process_security_top", &process_args)?;
+        let process = parse_process_security_top(&live_process_output.stdout)?;
+
+        require_control(
+            "all_capabilities_dropped",
+            container.effective_caps.is_empty()
+                && container.bounding_caps.is_empty()
+                && process_capabilities_empty(&process),
+        )?;
+        require_control(
+            "seccomp",
+            !security_options
+                .iter()
+                .any(|option| option == "seccomp=unconfined")
+                && matches!(
+                    process.seccomp.to_ascii_lowercase().as_str(),
+                    "filter" | "strict"
+                ),
+        )?;
+        require_control("lsm", effective_lsm_verified(info, &container, &process))?;
+        Ok(())
+    }
+
+    fn cleanup_owned_command_container(
+        &self,
+        container_id: &str,
+    ) -> Result<(), ApplicationServiceError> {
+        let remove_args = [
+            "rm".to_owned(),
+            "--force".to_owned(),
+            "--ignore".to_owned(),
+            container_id.to_owned(),
+        ];
+        if self.command_succeeded(&remove_args) {
+            Ok(())
+        } else {
+            Err(ApplicationServiceError::CleanupFailed)
+        }
+    }
+
+    fn cleanup_owned_command_container_or_report(
+        &self,
+        container_id: &str,
+        original: CommandExecutionError,
+    ) -> CommandExecutionError {
+        match self.cleanup_owned_command_container(container_id) {
+            Ok(()) => original,
+            Err(_) => CommandExecutionError::Backend(ApplicationServiceError::CleanupFailed),
+        }
+    }
+
     fn verify_effective_isolation(
         &self,
         plan: &PodmanLaunchPlan,
@@ -501,7 +1146,7 @@ impl RootlessPodmanAdapter {
         )?;
         require_control(
             "isolated_user_namespace",
-            container.host_config.userns_mode == "auto",
+            isolated_user_namespace_verified(&container.host_config),
         )?;
         require_control(
             "isolated_pid_namespace",
@@ -518,7 +1163,7 @@ impl RootlessPodmanAdapter {
         )?;
         require_control(
             "resource_limits",
-            resource_limits_match(&container.host_config, request),
+            resource_limits_match(&container.host_config, &request.resources),
         )?;
         require_control("lsm", effective_lsm_verified(info, &container, &process))?;
 
@@ -573,22 +1218,10 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output =
-            self.command_runner()
-                .run(&self.program, args)
-                .map_err(|error| match error {
-                    BoundedCommandError::Timeout => {
-                        ApplicationServiceError::BackendCommandTimedOut { operation }
-                    }
-                    BoundedCommandError::OutputLimit => {
-                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                    }
-                    BoundedCommandError::Spawn
-                    | BoundedCommandError::Wait
-                    | BoundedCommandError::Capture => {
-                        ApplicationServiceError::BackendInvocationFailed { operation }
-                    }
-                })?;
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| map_bounded_command_error(operation, error))?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -666,6 +1299,139 @@ impl Default for RootlessPodmanAdapter {
     }
 }
 
+fn verify_command_container_configuration(
+    request: &CommandExecutionRequest,
+    policy: &IsolationPolicy,
+    container: &ContainerInspection,
+    staged_source_path: Option<&Path>,
+) -> Result<(), ApplicationServiceError> {
+    if let Some(applied_image_digest) = container.image_digest.as_deref() {
+        let requested_image_digest = request
+            .image_reference
+            .rsplit_once('@')
+            .map(|(_, digest)| digest);
+        require_control(
+            "immutable_image_identity",
+            requested_image_digest == Some(applied_image_digest),
+        )?;
+    }
+
+    require_control(
+        "read_only_root_filesystem",
+        container.host_config.readonly_rootfs,
+    )?;
+    require_control("unprivileged_container", !container.host_config.privileged)?;
+    let security_options = container
+        .host_config
+        .security_opt
+        .as_deref()
+        .unwrap_or_default();
+    require_control(
+        "no_new_privileges",
+        security_options
+            .iter()
+            .any(|option| option == "no-new-privileges" || option == "no-new-privileges=true"),
+    )?;
+    require_control(
+        "isolated_user_namespace",
+        isolated_user_namespace_verified(&container.host_config),
+    )?;
+    require_control(
+        "isolated_pid_namespace",
+        container.host_config.pid_mode == "private",
+    )?;
+    require_control(
+        "isolated_ipc_namespace",
+        container.host_config.ipc_mode == "none",
+    )?;
+    require_control(
+        "isolated_uts_namespace",
+        container.host_config.uts_mode.as_deref() == Some("private"),
+    )?;
+    require_control(
+        "isolated_cgroup_namespace",
+        container.host_config.cgroup_mode.as_deref() == Some("private"),
+    )?;
+    require_control(
+        "external_egress_denied",
+        container.host_config.network_mode == "none",
+    )?;
+    require_control(
+        "non_root_identity",
+        container.config.user == format!("{}:{}", policy.run_as_user_id, policy.run_as_group_id),
+    )?;
+    require_control(
+        "resource_limits",
+        command_resource_configuration_matches(
+            &container.config,
+            &container.host_config,
+            &request.resources,
+        ),
+    )?;
+    require_control(
+        "command_mount_set",
+        container.mounts.len() == usize::from(request.source_artifact.is_some()),
+    )?;
+    if request.source_artifact.is_some() {
+        let source_mount = container
+            .mounts
+            .iter()
+            .find(|mount| mount.destination == "/workspace");
+        require_control(
+            "source_artifact_read_only",
+            source_mount.is_some_and(|mount| !mount.read_write),
+        )?;
+        require_control(
+            "source_artifact_bind_source",
+            source_mount.is_some_and(|mount| {
+                mount.mount_type == "bind"
+                    && staged_source_path.is_some_and(|expected| mount.source == expected)
+            }),
+        )?;
+        for required_option in ["noexec", "nosuid", "nodev"] {
+            require_control(
+                "source_artifact_mount_options",
+                source_mount.is_some_and(|mount| {
+                    mount.options.iter().any(|option| option == required_option)
+                }),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn map_bounded_command_error(
+    operation: &'static str,
+    error: BoundedCommandError,
+) -> ApplicationServiceError {
+    match error {
+        BoundedCommandError::Timeout => {
+            ApplicationServiceError::BackendCommandTimedOut { operation }
+        }
+        BoundedCommandError::OutputLimit => {
+            ApplicationServiceError::BackendOutputLimitExceeded { operation }
+        }
+        BoundedCommandError::Spawn(error_kind) => ApplicationServiceError::BackendSpawnFailed {
+            operation,
+            failure_kind: classify_spawn_failure(error_kind),
+        },
+        BoundedCommandError::Wait | BoundedCommandError::Capture => {
+            ApplicationServiceError::BackendInvocationFailed { operation }
+        }
+    }
+}
+
+pub(super) fn classify_spawn_failure(error_kind: ErrorKind) -> BackendInvocationFailureKind {
+    match error_kind {
+        ErrorKind::NotFound => BackendInvocationFailureKind::NotFound,
+        ErrorKind::PermissionDenied => BackendInvocationFailureKind::PermissionDenied,
+        ErrorKind::WouldBlock | ErrorKind::OutOfMemory => {
+            BackendInvocationFailureKind::ResourceExhausted
+        }
+        _ => BackendInvocationFailureKind::Other,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct VerifiedLaunch {
     host_port: u16,
@@ -714,27 +1480,24 @@ fn effective_lsm_verified(
 
     if info.host.security.apparmor_enabled {
         let inspect_profile = container.apparmor_profile.trim();
-        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+        // `/proc/<pid>/attr/current` exposes the current task's AppArmor
+        // context as `<profile> (<mode>)`. A bare profile name is not positive
+        // enforcement evidence, and complain mode audits without enforcing.
+        let Some((runtime_profile, mode_with_suffix)) = runtime_label.rsplit_once(" (") else {
             return false;
         };
-        return !inspect_profile.is_empty()
+        let Some(mode) = mode_with_suffix.strip_suffix(')') else {
+            return false;
+        };
+        let runtime_profile = runtime_profile.trim();
+        return mode.eq_ignore_ascii_case("enforce")
+            && !runtime_profile.is_empty()
+            && !inspect_profile.is_empty()
             && !inspect_profile.eq_ignore_ascii_case("unconfined")
             && inspect_profile == runtime_profile;
     }
 
     false
-}
-
-fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
-    let normalized = runtime_label.trim();
-    if normalized.is_empty() || normalized.eq_ignore_ascii_case("unconfined") {
-        return None;
-    }
-
-    let (profile, mode_with_suffix) = normalized.rsplit_once(" (")?;
-    let mode = mode_with_suffix.strip_suffix(')')?;
-    let profile = profile.trim();
-    (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
@@ -789,7 +1552,11 @@ fn parse_process_security_top(
             inheritable_caps: fields[4].to_owned(),
             permitted_caps: fields[5].to_owned(),
             ambient_caps: fields[6].to_owned(),
-            lsm_label: fields[7..].join(" "),
+            // Podman 6.1.0 was observed to pass through a trailing NUL byte
+            // from the underlying NUL-terminated `/proc/<pid>/attr/current`
+            // kernel interface into this column; a real LSM label never
+            // legitimately contains one, so it is always safe to strip.
+            lsm_label: fields[7..].join(" ").replace('\0', ""),
         });
     }
     matched.ok_or(ApplicationServiceError::MalformedIsolationInspection {
@@ -797,18 +1564,59 @@ fn parse_process_security_top(
     })
 }
 
-fn resource_limits_match(
-    effective: &ContainerHostConfig,
-    request: &ApplicationServiceRequest,
-) -> bool {
-    let requested_nano_cpus = u64::from(request.resources.cpu_millicores) * 1_000_000;
+/// Confirm the container was created with an isolated (non-host) user namespace.
+///
+/// Checks both representations Podman has been observed to use across
+/// versions: the CI-pinned 5.8.4 reports `HostConfig.UsernsMode == "auto"`
+/// directly, while 6.1.0 leaves that field empty and records the same fact
+/// only as the `io.podman.annotations.userns` annotation.
+fn isolated_user_namespace_verified(host_config: &ContainerHostConfig) -> bool {
+    host_config.userns_mode == "auto"
+        || host_config
+            .annotations
+            .get("io.podman.annotations.userns")
+            .is_some_and(|value| value == "auto")
+}
+
+fn resource_limits_match(effective: &ContainerHostConfig, resources: &ResourceRequest) -> bool {
+    let requested_nano_cpus = u64::from(resources.cpu_millicores) * 1_000_000;
     effective.memory > 0
-        && effective.memory <= request.resources.memory_bytes
+        && effective.memory <= resources.memory_bytes
         && effective.nano_cpus > 0
         && effective.nano_cpus <= requested_nano_cpus
         && effective.pids_limit > 0
         && u64::try_from(effective.pids_limit)
-            .is_ok_and(|value| value <= u64::from(request.resources.maximum_processes))
+            .is_ok_and(|value| value <= u64::from(resources.maximum_processes))
+}
+
+fn command_resource_configuration_matches(
+    config: &ContainerConfig,
+    effective: &ContainerHostConfig,
+    resources: &ResourceRequest,
+) -> bool {
+    if !resource_limits_match(effective, resources)
+        || config.timeout == 0
+        || config.timeout != u64::from(resources.lease_seconds)
+        || effective.tmpfs.len() != 1
+    {
+        return false;
+    }
+    let Some(options) = effective.tmpfs.get("/tmp") else {
+        return false;
+    };
+    let expected_size = format!("size={}", resources.tmpfs_bytes);
+    let mut applied = std::collections::BTreeSet::new();
+    for option in options.split(',').map(str::trim) {
+        if option.is_empty() || !applied.insert(option) {
+            return false;
+        }
+    }
+    applied.len() == 5
+        && applied.contains("rw")
+        && applied.contains("noexec")
+        && applied.contains("nosuid")
+        && applied.contains("nodev")
+        && applied.contains(expected_size.as_str())
 }
 
 fn require_control(
@@ -859,23 +1667,69 @@ fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     Some(identifier.to_owned())
 }
 
+fn read_command_create_receipt(path: &Path) -> Result<Option<String>, ApplicationServiceError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(ApplicationServiceError::BackendInvocationFailed {
+                operation: "container_create_receipt",
+            });
+        }
+    };
+    let identifier = std::str::from_utf8(&bytes)
+        .ok()
+        .map(str::trim)
+        .filter(|identifier| {
+            identifier.len() == 64
+                && identifier
+                    .chars()
+                    .all(|character| matches!(character, '0'..='9' | 'a'..='f'))
+        })
+        .ok_or(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_create_receipt",
+        })?;
+    Ok(Some(identifier.to_owned()))
+}
+
 fn sandbox_identity(
-    request: &ApplicationServiceRequest,
-    policy: &IsolationPolicy,
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
     started_at_epoch_seconds: u64,
 ) -> String {
     let mut hasher = Sha256::new();
-    for component in [
-        request.request_id.as_str(),
-        request.image_reference.as_str(),
-        policy.policy_id.as_str(),
-    ] {
+    for component in [request_id, image_reference, policy_id] {
         hasher.update(component.as_bytes());
         hasher.update([0]);
     }
     hasher.update(started_at_epoch_seconds.to_be_bytes());
     let digest = format!("{:x}", hasher.finalize());
     digest[..16].to_owned()
+}
+
+fn command_sandbox_identity(
+    request_id: &str,
+    image_reference: &str,
+    policy_id: &str,
+    started_at_epoch_seconds: u64,
+) -> Result<String, CommandExecutionError> {
+    let mut execution_nonce = [0_u8; 16];
+    getrandom::fill(&mut execution_nonce).map_err(|_| {
+        CommandExecutionError::Backend(ApplicationServiceError::BackendInvocationFailed {
+            operation: "execution_identity",
+        })
+    })?;
+
+    let mut hasher = Sha256::new();
+    for component in [request_id, image_reference, policy_id] {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update(started_at_epoch_seconds.to_be_bytes());
+    hasher.update(execution_nonce);
+    let digest = format!("{:x}", hasher.finalize());
+    Ok(digest[..32].to_owned())
 }
 
 fn cpu_limit(cpu_millicores: u32) -> String {
@@ -886,6 +1740,25 @@ fn parse_loopback_port(stdout: &[u8]) -> Option<u16> {
     let text = std::str::from_utf8(stdout).ok()?.trim();
     let port = text.strip_prefix("127.0.0.1:")?.parse::<u16>().ok()?;
     (port != 0).then_some(port)
+}
+
+/// Parse one successful `podman wait` stdout payload into the workload exit code.
+///
+/// Malformed or missing stdout is runtime evidence corruption, not a synthetic
+/// workload result. The caller supplies the exact wait operation so ordinary
+/// and post-kill failures retain distinct provenance.
+fn parse_wait_exit_code(
+    stdout: &[u8],
+    operation: &'static str,
+) -> Result<i32, CommandExecutionError> {
+    std::str::from_utf8(stdout)
+        .ok()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .and_then(|text| text.parse::<i32>().ok())
+        .ok_or(CommandExecutionError::Backend(
+            ApplicationServiceError::MalformedIsolationInspection { operation },
+        ))
 }
 
 fn wait_for_readiness(
@@ -909,5 +1782,63 @@ fn wait_for_readiness(
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::ErrorKind;
+
+    use super::{BoundedCommandError, classify_spawn_failure, map_bounded_command_error};
+    use crate::{ApplicationServiceError, BackendInvocationFailureKind};
+
+    #[test]
+    fn bounded_command_errors_keep_public_failure_classes() {
+        let operation = "runtime_inspection";
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::Timeout),
+            ApplicationServiceError::BackendCommandTimedOut { operation }
+        );
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::OutputLimit),
+            ApplicationServiceError::BackendOutputLimitExceeded { operation }
+        );
+        assert_eq!(
+            map_bounded_command_error(operation, BoundedCommandError::Spawn(ErrorKind::NotFound)),
+            ApplicationServiceError::BackendSpawnFailed {
+                operation,
+                failure_kind: BackendInvocationFailureKind::NotFound,
+            }
+        );
+        for error in [BoundedCommandError::Wait, BoundedCommandError::Capture] {
+            assert_eq!(
+                map_bounded_command_error(operation, error),
+                ApplicationServiceError::BackendInvocationFailed { operation }
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_failure_classification_is_bounded_and_forward_compatible() {
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::NotFound),
+            BackendInvocationFailureKind::NotFound
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::PermissionDenied),
+            BackendInvocationFailureKind::PermissionDenied
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::WouldBlock),
+            BackendInvocationFailureKind::ResourceExhausted
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::OutOfMemory),
+            BackendInvocationFailureKind::ResourceExhausted
+        );
+        assert_eq!(
+            classify_spawn_failure(ErrorKind::InvalidInput),
+            BackendInvocationFailureKind::Other
+        );
     }
 }

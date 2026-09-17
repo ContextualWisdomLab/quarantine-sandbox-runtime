@@ -674,11 +674,8 @@ mod tests {
             launch_resume: Arc::clone(&launch_resume),
             terminate_calls: Arc::clone(&terminate_calls),
         }));
-        let owner = LeaseOwnerId::new("urn:cwl:agent:test").unwrap_or_else(|_| {
-            std::panic::resume_unwind(Box::new(
-                "test owner should satisfy the bounded identity contract",
-            ))
-        });
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
+            .expect("test owner should satisfy the bounded identity contract");
         let worker_coordinator = Arc::clone(&coordinator);
         let worker_owner = owner.clone();
         let worker = thread::spawn(move || {
@@ -688,20 +685,17 @@ mod tests {
         launch_entered.wait();
         let poison_target = Arc::clone(&coordinator);
         let poison = thread::spawn(move || {
-            let _guard = poison_target.leases.lock().unwrap_or_else(|_| {
-                std::panic::resume_unwind(Box::new(
-                    "registry should be healthy before explicit poisoning",
-                ))
-            });
-            std::panic::resume_unwind(Box::new("poison registry after backend launch begins"));
+            let _guard = poison_target
+                .leases
+                .lock()
+                .expect("registry should be healthy before explicit poisoning");
+            panic!("poison registry after backend launch begins");
         });
         assert!(poison.join().is_err());
         launch_resume.wait();
 
         assert_eq!(
-            worker.join().unwrap_or_else(|_| {
-                std::panic::resume_unwind(Box::new("launch worker should not panic"))
-            }),
+            worker.join().expect("launch worker should not panic"),
             Err(ApplicationServiceCoordinatorError::StateUnavailable)
         );
         assert_eq!(
@@ -721,16 +715,11 @@ mod tests {
                 terminate_resume: Arc::clone(&terminate_resume),
             },
         ));
-        let owner = LeaseOwnerId::new("urn:cwl:agent:test").unwrap_or_else(|_| {
-            std::panic::resume_unwind(Box::new(
-                "test owner should satisfy the bounded identity contract",
-            ))
-        });
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
+            .expect("test owner should satisfy the bounded identity contract");
         let lease = coordinator
             .launch_at(&owner, &request(), &policy(), 1_780_000_000)
-            .unwrap_or_else(|_| {
-                std::panic::resume_unwind(Box::new("test lease should register before termination"))
-            });
+            .expect("test lease should register before termination");
         let worker_coordinator = Arc::clone(&coordinator);
         let worker_owner = owner.clone();
         let worker_lease = lease.clone();
@@ -741,20 +730,17 @@ mod tests {
         terminate_entered.wait();
         let poison_target = Arc::clone(&coordinator);
         let poison = thread::spawn(move || {
-            let _guard = poison_target.leases.lock().unwrap_or_else(|_| {
-                std::panic::resume_unwind(Box::new(
-                    "registry should be healthy before explicit poisoning",
-                ))
-            });
-            std::panic::resume_unwind(Box::new("poison registry after backend cleanup begins"));
+            let _guard = poison_target
+                .leases
+                .lock()
+                .expect("registry should be healthy before explicit poisoning");
+            panic!("poison registry after backend cleanup begins");
         });
         assert!(poison.join().is_err());
         terminate_resume.wait();
 
         assert_eq!(
-            worker.join().unwrap_or_else(|_| {
-                std::panic::resume_unwind(Box::new("termination worker should not panic"))
-            }),
+            worker.join().expect("termination worker should not panic"),
             Err(ApplicationServiceCoordinatorError::Backend(
                 ApplicationServiceError::CleanupFailed,
             )),

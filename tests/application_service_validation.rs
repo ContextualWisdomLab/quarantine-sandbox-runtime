@@ -108,6 +108,16 @@ fn request_validation_rejects_every_mutable_or_malformed_image_identity_class() 
         format!("oci-archive:/tmp/untrusted-image.tar@sha256:{digest}"),
         format!("containers-storage:[overlay@/tmp/foreign-store]cwl/tool@sha256:{digest}"),
         format!("docker-daemon:cwl/tool@sha256:{digest}"),
+        format!("localhost@mirror/cwl/tool@sha256:{digest}"),
+        format!("localhost//cwl/tool@sha256:{digest}"),
+        format!("/localhost/cwl/tool@sha256:{digest}"),
+        format!("localhost/cwl/tool/@sha256:{digest}"),
+        format!(":5000/cwl/tool@sha256:{digest}"),
+        format!("localhost:/cwl/tool@sha256:{digest}"),
+        format!("localhost:registry/cwl/tool@sha256:{digest}"),
+        format!("localhost/./tool@sha256:{digest}"),
+        format!("localhost/../tool@sha256:{digest}"),
+        format!("localhost/cwl:tag/tool@sha256:{digest}"),
     ];
     for image_reference in invalid_images {
         let mut candidate = request();
