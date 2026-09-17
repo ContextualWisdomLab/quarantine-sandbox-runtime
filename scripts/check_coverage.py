@@ -21,6 +21,70 @@ def _metric_counts(metric: dict[str, Any]) -> tuple[int, int]:
     raise ValueError(f"coverage metric has no covered/notcovered count: {metric}")
 
 
+def _source_region_counts(data: dict[str, Any]) -> tuple[int, int]:
+    """Return source-region total and covered counts across production files."""
+
+    file_records = data.get("files")
+    if not isinstance(file_records, list):
+        raise ValueError("coverage data has no file records")
+
+    production_filenames: set[str] = set()
+    expected_total = 0
+    for file_record in file_records:
+        if not isinstance(file_record, dict):
+            raise ValueError("coverage file record is malformed")
+        filename = file_record.get("filename")
+        summary = file_record.get("summary")
+        if not isinstance(filename, str) or not isinstance(summary, dict):
+            raise ValueError("coverage file record is malformed")
+        region_metric = summary.get("regions")
+        if not isinstance(region_metric, dict):
+            raise ValueError(f"coverage file has no region summary: {filename}")
+        region_total, _ = _metric_counts(region_metric)
+        production_filenames.add(filename)
+        expected_total += region_total
+
+    source_regions: dict[tuple[str, int, int, int, int, int], bool] = {}
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        raise ValueError("coverage data has no function regions")
+
+    for function in functions:
+        if not isinstance(function, dict):
+            raise ValueError("coverage function record is malformed")
+        filenames = function.get("filenames")
+        regions = function.get("regions")
+        if not isinstance(filenames, list) or not isinstance(regions, list):
+            raise ValueError("coverage function record is malformed")
+        for region in regions:
+            if not isinstance(region, list) or len(region) < 8:
+                raise ValueError("coverage region record is malformed")
+            file_id = int(region[5])
+            if file_id < 0 or file_id >= len(filenames):
+                raise ValueError("coverage region file id is out of range")
+            filename = str(filenames[file_id])
+            if filename not in production_filenames:
+                continue
+            key = (
+                filename,
+                int(region[0]),
+                int(region[1]),
+                int(region[2]),
+                int(region[3]),
+                int(region[7]),
+            )
+            source_regions[key] = source_regions.get(key, False) or int(region[4]) > 0
+
+    derived_total = len(source_regions)
+    if derived_total != expected_total:
+        raise ValueError(
+            "source region denominator "
+            f"{derived_total} does not match production file summaries {expected_total}"
+        )
+    covered = sum(source_regions.values())
+    return derived_total, covered
+
+
 def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     """Return source lines whose function regions are never executed.
 
@@ -128,6 +192,13 @@ def main() -> int:
             failures.append(f"missing coverage metric: {metric_name}")
             continue
         total, covered = _metric_counts(metric)
+        if metric_name == "regions":
+            print(f"regions (LLVM raw): {covered}/{total}")
+            try:
+                total, covered = _source_region_counts(data)
+            except ValueError as error:
+                failures.append(str(error))
+                continue
         print(f"{metric_name}: {covered}/{total}")
         if metric_name == "branches" and total == 0:
             failures.append("branch instrumentation produced zero branches")

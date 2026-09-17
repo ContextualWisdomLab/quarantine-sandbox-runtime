@@ -666,40 +666,37 @@ fn effective_lsm_verified(
     process: &ProcessSecurityEvidence,
 ) -> bool {
     let runtime_label = process.lsm_label.trim();
-    if runtime_label.is_empty() || runtime_label.eq_ignore_ascii_case("unconfined") {
-        return false;
-    }
 
     if info.host.security.selinux_enabled {
+        if runtime_label.eq_ignore_ascii_case("unconfined") {
+            return false;
+        }
         let inspect_label = container.process_label.trim();
         return !inspect_label.is_empty()
             && !inspect_label.eq_ignore_ascii_case("unconfined")
             && inspect_label == runtime_label;
     }
 
-    if info.host.security.apparmor_enabled {
-        let inspect_profile = container.apparmor_profile.trim();
-        let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
-            return false;
-        };
-        return !inspect_profile.is_empty()
-            && !inspect_profile.eq_ignore_ascii_case("unconfined")
-            && inspect_profile == runtime_profile;
-    }
-
-    false
+    debug_assert!(info.host.security.apparmor_enabled);
+    let inspect_profile = container.apparmor_profile.trim();
+    let Some(runtime_profile) = enforcing_apparmor_profile(runtime_label) else {
+        return false;
+    };
+    !inspect_profile.is_empty()
+        && !inspect_profile.eq_ignore_ascii_case("unconfined")
+        && inspect_profile == runtime_profile
 }
 
 fn enforcing_apparmor_profile(runtime_label: &str) -> Option<&str> {
     let normalized = runtime_label.trim();
-    if normalized.is_empty() || normalized.eq_ignore_ascii_case("unconfined") {
+    if normalized.eq_ignore_ascii_case("unconfined") {
         return None;
     }
 
     let (profile, mode_with_suffix) = normalized.rsplit_once(" (")?;
     let mode = mode_with_suffix.strip_suffix(')')?;
     let profile = profile.trim();
-    (!profile.is_empty() && mode.eq_ignore_ascii_case("enforce")).then_some(profile)
+    mode.eq_ignore_ascii_case("enforce").then_some(profile)
 }
 
 fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
@@ -716,8 +713,7 @@ fn process_capabilities_empty(process: &ProcessSecurityEvidence) -> bool {
 
 fn capability_set_is_empty(value: &str) -> bool {
     let normalized = value.trim();
-    if normalized.is_empty()
-        || normalized == "-"
+    if normalized == "-"
         || normalized.eq_ignore_ascii_case("none")
         || normalized == "0"
         || normalized.eq_ignore_ascii_case("0x0")
@@ -870,9 +866,6 @@ fn wait_for_readiness(
             return Ok(());
         }
         let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
         thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
     }
 }

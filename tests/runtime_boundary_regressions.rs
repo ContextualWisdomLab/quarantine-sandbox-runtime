@@ -15,8 +15,9 @@ use quarantine_sandbox_runtime::{
     RootlessPodmanAdapter, ServiceProtocol,
 };
 
+const FAKE_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SECURITY_INFO: &str = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-const CONTAINER_INSPECTION: &str = r#"[{"Id":"fake-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+const CONTAINER_INSPECTION: &str = r#"[{"Id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
 const NETWORK_INSPECTION: &str = r#"[{"internal":true,"dns_enabled":false}]"#;
 
 fn policy() -> IsolationPolicy {
@@ -98,7 +99,7 @@ fn non_utf8_port_output_fails_closed_and_cleans_every_created_resource() {
     let fixture = tempfile::tempdir().expect("isolated runtime boundary fixture directory");
     let log = fixture.path().join("non-utf8-podman-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then printf 'true\\n'; exit 0; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '\\377' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then printf 'true\\n'; exit 0; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf '%s\\n' '{FAKE_CONTAINER_ID}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '\\377' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display()
     );
     let program = write_executable(fixture.path(), "non-utf8-podman", &script);
@@ -128,7 +129,7 @@ fn cleanup_command_output_overflow_fails_closed_without_skipping_other_cleanup()
         .port();
     let log = fixture.path().join("cleanup-output-limit-log");
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then printf 'true\\n'; exit 0; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf 'fake-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ] && [ \"${{3:-}}\" != json ]; then printf 'true\\n'; exit 0; fi\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{SECURITY_INFO}' ;;\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{NETWORK_INSPECTION}' ;;\n  create:--name) printf '%s\\n' '{FAKE_CONTAINER_ID}' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{CONTAINER_INSPECTION}' ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{}\\n' ;;\n  stop:*) i=0; while [ \"$i\" -lt 256 ]; do printf x; i=$((i + 1)); done ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         ready_port
     );
