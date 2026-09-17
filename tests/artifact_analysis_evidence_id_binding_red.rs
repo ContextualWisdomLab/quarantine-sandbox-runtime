@@ -47,7 +47,8 @@ fn foreign_job_evidence_identifier_fails_closed() {
     let mut bundle = control_bundle();
     let expected_sequence = bundle.evidence[0].sequence_number;
     assert_eq!(expected_sequence, 1);
-    let expected_evidence_id = format!("{}:evidence:{expected_sequence:04}", bundle.analysis_job_id);
+    let expected_evidence_id =
+        format!("{}:evidence:{expected_sequence:04}", bundle.analysis_job_id);
     bundle.evidence[0].evidence_id = "analysis_job_foreign:evidence:0001".to_owned();
     assert_ne!(bundle.evidence[0].evidence_id, expected_evidence_id);
 
@@ -67,7 +68,8 @@ fn duplicate_sequence_evidence_identifier_fails_closed() {
     let first_evidence_id = bundle.evidence[0].evidence_id.clone();
     let expected_sequence = bundle.evidence[1].sequence_number;
     assert_eq!(expected_sequence, 2);
-    let expected_evidence_id = format!("{}:evidence:{expected_sequence:04}", bundle.analysis_job_id);
+    let expected_evidence_id =
+        format!("{}:evidence:{expected_sequence:04}", bundle.analysis_job_id);
     bundle.evidence[1].evidence_id = first_evidence_id;
     assert_ne!(bundle.evidence[1].evidence_id, expected_evidence_id);
 
