@@ -34,7 +34,9 @@ impl IngestionPolicy {
                 policy_field: "maximum_artifact_bytes",
             });
         }
-        if self.maximum_artifact_name_bytes == 0 {
+        if self.maximum_artifact_name_bytes == 0
+            || self.maximum_artifact_name_bytes > DEFAULT_MAXIMUM_ARTIFACT_NAME_BYTES
+        {
             return Err(IngestionError::InvalidPolicy {
                 policy_field: "maximum_artifact_name_bytes",
             });
@@ -67,7 +69,7 @@ impl IngestedArtifact {
 /// Ingestion policy or input failure.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum IngestionError {
-    /// A configured hard limit is zero.
+    /// A configured hard limit is zero or exceeds the canonical descriptor bound.
     #[error("invalid ingestion policy field: {policy_field}")]
     InvalidPolicy {
         /// Invalid policy field.
@@ -82,6 +84,9 @@ pub enum IngestionError {
     /// The artifact name contains a control character.
     #[error("artifact name contains a control character")]
     ArtifactNameControlCharacter,
+    /// The artifact name violates the canonical descriptor identity contract.
+    #[error("artifact name violates canonical descriptor identity")]
+    InvalidArtifactName,
     /// The artifact name exceeds its configured UTF-8 byte limit.
     #[error("artifact name is {actual_bytes} bytes; maximum is {maximum_bytes}")]
     ArtifactNameTooLong {
@@ -146,6 +151,9 @@ pub(crate) fn ingest_bytes_with_optional_name(
         artifact_sha256,
         artifact_kind: detect_artifact_kind(original_file_name.unwrap_or(""), bytes),
     };
+    descriptor
+        .validate()
+        .map_err(|_| IngestionError::InvalidArtifactName)?;
 
     Ok(IngestedArtifact {
         descriptor,
