@@ -85,6 +85,13 @@ assert "incomplete file" not in covered_stdout, covered_stdout
 uncovered_result, uncovered_stdout, uncovered_stderr = run(payload(0))
 assert uncovered_result == 1, (uncovered_stdout, uncovered_stderr)
 assert "branches coverage is 1/2" in uncovered_stderr, uncovered_stderr
+
+mismatch = payload(1)
+mismatch["data"][0]["files"][0]["summary"]["branches"]["count"] = 4
+mismatch_result, mismatch_stdout, mismatch_stderr = run(mismatch)
+assert mismatch_result == 1, (mismatch_stdout, mismatch_stderr)
+assert "source branch denominator 2" in mismatch_stderr, mismatch_stderr
+assert "production file summary 4" in mismatch_stderr, mismatch_stderr
 "#;
 
     let output = Command::new("python3")

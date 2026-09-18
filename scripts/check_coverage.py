@@ -210,6 +210,105 @@ def _source_region_counts(data: dict[str, Any]) -> tuple[int, int]:
     return derived_total, covered
 
 
+def _source_branch_map(
+    data: dict[str, Any], production_filenames: set[str]
+) -> dict[tuple[str, int, int, int, int, int], tuple[bool, bool]]:
+    """Union true/false outcomes for each physical source branch."""
+
+    source_branches: dict[
+        tuple[str, int, int, int, int, int], tuple[bool, bool]
+    ] = {}
+    functions = data.get("functions")
+    if not isinstance(functions, list):
+        raise ValueError("coverage data has no function regions")
+
+    for function in functions:
+        if not isinstance(function, dict):
+            raise ValueError("coverage function record is malformed")
+        filenames = function.get("filenames")
+        branches = function.get("branches", [])
+        if not isinstance(filenames, list) or not isinstance(branches, list):
+            raise ValueError("coverage function branch record is malformed")
+        for branch in branches:
+            if not isinstance(branch, list) or len(branch) < 9:
+                raise ValueError("coverage branch record is malformed")
+            file_id = int(branch[6])
+            if file_id < 0 or file_id >= len(filenames):
+                raise ValueError("coverage branch file id is out of range")
+            filename = str(filenames[file_id])
+            if filename not in production_filenames:
+                continue
+            key = (
+                filename,
+                int(branch[0]),
+                int(branch[1]),
+                int(branch[2]),
+                int(branch[3]),
+                int(branch[8]),
+            )
+            prior_true, prior_false = source_branches.get(key, (False, False))
+            source_branches[key] = (
+                prior_true or int(branch[4]) > 0,
+                prior_false or int(branch[5]) > 0,
+            )
+    return source_branches
+
+
+def _source_branch_counts(data: dict[str, Any]) -> tuple[int, int]:
+    """Return physical source-branch outcomes across codegen instantiations."""
+
+    file_records = data.get("files")
+    if not isinstance(file_records, list):
+        raise ValueError("coverage data has no file records")
+
+    production_filenames: set[str] = set()
+    expected_by_file: dict[str, int] = {}
+    for file_record in file_records:
+        if not isinstance(file_record, dict):
+            raise ValueError("coverage file record is malformed")
+        filename = file_record.get("filename")
+        summary = file_record.get("summary")
+        if not isinstance(filename, str) or not isinstance(summary, dict):
+            raise ValueError("coverage file record is malformed")
+        branch_metric = summary.get("branches")
+        if not isinstance(branch_metric, dict):
+            raise ValueError(f"coverage file has no branch summary: {filename}")
+        branch_total, _ = _metric_counts(branch_metric)
+        production_filenames.add(filename)
+        expected_by_file[filename] = branch_total
+
+    source_branches = _source_branch_map(data, production_filenames)
+    for filename, expected_total in expected_by_file.items():
+        derived_total = 2 * sum(
+            1 for branch_key in source_branches if branch_key[0] == filename
+        )
+        if derived_total != expected_total:
+            raise ValueError(
+                "source branch denominator "
+                f"{derived_total} for {filename} does not match production file summary "
+                f"{expected_total}"
+            )
+
+    total = 2 * len(source_branches)
+    covered = sum(
+        int(true_executed) + int(false_executed)
+        for true_executed, false_executed in source_branches.values()
+    )
+    return total, covered
+
+
+def _source_branch_file_counts(data: dict[str, Any], filename: str) -> tuple[int, int]:
+    """Return physical source-branch outcomes for one production file."""
+
+    source_branches = _source_branch_map(data, {filename})
+    total = 2 * len(source_branches)
+    covered = sum(
+        int(true_executed) + int(false_executed)
+        for true_executed, false_executed in source_branches.values()
+    )
+    return total, covered
+
+
 def _uncovered_lines(data: dict[str, Any], filename: str) -> list[int]:
     """Return source lines whose function regions are never executed.
 
@@ -372,6 +471,13 @@ def main() -> int:
             except ValueError as error:
                 failures.append(str(error))
                 continue
+        elif metric_name == "branches":
+            print(f"branches (LLVM raw): {covered}/{total}")
+            try:
+                total, covered = _source_branch_counts(data)
+            except ValueError as error:
+                failures.append(str(error))
+                continue
         print(f"{metric_name}: {covered}/{total}")
         if metric_name == "branches" and total == 0:
             failures.append("branch instrumentation produced zero branches")
@@ -394,7 +500,10 @@ def main() -> int:
             metric = summary.get(metric_name)
             if not isinstance(metric, dict):
                 continue
-            total, covered = _metric_counts(metric)
+            if metric_name == "branches":
+                total, covered = _source_branch_file_counts(data, filename)
+            else:
+                total, covered = _metric_counts(metric)
             if total != covered:
                 incomplete_metrics.append(f"{metric_name}={covered}/{total}")
         if incomplete_metrics:
