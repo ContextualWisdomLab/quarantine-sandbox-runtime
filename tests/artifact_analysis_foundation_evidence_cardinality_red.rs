@@ -30,9 +30,7 @@ fn foundation_index(
         .evidence
         .iter()
         .enumerate()
-        .filter_map(|(index, record)| {
-            (record.evidence_kind == evidence_kind).then_some(index)
-        })
+        .filter_map(|(index, record)| (record.evidence_kind == evidence_kind).then_some(index))
         .collect();
     assert_eq!(
         matching_indices.len(),
