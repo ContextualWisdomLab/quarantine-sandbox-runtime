@@ -50,7 +50,7 @@ Artifact-analysis parent #18 remains exact `703b4b1a047321bb08d1d6cb1de78d01cb35
 - #76 strict evidence deserialization exact `60d19a531c06f035df5291948382de7ee10484c6`: five owner-local unknown-field controls are focused GREEN; broad failure is inherited command-runtime ENTRYPOINT ancestry.
 - #70 Analyzer Worker exact `991ecccabcf23380443d86873cf2777967112fbf`: Worker/Core suites are focused GREEN; the only decoded workspace failure is inherited `backend_security_info` versus expected isolation contradiction. Do not weaken worker semantics or mask with retry/sleep/mutex.
 - #51/#55/#59 remain independent result/provenance/subject-binding prerequisites. #67 is now exact `010330580634fc277ae2a18e9504e2d1f8c5d712`: test-only `1ca135d...` retains the earlier executed self-verifiability RED and adds the descriptor-identity RED requiring identical artifact bytes/request/profile with distinct admitted original leaf names to produce distinct `analysis_job_id` and job-bound evidence IDs. Docs-only current head `010330580...` repairs an overclaim in `CHANGELOG.md`: evidence v1.1 detects contradictions only while the companion digest is unchanged and does not independently prove derivation. Production/schema behavior is unchanged; current CI `35400068729` is queued and predecessor `35395166943` does not transfer.
-- #102 UTF-8/dialect publication exact `ea2945fcc2d3291b18b6e7a5f6b683eff6117ba9` remains a publication RED lane. Future serialized-byte semantics require CWL nullable-field materialization followed by RFC 8785 JCS and UTF-8 octet counting. #135 Gregorian profile remains a separate dependent contract.
+- #102 UTF-8/dialect publication is now exact `517bc8a2326289a9c93c024430e9665820dc553a`. Predecessor `ea2945fcc2d3291b18b6e7a5f6b683eff6117ba9` / CI `35275047055` passed exact checkout, dependency lock, repository policy and coverage-parser tests, then `verify` stopped at `cargo fmt --check` in `tests/artifact_analysis_contract_vocabulary_publication_red.rs` before the publication witness. Current `517bc8a...` applies only the formatter output; production/schema/dialect/vocabulary semantics are unchanged and no predecessor semantic result transfers. The publication RED therefore remains unexecuted. Future serialized-byte semantics require CWL nullable-field materialization followed by RFC 8785 JCS and UTF-8 octet counting. #135 Gregorian profile remains a separate dependent contract.
 
 ## DDD and ownership boundary
 
@@ -66,6 +66,7 @@ Core foundation repositories are optional released contract owners rather than m
 | Branch coverage can false-underreport repeated codegen records. | #112 current `8991d4a...`; predecessor has causal RED. | Execute current exact; require complementary outcome and denominator-mismatch controls GREEN without denominator/threshold reduction. |
 | Application-service network authority is not fully exact-ID and foreign-safe end to end. | #127 `7106388...`, CI `35384682678`; current #21 ancestry is adopted normally and recorded in checked-in TRACEABILITY. | Execute unchanged current exact, then progress provenance → pre-ID cleanup → post-ID cleanup → effective attachment → private authority → non-force termination → mandatory evidence. |
 | Leading-dash image references need explicit Podman option termination. | #133 `4191ac0...`, CI `35384712828`, normally restacked on current #127. | Execute focused delimiter witness and prove all #127 network/lifecycle deltas remain intact. |
+| Shared UTF-8/serialized-byte vocabulary publication is not yet formatter-clean through its hardened publication RED. | #101/#102 current `517bc8a...`; predecessor `ea2945f...` / CI `35275047055` stopped at rustfmt before the witness. | Execute current formatter-only successor unchanged, require the intended missing-publication RED, then publish the minimum versioned normative vocabulary/conformance contract before dependent consumers adopt it. |
 | Application-service public schema can admit multibyte request IDs and command arguments that the runtime rejects by UTF-8 byte length. | #138/#139 current `d08cbe4...`, CI `35404702085`; test-only RED above exact #21. | Execute the current mismatch RED; after #101/#102 publishes a versioned byte-vocabulary contract, adopt it without mutable source copying and prove exact-bound/overflow vectors for both fields. |
 | Hostile application payload can precede effective isolation attestation. | #128 downstream of network lifecycle. | Hold created workload, attest exact sandbox, release only after successful effective proof, preserve cleanup/recovery evidence. |
 | Future self-hosted CI may expose LAN/host services. | #136/#137 plus `linux-cluster-ops#326`. | Obtain current local RED, then reusable denial evidence plus real s1 pre-lease failed-reachability proof. |
@@ -83,12 +84,13 @@ Core foundation repositories are optional released contract owners rather than m
 2. Let #112 exact `8991d4a...` execute its physical branch-union repair; do not weaken measured surface or transfer predecessor success.
 3. Let #127 exact `7106388...` / CI `35384682678` execute after normal adoption of current #21 and checked-in owner-adoption TRACEABILITY; classify any remaining network failure at its intended owner boundary.
 4. Let #133 exact `4191ac0...` / CI `35384712828` execute on current #127; require delimiter GREEN plus parent network/lifecycle preservation.
-5. Let #139 exact `d08cbe4...` / CI `35404702085` execute its application-service schema/runtime UTF-8 mismatch RED; after #101/#102 releases the byte-vocabulary contract, adopt that versioned contract rather than mutable source.
-6. Let #53 and #61 execute current exacts before any further semantic promotion.
-7. Let #65 and then #130 execute without predecessor promotion.
-8. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
-9. Let #51/#55/#59 and #67 exact `010330580...` / CI `35400068729` execute independently without wake commits; #67 must first prove descriptor-identity aliasing before any new semantic GREEN.
-10. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
-11. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
-12. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
-13. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
+5. Let #102 exact `517bc8a...` execute the formatter-only repair and reach the hardened publication RED; do not publish GREEN artifacts before that cause executes.
+6. Let #139 exact `d08cbe4...` / CI `35404702085` execute its application-service schema/runtime UTF-8 mismatch RED; only after #101/#102 releases the byte-vocabulary contract may #139 adopt that versioned contract rather than mutable source.
+7. Let #53 and #61 execute current exacts before any further semantic promotion.
+8. Let #65 and then #130 execute without predecessor promotion.
+9. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
+10. Let #51/#55/#59 and #67 exact `010330580...` / CI `35400068729` execute independently without wake commits; #67 must first prove descriptor-identity aliasing before any new semantic GREEN.
+11. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
+12. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
+13. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
+14. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
