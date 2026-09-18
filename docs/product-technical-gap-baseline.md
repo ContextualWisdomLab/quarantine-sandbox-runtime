@@ -1,10 +1,22 @@
 # Product and Technical Gap Baseline
 
-Last reviewed on 2026-09-18 KST against protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` and the live owner PR refs below. This file is the repository-wide single-writer current baseline. Predecessor checks never transfer to a moved head, mutable PR heads are not consumer authority, and a GitHub `mergeable=true` result is not release readiness.
+Last reviewed on 2026-09-19 KST against protected/default `develop@60a85c7633e03b425b67159ec6822c8178cf87ea` and the live owner PR refs below. This file is the repository-wide single-writer current baseline. Predecessor checks never transfer to a moved head, mutable PR heads are not consumer authority, and a GitHub `mergeable=true` result is not release readiness.
 
 The full causal ledger that previously occupied this file is preserved byte-for-byte in [`product-technical-gap-history-2026-09-16.md`](product-technical-gap-history-2026-09-16.md), using the former baseline blob `8fa8911d252f37be1f949d231ab522929e8ed6d8`. Historical present-tense statements there are evidence, not current authority.
 
-## Current owner authority — 2026-09-18
+## Integration root and release authority — 2026-09-19
+
+Canonical integration-root PR #1 resolves to live Git ref `a85dc86c00f00354d9ddb9bf7c291c2c1cd40884`, Draft/open/mergeable, targeting protected `develop@60a85c7633e03b425b67159ec6822c8178cf87ea`. The PR body's older `5c6a44bb...` current-authority wording is historical and must not override the Git ref.
+
+Native root CI `35180762143` is exact-head hosted evidence. `verify` job `105072190633` is GREEN through exact checkout, dependency lock, repository policy, coverage-parser tests, rustfmt, full workspace/all-target tests, Clippy and rustdoc. Production coverage `105072190516`, branch coverage `105072190650`, and hosted negative rootless/AppArmor `105072190584` are GREEN. Dedicated positive SELinux job `105072190600` received no eligible runner and was cancelled after 24 hours. The workflow-level conclusion is therefore cancelled rather than release-GREEN; completed sibling job success does not substitute for the missing positive effective-LSM gate.
+
+Issue #131's rustup implicit-toolchain warning is completed rather than suppressed: the root coverage job uses explicit `cargo +1.97.1 install cargo-llvm-cov --locked --version 0.8.6`, and #131 is closed with `state_reason=completed`. Treat that warning defect as repaired on this exact root path.
+
+Central security remains release-blocking. Root Security Scan `35180762004` fails closed because dependency-review job `105155167894` reaches an exact checkout and then fails its support probe before the pinned Dependency Review action can execute; central owner `ContextualWisdomLab/.github#810` remains open for the public-repository HTTP-403 availability/baseline-provenance incident. OSV and Scorecard success are independent evidence and do not substitute for Dependency Review. Root CodeQL PR `35180762062` also remains non-GREEN: Actions and Python compatibility jobs fail while waiting for an authoritative current-head terminal verdict, although dispatch job `105269719743` succeeds; central owner `.github#1929` remains open for terminal-status publication proof. Do not patch these central-owner defects in a leaf runtime workflow.
+
+GitHub Release inventory remains empty. No mutable root/child PR head, hosted-only success set, or administrative mergeability result is immutable consumer authority.
+
+## Current owner authority — 2026-09-19
 
 ### Command runtime and repository fitness
 
@@ -72,11 +84,11 @@ Core foundation repositories remain optional released contract owners rather tha
 | Artifact-analysis focused leaves remain partially blocked by stale command-runtime ancestry even when their own contracts are GREEN. | #63 and #76 are current-head focused GREEN; #65 has an exact formatter-only repair awaiting CI. | Preserve leaf semantics, let #65 exact CI execute, stabilize #14/#112, then ordinary/non-force adopt the repaired command foundation into #18 and descendants with full exact-head evidence reacquired. |
 | Artifact analyzer execution remains fail-closed without a completed isolated-worker result path. | #70 plus #51/#55/#59 and related leaves. | Complete Core worker isolation/lifecycle, bounded result ingestion, stable analyzer provenance, subject/record/job integrity and truthful completeness; then reacquire exact-head coverage/security/runtime evidence. |
 | Positive effective-LSM evidence is absent on current release candidates. | Hosted negative rootless/AppArmor evidence exists; dedicated SELinux jobs repeatedly remain unassigned/cancelled. | Obtain dedicated positive effective SELinux/LSM evidence tied to the exact candidate; do not substitute host capability or negative fail-closed evidence. |
-| No immutable consumer authority exists. | Protected `develop` is unchanged and GitHub Release inventory is empty. | Integrate normally only after all exact-head gates, then run protected-head CI/security/runtime evidence and publish version/CHANGELOG, immutable package/release, SBOM, provenance, reproducibility and rollback evidence. |
+| No immutable consumer authority exists and the root security envelope is not terminal. | Root #1 `a85dc86...` has GREEN verify/coverage/branch/negative-rootless jobs, but positive SELinux is absent, Dependency Review fails closed under `.github#810`, CodeQL terminal verdict publication remains unresolved under `.github#1929`, protected `develop` is unchanged, and GitHub Release inventory is empty. | Resolve the central security owner incidents without leaf shims, obtain exact positive effective-LSM evidence, integrate normally only after every exact-head gate, then run protected-head CI/security/runtime evidence and publish version/CHANGELOG, immutable package/release, SBOM, provenance, reproducibility and rollback evidence. |
 
 ## Verification and release authority
 
-Protected/default `develop` is exact `60a85c7633e03b425b67159ec6822c8178cf87ea` and is marked protected. Administrative bypass capability is not normal-path evidence. GitHub Release inventory is empty.
+Protected/default `develop` is exact `60a85c7633e03b425b67159ec6822c8178cf87ea` and is marked protected. Administrative bypass capability is not normal-path evidence. Canonical integration root remains #1 exact `a85dc86c00f00354d9ddb9bf7c291c2c1cd40884`; its hosted CI success set is insufficient while positive effective-LSM and central security terminal evidence are absent. GitHub Release inventory is empty.
 
 One release candidate must remain unchanged while it passes repository validation, rustfmt, full locked workspace/all-target tests, Clippy `-D warnings`, public/private rustdoc `-D warnings`, 100% applicable owned-production statement/function/region/branch plus edge coverage, qualifying independent review/thread/security gates, dedicated positive effective-LSM and applicable real runtime evidence. Normal protected integration must then create an exact protected head that independently receives required CI/security/runtime evidence before version/tag/package/GitHub Release or equivalent immutable publication, SBOM, provenance, reproducibility and rollback can authorize consumers.
 
@@ -92,4 +104,5 @@ One release candidate must remain unchanged while it passes repository validatio
 8. Preserve the focused GREEN semantics on #63 and #76. When #14/#112 is stable, flow canonical command-runtime repairs through #18 by ordinary non-force adoption rather than copying source into leaves.
 9. Let #51/#55/#59, current #67 cleanup exact `81b4ee8...`, and #70 children execute independently. Do not wake-commit, transfer predecessor status or implement semantic GREEN before causal evidence.
 10. Continue the independent #125 process-lifecycle edge only from its own executed/coverage evidence.
-11. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate above.
+11. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected-head integration and immutable release evidence exist; do not treat hosted sibling GREEN as release completion.
+12. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate above.
