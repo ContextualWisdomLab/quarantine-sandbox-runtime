@@ -67,11 +67,9 @@ fn analyzer_result_amplification_cannot_complete_past_declared_profile_budget() 
         Err(AnalysisError::IsolatedAnalyzerWorkerRequired) => panic!(
             "#49's fail-closed isolation prerequisite is not #50 result-channel GREEN; this RED must remain blocked until the analyzer can execute behind the isolated-worker port"
         ),
-        Err(_) => {
-            // Fail-closed rejection is an acceptable future GREEN only after
-            // the worker/result-channel path exists and rejects this invocation
-            // for its bounded-ingestion contract rather than for missing isolation.
-        }
+        Err(error) => panic!(
+            "an unrelated fail-closed error is not #50 result-channel GREEN: {error:?}; only a dedicated bounded result-channel outcome introduced after causal RED may satisfy rejection semantics"
+        ),
         Ok(bundle) => {
             let serialized = serde_json::to_vec(&bundle).expect("evidence bundle serializes");
             assert!(
