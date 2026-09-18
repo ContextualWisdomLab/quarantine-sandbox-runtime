@@ -1,0 +1,71 @@
+# Command owner-repair gap-owner migration
+
+## Authority boundary
+
+PR #112 is the active command-runtime/chronology and repository-fitness owner-repair descendant above canonical command-runtime #14. It owns the bounded command chronology repair, command-owner structural coverage invariants, repository/DDD lexer fitness, coverage-diagnostic correctness, runtime-gate release/control coverage, PR-source traversal fitness, and the exact command-owner evidence produced while those repairs were developed.
+
+It does not own repository-wide `docs/product-technical-gap-baseline.md`; that ledger remains canonical #121 authority. Application-service receipt/exact-ID cleanup, readiness/lifecycle, independent capability-column evidence, effective network-cardinality and related owner truth remain #21/#127 or their canonical successors. #112 must consume those through ordinary owner ancestry rather than source-copying them.
+
+## Migrated exact evidence and structural decisions
+
+The former #112 global-Gap delta contained valid evidence that must survive removal from the repository-wide ledger. The focused TRACEABILITY documents remain normative; this file is the migration index for exact-run facts and cross-document decisions.
+
+### Repository/DDD lexer
+
+Test-only `826e7d918bd8ee5499240e819c915d9865f54d43` proved comments and ordinary/raw strings containing text that resembles `use crate::sandbox_execution::*;` must not be classified as executable wildcard imports. Minimum `3c379187bcd03768819447ebd7253f1a9c569939` masks line comments, nested block comments, ordinary strings and `r`/`br`/`cr` raw strings before use-tree inspection while continuing to reject executable direct/grouped/descendant/nested wildcard imports. `606caab42531e447459dcabce1419f75448e1607` records the decision in `REPOSITORY_DDD_LEXER_TRACEABILITY.md`; `756f5f7fd93891806ffd779718174798764a0e52` is the formatter-only descendant.
+
+Native CI `35038887142` on exact `756f5f7...` made verify `104614082342` and hosted negative rootless/AppArmor `104614082204` GREEN. Branch coverage `104614082089` and production coverage `104614082323` executed the suites and failed only complete-coverage admission. Historical evidence measured 718/726 branches and 5203/5213 physical source lines with 512/512 functions. Positive SELinux `104614082231` remained queued. This is exact historical evidence only.
+
+### Coverage diagnostic half-open interval parity
+
+`c8a2986c1201957d98261eeb7585d2ce8b43eb8a` added `coverage_diagnostic_half_open_red.rs` after source review found `_uncovered_lines` treated a region ending at next-line column 1 as including that terminal line while the authoritative admission mapping did not. CI `35058814349` causally failed the focused control in branch job `104674561065` and verify `104674561248`: `[10,5] -> [11,1]` was diagnostically reported as `[10,11]` instead of `[10]`. Hosted negative job `104674561169` passed. Minimum `9e1b93c0f72f4b2c0c9c8806dbaa9add57bc7759` aligns diagnostics with the half-open line-admission rule without changing coverage denominator, exclusion policy, thresholds, Rust production source, branch accounting or region accounting. `647c6a3fb262af82b0ab40699b80c5dca4cb194e` restores only the final newline and was the prior exact #112 head.
+
+### Bounded command terminal state and command-wait output limit
+
+`49337a2ffec3edd7492295c7dd8e5144b884fe18` replaced contradictory independent `status: Option<ExitStatus>` plus `timed_out: bool` representation with `BoundedCompletion::{Exited, TimedOut, OutputLimit}`. The owned runner produces `status=None` only for timeout/output-limit termination, so the prior later `None => BackendInvocationFailed` arm was structurally unreachable. `856d91c9b31c7bcdc9f5aae2dd3d0aa6032e4c16` repaired rustdoc after the representation change; executable-source authority `343c77a66746b382cfcc1633691d4fa70af3a95a` removed purpose-complete self-fix machinery. See `BOUNDED_COMMAND_COMPLETION_TRACEABILITY.md` and `COMMAND_WAIT_OUTPUT_LIMIT_TRACEABILITY.md`.
+
+Exact `0ab35c399a14aed9dc04e575826fc874ba82afcf` / native CI `34729167091` then isolated another structurally impossible gate: `stdout_truncated || stderr_truncated` inside `BoundedCompletion::Exited`. The owned runner classifies any observed output overflow as `OutputLimit` before `Exited` can exist. Branch artifact `10308302725`, digest `sha256:7afd53f86799a08ccb72fc05d6fbcaf5eca3f21eb2e8b4b121e44c7a88a3b4aa`, measured 5220/5262 lines, 503/503 functions, 6999/7126 regions and 720/730 branches. One-shot run `34729886700` validated removal of only that impossible Exited truncation predicate and published ordinary descendant `a6dda0d9aeed837caf865e2965c13cc374c65d67`. Public `BackendOutputLimitExceeded { operation: "command_wait" }` behavior remains unchanged.
+
+### Command-owner system failures and release-token entropy
+
+Exact `a28803f47aad499a6c411596831ca365971076df` artifacts measured 5068/5129 lines, 484/486 functions, 6805/6956 regions and 712/720 branches. `podman_runtime_gate_binding.rs` reached 60/60 functions and 24/24 branches. Source-coordinate review left two wholly unexecuted command-owner system-failure outcomes: create-receipt temporary-directory creation failure and execution-identity OS entropy failure. The repair keeps production `tempfile::Builder::tempdir()` and `getrandom::fill`, but exposes deterministic decision seams so those hard-to-induce mappings can be proven without process-global permission/RNG mutation, retry/fallback, panic/unsafe or coverage exclusion. See `COMMAND_OWNER_SYSTEM_FAILURE_TRACEABILITY.md`.
+
+A separate causal exact `c31b569f9d65ba0960b0358fca2c8dc2e8c0e788` / CI `34709222684` isolated the runtime-gate release-token entropy failure. Verify `103594820336` and hosted negative `103594820266` were GREEN while coverage failed only repository-wide 100% admission. Totals were 5042/5109 lines, 479/482 functions, 6772/6927 regions and 710/718 branches; runtime-gate binding was 454/462 lines, 55/56 functions, 652/666 regions and 22/22 branches. The production source remains OS entropy only; deterministic tests prove entropy failure maps to `BackendInvocationFailed { operation: "runtime_gate_release_token" }` and successful supplied nonce bytes are hashed exactly. See `RUNTIME_GATE_RELEASE_TOKEN_ENTROPY_TRACEABILITY.md`.
+
+### PR source traversal relative-path invariant
+
+Exact `c70cc3622a9965d002d604c6bf6c61d034f84efd` / CI `34707886045` made verify `103591175526` and hosted negative `103591175499` GREEN while coverage failed only repository-wide admission. Production artifact `10302217625` digest `sha256:04ef81f1f77e9181e13164c8f3fc383483b459285d264aa574c5b1d3c6d7cb5b`; branch artifact `10301863269` digest `sha256:0dd5fef1bbc21bd909cfc4b9be33c85a9f5e4320046ec71c9daf760a3673659e`; totals were 5045/5114 lines, 479/483 functions, 6772/6929 regions and 710/718 branches. `pr_source_artifact.rs` was 218/221 lines, 20/21 functions, 293/314 regions and 32/32 branches.
+
+The remaining source-function deficit there was structurally unreachable `strip_prefix(root)` failure after traversal had already discovered each child under the same root. The repair carries relative traversal state and derives children with `relative_directory.join(entry.file_name())`, preserving `OsString`/Unix byte identity, no-follow metadata, unsupported-entry rejection, deterministic sorting, byte/digest bounds and mutation guards. See `PR_SOURCE_TRAVERSAL_RELATIVE_PATH_TRACEABILITY.md`.
+
+### Command release callback reachability
+
+Exact `2c66fca09e01b7301e1722b58f802f91ddb71543` / CI `34704870262` produced branch artifact `10301233710`, digest `sha256:bc3ede1d5cf85d56eaea79b6256974c4722a2bd6ec6f60ceabb568d69a18bd39`, at 5044/5114 lines, 479/484 functions, 6772/6929 regions and 710/718 branches. The no-op callback supplied by legacy `run_legacy_command_at_for_test` was structurally unreachable because that path always supplied no runtime-gate binding args while the callback could run only with binding args. One-shot exact `5e3c4a527eeb3cdf7f0b193b688986fd572df19d` / run `34707552403` validated the repair; ordinary `5a146ada3f3bfc5a325ce99dbea95faedd4a218f` makes release control explicitly optional so legacy passes `None` and runtime-gated flow passes `Some(release_gate)`. `f337419fffab80509fd9da941168c588a7e01039` was a no-tree-change connector descendant used only to reacquire native CI after bot-authored `action_required`. See `COMMAND_RELEASE_CALLBACK_REACHABILITY_TRACEABILITY.md`.
+
+### Command chronology authority
+
+Issue #44's original chronology witness had become false-pass capable because its fake inspect evidence no longer satisfied the current command-isolation contract. Draft #111 exact `d45ec905eb55bb2b23737995e96baf698cf4de16` / CI `34565196344` repaired the fixture and executed the intended RED: caller-supplied future wall-clock input still reached successful runtime lifecycle evidence and contradicted runtime-owned result chronology. #112 moves start/finish observation inside `RootlessPodmanAdapter`, retains caller time only as compatibility/test seam, fails closed on pre-epoch or rollback chronology and retains monotonic timeout authority. See `COMMAND_RESULT_TIME_TRACEABILITY.md`.
+
+Exact #112 predecessor `cf90c395513e404440787cb6981c84e47860d0d2` / CI `34578304083` made verify and hosted negative rootless/AppArmor GREEN. Coverage evidence measured 4691/4841 lines, 435/446 functions, 6304/6543 regions and 656/726 branches; production artifact digest `sha256:bcfdfa9fc0c4c60c96518b5fe802e12c0812e71c8da225367f36012b9d6e7f26`, branch digest `sha256:8576fb11a3ff3daf33bea6d9b3258973af8cd14481d4f8efd0a71f330183524f`. Positive SELinux remained unproven.
+
+### Later exact owner-repair evidence
+
+Exact `123a7e6c26d07dc2a2b4d96672c7d9da4d6693fc` made repository validation/full tests/Clippy/rustdoc/hosted negative GREEN and generated 4801/4915 lines, 442/453 functions, 6404/6614 regions and 704/718 branches; branch digest `sha256:f117e0731d0483d83fd27d1fecc3bfc7a837cd838b3839cee75b9845e088d5a7`, production digest `sha256:4a49de476c3a7a46b4c7ba6395edbd00f6dafbbd96a37e2cd5fec2d714a16cd7`. AppArmor admission invariants were causally simplified without weakening profile/mode/equality checks. See `APPARMOR_ADMISSION_INVARIANT_TRACEABILITY.md`.
+
+Exact `4aa3221f476dfa65c1b8f5dff5c0f0dbbece18a9` / CI `34603185061` made verify and hosted negative GREEN and measured 4739/4867 lines, 439/450 functions, 6356/6574 regions and 676/716 branches; coverage digest `sha256:5d8158884c7486d9199e09d11b8b278d5adaa6c731290bd108e097dbcd1c2ce0`, branch digest `sha256:01bfd9a9367f4aa8e54c35c3a8901e11e5060b6ea20c4e282e08307532c85ebe`. The lineage rejects malformed create identifiers and missing/incomplete/duplicate PID-1 security evidence before release.
+
+Exact `47ceddd966ea9d20b0784ac52dc7452d346eea44` / CI `34606000110` made verify and hosted negative GREEN, measured 4745/4867 lines, 439/450 functions, 6358/6574 regions and 677/716 branches; coverage digest `sha256:3cd5226b715383b2051800fda4c900d16fddb88e4ac59e7653aeec36d1af0516`, branch digest `sha256:2ac1dd6eae68ae42d85266ebd350a008767e09fead820208358d57266f1e8d22`. The same owner lineage observes live `/tmp` from `/proc/self/mountinfo` and `statvfs`, requires tmpfs/request-bound capacity/effective `rw,noexec,nosuid,nodev`, and behaviorally proves noexec. Positive release acceptance remains unavailable without the dedicated SELinux runner. See `LIVE_TMPFS_ENFORCEMENT_TRACEABILITY.md`.
+
+Exact `2d5bab57e7d8bd2d9c0ee733171a8ac19a355d51` / CI `34626613078` made verify `103353148163` and hosted negative `103353148280` GREEN. Coverage evidence measured 4787/4905 lines, 442/453 functions, 6388/6602 regions and 694/720 branches; coverage digest `sha256:f7bb47288868a7413e71a147606b2d11f6d0eb7a8d21f2522fa9d0d0c8ad64de`, branch digest `sha256:620ddfc6a748b309c2e62979c5d456f38de886ba8eba0b46ef10f2b39cf2be83`. The single-record inspection repair removed a structurally impossible fallback after cardinality had already established exactly one record. Positive SELinux `103353148089` remained runner-unassigned.
+
+Exact `378abe88c93d0e4e42e2879851250f158d8c3ce9` / CI `34690458572` made verify `103544664828` and hosted negative `103544664629` GREEN; production coverage `103544664747` and branch coverage `103544664716` failed only explicit complete-coverage gates at 5037/5114 lines, 477/484 functions, 6764/6929 regions and 710/718 branches. Production digest `sha256:7c04301d17a92c2adc3031d824deb4073b65d5cc2f22e3ff860e16542fe9f96b`, branch digest `sha256:658e8f7cbbd6a40319af07176a9fd5f89b9f81b3dfd711492800f5c95a54ddab`. Source-coordinate analysis left two application-service-owned outcomes: cleanup backend-error plus registry-finalization-error precedence and post-probe readiness deadline. Those stay on canonical application-service owner ancestry rather than being manufactured in #112.
+
+## Release boundary
+
+None of the migrated historical evidence transfers to a moved #112 head. Positive effective-LSM remains a dedicated gate; #35/#43 still require real cgroup-v2/live `/tmp`/behavioral wall-time/over-lease exact-ID termination and leak-free cleanup on the same release candidate; repository-wide 100% owned-production coverage, independent review/security, protected integration, complete owner/successor adoption, and immutable version/package/SBOM/provenance/reproducibility/rollback publication remain required.
+
+## Single-writer and parent-adoption decision
+
+Review `5230277077` found that #112 still carried the repository-wide Gap ledger and trailed canonical parent #14 after its migration-first owner repair. This document preserves #112-specific exact-run/digest and structural-coverage history before that leaf-owned global delta is removed. The branch must then ordinary two-parent adopt #14 exact `b69106872756db0bb65a906ebd8175e5343017c0`, inherit the parent owner-repair doctoring and restored global Gap state, and preserve every #112 production/test/coverage-policy delta.
+
+No force push, destructive rebase, denominator reduction, application-service source copy, blind retry, predecessor-GREEN transfer, protected merge or release is authorized by this repair. The resulting exact head must reacquire its own full CI/coverage/security/runtime evidence.

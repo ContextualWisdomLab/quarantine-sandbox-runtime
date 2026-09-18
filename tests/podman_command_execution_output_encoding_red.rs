@@ -69,19 +69,19 @@ case "${{1:-}}:${{2:-}}" in
     previous=''
     for argument in "$@"; do
       if [ "$previous" = '--cidfile' ]; then
-        printf 'fake-command-container-id\n' > "$argument"
+        printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' > "$argument"
       fi
       case "$argument" in
-        --cidfile=*) printf 'fake-command-container-id\n' > "${{argument#--cidfile=}}" ;;
+        --cidfile=*) printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' > "${{argument#--cidfile=}}" ;;
       esac
       previous="$argument"
     done
-    printf 'fake-command-container-id\n'
+    printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n'
     ;;
   init:*) : ;;
   start:*) : ;;
   container:inspect)
-    printf '%s\n' '[{{"Id":"fake-command-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{{"User":"65532:65532","Timeout":20}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{{"io.podman.annotations.userns":"auto"}},"PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}}}}]'
+    printf '%s\n' '[{{"Id":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":null,"BoundingCaps":null,"Config":{{"User":"65532:65532","Timeout":20}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"","Annotations":{{"io.podman.annotations.userns":"auto"}},"PidMode":"private","IpcMode":"none","NetworkMode":"none","UTSMode":"private","CgroupMode":"private","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":16,"Tmpfs":{{"/tmp":"rw,noexec,nosuid,nodev,size=16777216"}}}}}}]'
     ;;
   top:*)
     printf '%s\n' 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL' '1 filter - - - - - containers-default (enforce)'

@@ -11,8 +11,117 @@ fn podman_adapter_lives_outside_core_sandbox_context() {
 
     let core = fs::read_to_string(root.join("src/sandbox_execution/mod.rs"))
         .expect("sandbox_execution source should be readable");
-    assert!(!core.contains("application_service"));
-    assert!(!core.contains("ApplicationService"));
+    assert!(!core.contains("application_service::"));
+    assert!(!core.contains("crate::application_service"));
+}
+
+#[test]
+fn bounded_command_contract_is_owned_by_core_sandbox_context() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let core_module_path = root.join("src/sandbox_execution/mod.rs");
+    let core_contract_path = root.join("src/sandbox_execution/bounded_command_execution.rs");
+    let supporting_context_root = root.join("src/application_service");
+    let historical_supporting_contract_path =
+        root.join("src/application_service/command_execution.rs");
+    let podman_infrastructure_path = root.join("src/infrastructure/podman.rs");
+
+    let core_module =
+        fs::read_to_string(core_module_path).expect("sandbox_execution source should be readable");
+    let podman_infrastructure = fs::read_to_string(podman_infrastructure_path)
+        .expect("Podman infrastructure source should be readable");
+
+    assert!(
+        core_contract_path.is_file(),
+        "bounded command domain truth must live under the sandbox_execution Core context"
+    );
+    assert!(
+        core_module.contains("mod bounded_command_execution;"),
+        "sandbox_execution must own the bounded command module"
+    );
+    assert!(
+        core_module.contains("pub use bounded_command_execution::{"),
+        "sandbox_execution must export the bounded command request/result/backend port"
+    );
+    assert!(
+        !historical_supporting_contract_path.exists(),
+        "application_service must not retain a second bounded command source of truth"
+    );
+
+    let mut supporting_sources = Vec::new();
+    collect_rust_sources(&supporting_context_root, &mut supporting_sources);
+    assert!(
+        !supporting_sources.is_empty(),
+        "application_service Supporting context must contain Rust sources"
+    );
+    for path in supporting_sources {
+        let source =
+            fs::read_to_string(&path).expect("application_service source should be readable");
+        assert!(
+            !source.contains("CommandExecutionOutcome"),
+            "application_service source {} must not expose Core-private bounded command outcomes",
+            path.display()
+        );
+        assert!(
+            !imports_sandbox_execution_glob(&source),
+            "application_service source {} must not wildcard-import Core sandbox_execution exports",
+            path.display()
+        );
+    }
+    assert!(
+        !podman_infrastructure.contains("application_service::CommandExecutionOutcome"),
+        "infrastructure must import bounded command domain truth directly from sandbox_execution Core"
+    );
+
+    let core_contract = fs::read_to_string(core_contract_path)
+        .expect("bounded command Core contract should be readable");
+    assert!(
+        !core_contract.contains("application_service")
+            && !core_contract.contains("ApplicationService"),
+        "Core bounded command domain truth must not depend on Supporting application_service types"
+    );
+}
+
+#[test]
+fn sandbox_execution_glob_detection_covers_direct_and_grouped_use_trees() {
+    for source in [
+        "use crate::sandbox_execution::*;",
+        "use crate::sandbox_execution::{*};",
+        "use crate::sandbox_execution::{CommandExecutionRequest, *};",
+        "use crate::sandbox_execution::{nested::{Thing}, *};",
+        "use crate::sandbox_execution::nested::*;",
+        "use crate::sandbox_execution::{nested::*};",
+        "use crate::sandbox_execution::nested::{Thing, *};",
+    ] {
+        assert!(
+            imports_sandbox_execution_glob(source),
+            "wildcard Core import must be detected: {source}"
+        );
+    }
+
+    for source in [
+        "use crate::sandbox_execution::CommandExecutionRequest;",
+        "use crate::sandbox_execution::{CommandExecutionRequest, CommandExecutionResult};",
+        "use crate::sandbox_execution::nested::Thing;",
+        "use crate::sandbox_execution::{nested::Thing};",
+        "use crate::sandbox_execution::nested::{Thing, OtherThing};",
+    ] {
+        assert!(
+            !imports_sandbox_execution_glob(source),
+            "named Core imports must not be classified as wildcard imports: {source}"
+        );
+    }
+
+    for source in [
+        "// use crate::sandbox_execution::*;",
+        "let sample = \"use crate::sandbox_execution::*;\";",
+        "let sample = r#\"use crate::sandbox_execution::nested::*;\"#;",
+        "/* outer /* use crate::sandbox_execution::{*}; */ comment */",
+    ] {
+        assert!(
+            !imports_sandbox_execution_glob(source),
+            "non-code wildcard text must not be classified as Core import: {source}"
+        );
+    }
 }
 
 #[test]
@@ -131,6 +240,145 @@ fn test_module_stripping_never_hides_conditionally_production_or_trailing_items(
         strip_trailing_test_module(test_only),
         "fn production() {}\n"
     );
+}
+
+fn imports_sandbox_execution_glob(source: &str) -> bool {
+    let code = rust_code_without_comments_and_strings(source);
+    let compact_source: String = code.split_whitespace().collect();
+    let marker = "sandbox_execution::";
+    let mut cursor = 0;
+
+    while let Some(relative_index) = compact_source[cursor..].find(marker) {
+        let use_tree_start = cursor + relative_index + marker.len();
+        let tail = &compact_source[use_tree_start..];
+        let use_tree = tail.split_once(';').map_or(tail, |(tree, _)| tree);
+        if use_tree.contains('*') {
+            return true;
+        }
+
+        cursor = use_tree_start;
+        if cursor >= compact_source.len() {
+            break;
+        }
+    }
+
+    false
+}
+
+fn rust_code_without_comments_and_strings(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    let mut block_depth = 0_u32;
+    let mut in_string = false;
+
+    while index < bytes.len() {
+        if block_depth > 0 {
+            if bytes[index..].starts_with(b"/*") {
+                block_depth += 1;
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else if bytes[index..].starts_with(b"*/") {
+                block_depth -= 1;
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else {
+                output.push(if bytes[index] == b'\n' { b'\n' } else { b' ' });
+                index += 1;
+            }
+            continue;
+        }
+
+        if in_string {
+            if bytes[index] == b'\\' && index + 1 < bytes.len() {
+                output.extend_from_slice(b"  ");
+                index += 2;
+            } else if bytes[index] == b'"' {
+                output.push(b' ');
+                in_string = false;
+                index += 1;
+            } else {
+                output.push(if bytes[index] == b'\n' { b'\n' } else { b' ' });
+                index += 1;
+            }
+            continue;
+        }
+
+        if let Some(raw_end) = rust_raw_string_end(bytes, index) {
+            for byte in &bytes[index..raw_end] {
+                output.push(if *byte == b'\n' { b'\n' } else { b' ' });
+            }
+            index = raw_end;
+            continue;
+        }
+
+        if bytes[index..].starts_with(b"//") {
+            while index < bytes.len() && bytes[index] != b'\n' {
+                output.push(b' ');
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            block_depth = 1;
+            output.extend_from_slice(b"  ");
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'"' {
+            in_string = true;
+            output.push(b' ');
+            index += 1;
+            continue;
+        }
+
+        output.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(output).expect("masked Rust source must remain valid UTF-8")
+}
+
+fn rust_raw_string_end(bytes: &[u8], index: usize) -> Option<usize> {
+    if index > 0 && (bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_') {
+        return None;
+    }
+
+    let mut cursor = index;
+    if bytes.get(cursor) == Some(&b'b') && bytes.get(cursor + 1) == Some(&b'r')
+        || bytes.get(cursor) == Some(&b'c') && bytes.get(cursor + 1) == Some(&b'r')
+    {
+        cursor += 2;
+    } else if bytes.get(cursor) == Some(&b'r') {
+        cursor += 1;
+    } else {
+        return None;
+    }
+
+    let hash_start = cursor;
+    while bytes.get(cursor) == Some(&b'#') {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'"') {
+        return None;
+    }
+
+    let hash_count = cursor - hash_start;
+    let mut closing_index = cursor + 1;
+    while closing_index < bytes.len() {
+        if bytes[closing_index] == b'"' {
+            let hash_start = closing_index + 1;
+            let hash_end = hash_start + hash_count;
+            if hash_end <= bytes.len()
+                && bytes[hash_start..hash_end].iter().all(|byte| *byte == b'#')
+            {
+                return Some(hash_end);
+            }
+        }
+        closing_index += 1;
+    }
+
+    Some(bytes.len())
 }
 
 fn collect_rust_sources(directory: &Path, output: &mut Vec<std::path::PathBuf>) {
