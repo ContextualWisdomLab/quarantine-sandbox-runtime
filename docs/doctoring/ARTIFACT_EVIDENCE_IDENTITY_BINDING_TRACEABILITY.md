@@ -2,55 +2,63 @@
 
 ## Authority and problem
 
-Issue #58 owns a P0 evidence-integrity defect in the `artifact_analysis` bounded context. PR #59 is currently based on PR #18 exact `c0647152ec052d82969b2ae078891e25e6d4d69a`; the original focused test-bearing RED was `52354e070830802e4a387f68e6faf9ed01244751`. PR #18 itself remains open and intentionally stale behind its moving command/runtime prerequisite, so #59 does not treat that ancestry as release authority.
+Issue #58 owns the P0 subject-identity integrity contract in the `artifact_analysis` bounded context. PR #59 is based on current artifact-analysis parent #18 exact `703b4b1a047321bb08d1d6cb1de78d01cb350696`. Ordinary two-parent commit `52a129a5955df07a1e1a7638ed03a7b382655432` adopted that parent from the prior #59 lineage without force push or destructive rebase. Repository-wide `docs/product-technical-gap-baseline.md` remains #121 single-writer authority and is not a current #59 leaf delta.
 
-`AnalysisEngine::analyze_bytes()` derives both the top-level `ArtifactDescriptor` and the `ArtifactIdentity` evidence attributes from one ingested artifact. That production path is internally consistent when it creates a bundle. The public `EvidenceBundle::validate()` contract, however, validates those two representations independently. A reconstructed or deserialized receipt can therefore retain a valid top-level artifact SHA-256 while replacing only `ArtifactIdentity.attributes["artifact_sha256"]` with another valid artifact digest and still satisfy the current validator.
+`AnalysisEngine::analyze_bytes()` emits two representations of one analyzed subject: the top-level `ArtifactDescriptor` and one `ArtifactIdentity` evidence record. Current runtime assembly duplicates these machine facts into the nested record: `artifact_name`, optional `original_file_name`, `artifact_sha256`, `artifact_size_bytes`, and `artifact_kind`. `EvidenceBundle::validate()` validates the top-level descriptor and each evidence record independently; it does not bind those duplicated subject facts to each other.
 
-This is not an analyzer-verdict problem. It is a subject-binding invariant owned by artifact-analysis evidence semantics: one receipt cannot truthfully attest two different artifact identities.
+A reconstructed or deserialized receipt can therefore present mutually contradictory subject claims while every individual value remains syntactically valid. This is not an analyzer verdict problem. One receipt must not truthfully name two artifacts depending on which representation a consumer reads.
 
-## Reproduction authority
+## Causal-evidence history
 
-Historical exact `9b4029f2dbd3a052854954654604c841049405b3` ran CI `34057653119`. Hosted negative rootless/AppArmor job `101552375182` was GREEN. Verify job `101552375139` passed exact checkout, dependency lock, repository policy, coverage-parser tests, and rustfmt before failing in the workspace `Test` step; coverage job `101552375176` likewise failed during production-coverage generation. The available GitHub evidence no longer exposes assertion-level output for that historical failure, and the parent ancestry also had broad test failures. Therefore this run is not promoted to an assertion-level causal RED for issue #58.
+Historical exact `9b4029f2dbd3a052854954654604c841049405b3` ran CI `34057653119`. Hosted negative rootless/AppArmor was GREEN and verify reached the workspace test step, but retained GitHub evidence does not expose assertion-level output for the subject-binding test and the ancestry also contained broader failures. That run is not promoted to assertion-level causal RED for issue #58.
 
-Review found a second causality weakness in the original witness: it forged the nested digest with `"0".repeat(64)`. That value satisfies the current lower-case SHA-256 syntax check, but a future general sentinel/all-zero digest rule could reject it and make the subject-binding RED pass without implementing subject equality.
+Test-only `5ccc078d52719f401e590b3c2a0555355c206ea7` removed the original all-zero-digest false-GREEN path. It built two independently valid `StaticOnly` bundles from different bytes and transplanted the alternate engine-produced SHA-256 into the primary bundle. Both controls were valid before mutation, so a future sentinel/all-zero rejection could not satisfy the RED accidentally.
 
-Test-only commit `5ccc078d52719f401e590b3c2a0555355c206ea7` removes that false-GREEN path. `tests/artifact_analysis_identity_binding_red.rs` now creates two independently valid `StaticOnly` bundles from different artifact bytes, proves both controls validate, and transplants the second bundle's engine-produced artifact SHA-256 into only the first bundle's `ArtifactIdentity` record. The first bundle's top-level `ArtifactDescriptor` is left unchanged. The hostile digest is therefore not merely syntactically plausible; it is a real digest already accepted in another valid receipt, and the intended remaining contradiction is subject binding.
+Formal review `5243543629` on current-parent exact `52a129a5955df07a1e1a7638ed03a7b382655432` found a broader false-completion path. The hardened witness still covered only `artifact_sha256`, while issue #58 and current runtime duplicate multiple machine fields. A SHA-only production repair could make that test GREEN while allowing contradictory artifact name, original file name, byte size, or kind in the same receipt.
 
-The test still does not reference a future `ContractError` variant before production defines one. Doing so would convert the intended semantic validator-acceptance RED into a compile-time failure. Production Rust and the checked-in JSON Schema remain unchanged until the hardened exact head executes and fails for the intended subject-binding cause.
+Test-only `20f5a040a8bdcf0fde2b1918e3176a9727970e45` therefore expands the RED into five independent hostile cases. Every case starts from two independently valid engine-produced bundles. The controls deliberately differ in leaf name, original leaf name, bytes/digest, byte length, and detected kind (`Text` versus `PdfDocument`). Each test changes exactly one nested `ArtifactIdentity` subject attribute to the alternate bundle's already-valid value while leaving the primary top-level `ArtifactDescriptor` unchanged. The five required contradictions are:
+
+- `artifact_name`;
+- `original_file_name`;
+- `artifact_sha256`;
+- `artifact_size_bytes`;
+- `artifact_kind`.
+
+The helper asserts that the alternate value is materially different before mutation. Because the hostile value is accepted in another valid engine-produced receipt, a standalone syntax, sentinel, or format restriction cannot legitimately satisfy the witness. The RED still does not reference a future `ContractError` variant, so the intended first failure remains semantic validator acceptance rather than compilation failure.
+
+Production Rust, public JSON Schema, runtime assembly, and wire version are unchanged in this RED hardening.
 
 ## DDD and contract boundary
 
-- `artifact_analysis` owns artifact subject identity, normalized evidence semantics, and receipt validation.
-- `sandbox_execution` owns isolation, resource, and lifecycle evidence; it does not decide which artifact an analysis receipt describes.
-- infrastructure adapters may report runtime observations but cannot redefine artifact identity.
-- AppGuardrail owns static scan/SARIF semantics, Noema owns admission/activation, and Wardnet owns verdict/incident authority.
-- consumer code must not be required to choose between contradictory top-level and nested subject claims.
+`artifact_analysis` owns artifact subject identity, normalized evidence semantics, and receipt validation. `sandbox_execution` owns isolation/resource/lifecycle evidence and cannot redefine the analyzed artifact. Infrastructure adapters may report observations but cannot choose between contradictory subject representations. AppGuardrail remains static-scan/SARIF authority, Noema admission/activation authority, and Wardnet verdict/incident authority.
 
-The current `1.0.0` wire schema provides syntactic shape validation. JSON Schema Draft 2020-12 does not provide a portable general-purpose mechanism for asserting equality between arbitrary values at two instance locations. If semantic subject equality cannot be represented without a non-standard extension, the canonical executable Rust validator and public contract documentation must say so explicitly. A schema that merely validates both SHA-256 strings independently is not evidence of subject binding.
+The canonical top-level `ArtifactDescriptor` is the subject descriptor. `ArtifactIdentity` is normalized evidence about that same subject, not a second independent source of truth. Therefore every duplicated subject attribute emitted under the versioned contract must agree exactly with the descriptor field from which it is derived. Validation must reject contradiction rather than normalize, rewrite, or silently prefer one representation.
 
-## Minimal causal repair
+Portable JSON Schema Draft 2020-12 does not provide a general cross-instance value-equality operator tying arbitrary sibling/nested instance locations together. The checked-in schema can continue to prove shape and local syntax, but it must not be described as proving semantic subject equality unless a deliberately versioned executable dialect is introduced. The canonical executable contract validator and public documentation must state the semantic binding explicitly.
 
-After exact-head execution proves the hardened RED for the intended cause, the smallest acceptable GREEN must:
+## Minimum causal repair after executed RED
 
-1. define one canonical `ArtifactIdentity`-to-`ArtifactDescriptor` mapping under the versioned artifact-analysis contract;
-2. reject a contradictory subject digest before a receipt becomes consumer-authoritative;
-3. preserve both untouched engine-produced control receipts as valid;
-4. return a dedicated typed subject-identity mismatch rather than relying on an unrelated validation error;
-5. compare stable machine fields rather than summary/display text;
-6. avoid normalizing, overwriting, or silently repairing forged receipt content during validation;
-7. preserve #49 host-capability isolation, #50 bounded result ingestion, #52 dynamic completeness, #54 analyzer provenance, #56 ToolFailure/completeness, #60 record/job identity, #62 runtime-boundary binding, and #64 foundation cardinality as independent gates.
+No production GREEN is authorized until exact current-head CI executes the five hostile cases behind repository/format prerequisites and demonstrates that the existing validator accepts the contradictions.
 
-The dedicated typed error and its expected/actual subject fields belong in the GREEN step after the semantic RED executes. They must not be referenced prematurely in the test.
+After that causal RED, the smallest compatible repair is one canonical ArtifactIdentity-to-ArtifactDescriptor validator that:
+
+1. locates the required foundation `ArtifactIdentity` record under the existing cardinality contract;
+2. requires each duplicated machine field to equal the authoritative top-level descriptor value exactly;
+3. requires `original_file_name` parity when that field is present under the versioned contract;
+4. returns a dedicated typed subject-identity mismatch with stable field identity and expected/actual machine values, rather than an unrelated validation error;
+5. preserves untouched engine-produced receipts as valid;
+6. rejects hostile input without rewriting or normalization;
+7. leaves #49 isolation, #50 bounded result ingestion, #52 dynamic completeness, #54 analyzer provenance, #56 ToolFailure/completeness, #60 record/job identity, #62 runtime-boundary consistency, and #64 foundation cardinality as independent gates.
+
+If the exact foundation-cardinality prerequisite is not yet integrated when the GREEN is implemented, the repair must preserve that owner boundary rather than duplicating or weakening it locally.
 
 ## Security and commercial effect
 
-A receipt with two different subject identities is not reliable audit, SOC 2/CSAP evidence, admission input, or provenance. Downstream services may parse the top-level descriptor while human/operator tooling reads normalized evidence attributes, producing divergent conclusions from the same signed or stored payload. Signing a contradictory bundle would protect the contradiction rather than repair it.
-
-Release authority therefore requires semantic subject consistency before signing, provenance publication, or consumer handoff.
+Subject identity is provenance authority. A signed or stored receipt whose top-level descriptor and normalized identity evidence disagree remains contradictory even if its signature is valid: the signature protects the contradiction. Downstream services can otherwise make different admission, audit, or incident decisions depending on which representation they consume. For SOC 2/CSAP evidence readiness and immutable publication, the receipt must identify one subject consistently before signing or consumer handoff.
 
 ## Evidence basis
 
-SLSA v1.2 Provenance is an Approved specification and defines provenance as verifiable information about where, when, and how an artifact was produced. NIST finalized SP 800-53 Release 5.2.0 on August 27, 2025 and explicitly strengthened software integrity, validation, developer testing, and update reliability controls. The peer-reviewed in-toto work supplies the supply-chain integrity rationale for binding attestations to the artifacts and steps they describe. These sources support the integrity objective; this repository's versioned artifact-analysis contract remains normative for the exact subject-equality rule.
+SLSA v1.2 Provenance defines provenance as verifiable information about where, when, and how an artifact was produced and treats artifact subjects/digests as provenance identity. NIST SP 800-53 Rev. 5 Release 5.2.0 retains software/information-integrity, validation, and developer-testing controls. The peer-reviewed in-toto work provides the supply-chain integrity rationale for binding attestations to the artifacts and steps they describe. These sources establish the integrity objective; this repository's versioned artifact-analysis contract remains normative for the exact field-equality rule.
 
 ### References
 
@@ -62,4 +70,4 @@ Torres-Arias, S., Afzali, H., Kuppusamy, T. K., Curtmola, R., & Cappos, J. (2019
 
 ## Current gate
 
-Current #59 must independently execute after `5ccc078d...` and this doctoring update. Historical broad failures do not transfer. No production validator change, merge, release, provenance publication, or consumer handoff is authorized until the hardened witness fails for the intended subject-binding cause and the resulting minimal GREEN passes on one unchanged exact head together with the repository's required review, coverage, security, real-runtime, and positive-LSM gates.
+Test-bearing exact `20f5a040a8bdcf0fde2b1918e3176a9727970e45` must execute independently on current #18 ancestry. Any documentation descendant likewise invalidates predecessor whole-head conclusions and must reacquire exact-head evidence. Keep #59 Draft/open until an unchanged dependency-safe head passes repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, applicable positive effective isolation, protected integration, and immutable publication with SBOM/provenance/reproducibility/rollback. No predecessor GREEN, force update, simple close, or consumer publication is authorized.
