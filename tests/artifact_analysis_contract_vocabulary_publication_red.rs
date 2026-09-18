@@ -38,9 +38,7 @@ fn repository_path(relative_path: &str) -> std::path::PathBuf {
 
 fn read_text(relative_path: &str) -> String {
     fs::read_to_string(repository_path(relative_path)).unwrap_or_else(|error| {
-        panic!(
-            "required vocabulary publication artifact {relative_path} must be readable: {error}"
-        )
+        panic!("required vocabulary publication artifact {relative_path} must be readable: {error}")
     })
 }
 
@@ -50,9 +48,7 @@ fn vector_by_id<'a>(vectors: &'a Value, vector_id: &str) -> &'a Value {
         .expect("vocabulary conformance publication must contain a cases array")
         .iter()
         .find(|case| case["id"].as_str() == Some(vector_id))
-        .unwrap_or_else(|| {
-            panic!("missing required vocabulary conformance vector {vector_id}")
-        })
+        .unwrap_or_else(|| panic!("missing required vocabulary conformance vector {vector_id}"))
 }
 
 fn canonical_bounded_source_context(instance: &Value) -> Value {
@@ -184,13 +180,7 @@ fn required_cwl_vocabulary_publishes_semantics_and_conformance_vectors() {
         "conformance vectors must bind the exact required vocabulary identity"
     );
 
-    assert_utf8_vector(
-        &vectors,
-        "max_utf8_bytes_multibyte_boundary",
-        64,
-        128,
-        true,
-    );
+    assert_utf8_vector(&vectors, "max_utf8_bytes_multibyte_boundary", 64, 128, true);
     assert_utf8_vector(
         &vectors,
         "max_utf8_bytes_multibyte_overflow",
