@@ -1,12 +1,12 @@
 # Artifact Evidence Identifier Binding Traceability
 
-Status: issue #60 current-owner RED is split into independent hostile identity witnesses and hardened against sequence-mismatch false positives. Assertion-level typed identity-mismatch binding remains intentionally incomplete until the current exact head executes the semantic RED and the dedicated contract error exists; production GREEN remains unchanged.
+Status: issue #60 has an executed causal RED on exact `36cea922b5f9170ad9e2813d52d0c0f64f23bacf`. Minimal production repair `c024ecc84a83f5af7a24adf7b92b191792337762` binds every `EvidenceRecord.evidence_id` to the enclosing `analysis_job_id` and one-based sequence and upgrades both hostile regressions to the dedicated typed mismatch error. The repair is not GREEN or release evidence until the exact document-bearing successor completes current-head CI and the remaining repository gates.
 
 ## Problem
 
-`artifact_analysis` exposes one top-level `EvidenceBundle.analysis_job_id` and one `EvidenceRecord.evidence_id` for every normalized record. Production assembly already emits record identifiers as `<analysis_job_id>:evidence:<zero-padded one-based sequence>`, but the public validation boundary does not enforce that relation.
+`artifact_analysis` exposes one top-level `EvidenceBundle.analysis_job_id` and one `EvidenceRecord.evidence_id` for every normalized record. Production assembly already emits record identifiers as `<analysis_job_id>:evidence:<zero-padded one-based sequence>`, but the pre-repair public validation boundary did not enforce that relation.
 
-On current owner ancestry, `EvidenceRecord::validate(expected_sequence)` validates bounded `evidence_id` text and the numeric sequence independently. `EvidenceBundle::validate()` supplies only the expected sequence; it does not bind the record identifier to the enclosing `analysis_job_id`. A deserialized or reconstructed receipt can therefore carry an unrelated but syntactically valid `evidence_id`, or reuse the first record identifier at another valid sequence, while retaining all other fields.
+On predecessor `36cea922...`, `EvidenceRecord::validate(expected_sequence)` validated bounded `evidence_id` text and the numeric sequence independently. `EvidenceBundle::validate()` supplied only the expected sequence; it did not bind the record identifier to the enclosing `analysis_job_id`. A deserialized or reconstructed receipt could therefore carry an unrelated but syntactically valid `evidence_id`, or reuse the first record identifier at another valid sequence, while retaining all other fields.
 
 This is a referential-integrity defect at the evidence-contract boundary. It is not an analyzer verdict, malware classification, sandbox-isolation claim, or consumer authorization decision.
 
@@ -16,41 +16,38 @@ This is a referential-integrity defect at the evidence-contract boundary. It is 
 
 Issue #58 owns the separate subject-binding relation between the top-level `ArtifactDescriptor` and nested `ArtifactIdentity` evidence. Issue #60 is intentionally separate because its invariant is record/reference identity inside one analysis job.
 
-## Current implementation evidence
+## Executed causal RED
 
-`AnalysisEngine::deterministic_job_id()` creates one deterministic job identity. `push_record()` then assigns every emitted record `format!("{analysis_job_id}:evidence:{sequence_number:04}")`. The runtime producer is therefore stricter than the public validator.
+Native CI `35219614102` executed exact `36cea922b5f9170ad9e2813d52d0c0f64f23bacf` with Rust 1.97.1. Verify job `105196251862` passed exact checkout, dependency lock, repository policy validation, coverage-parser tests, and `cargo fmt --check`, then ran the full locked workspace/all-target test command.
 
-That asymmetry matters after serialization. Audit stores, provenance/signature systems, incident references, deduplication, and downstream evidence links can reasonably treat `evidence_id` as the stable identifier for a record produced by the enclosing job. Accepting a different identity at validation time lets the stored reference disagree with the job whose provenance a consumer is evaluating.
+The dedicated witness reached all three identity tests:
 
-## RED lineage and review hardening
+- `emitted_evidence_ids_match_the_documented_job_and_sequence_identity` passed, proving the runtime producer already emits the intended deterministic identity form;
+- `foreign_job_evidence_identifier_fails_closed` failed because validation accepted `analysis_job_foreign:evidence:0001` at sequence 1;
+- `duplicate_sequence_evidence_identifier_fails_closed` failed because validation accepted record 1's identifier at sequence 2.
 
-Initial test-bearing authority `b81495c9d4352ed55b3dc662a19cecb535d7a186` placed both hostile mutations in one test. Current predecessor exact `95438943226b719dda296ada384036e258d81bf4`, CI `34057675450`, completed with hosted negative rootless/AppArmor GREEN while verify, coverage, and branch-coverage failed during broader Rust evidence generation. That run proves execution reached the repository's Rust evidence path, but the available GitHub connector evidence does not retain assertion-level log text sufficient to promote the predecessor failure as the precise issue #60 causal RED.
+Both hostile records retained the correct numeric sequence, so `InvalidEvidenceSequence` could not satisfy the witness. Hosted negative rootless/AppArmor also passed on this exact. Broad coverage and branch-coverage jobs failed during repository-wide Rust evidence generation and remain separate gates; positive SELinux did not provide qualifying current-head evidence.
 
-Test-only ordinary child `e9c6217306da87dc075a2e102d38eb41ed83cb28` therefore improves causality rather than guessing. It changes no production Rust, public schema, wire shape, or version. The witness has three separately named controls:
+## Minimal causal repair
 
-1. `emitted_evidence_ids_match_the_documented_job_and_sequence_identity` proves the existing producer emits the deterministic identity form this repair intends to preserve;
-2. `foreign_job_evidence_identifier_fails_closed` changes only the first record identifier to `analysis_job_foreign:evidence:0001` and requires rejection;
-3. `duplicate_sequence_evidence_identifier_fails_closed` reuses record 1's valid identifier at sequence 2 and independently requires rejection.
+Production commit `c024ecc84a83f5af7a24adf7b92b191792337762` changes only the contract relation required by the executed RED and the two hostile regressions:
 
-Current-head review correctly found that plain `is_err()` assertions could still false-GREEN on an unrelated validation failure. Test-only ordinary child `0181766da395167ab3ca28bcbc2d211efe3a5731` therefore keeps both hostile mutations on their intended one-based sequence, computes the canonical expected identity for that sequence, proves the supplied hostile identity differs from it, and explicitly fails if validation returns `InvalidEvidenceSequence`. This does not invent the future production error or turn the semantic RED into a compile-time missing-variant RED.
+1. `EvidenceBundle::validate()` passes the enclosing `analysis_job_id` into `EvidenceRecord::validate()`;
+2. record validation first preserves the existing contiguous one-based sequence check, then computes the canonical identifier `<analysis_job_id>:evidence:<sequence padded to four decimal digits>`;
+3. a contradiction is rejected as `ContractError::InvalidEvidenceIdentity { expected_evidence_id, actual_evidence_id }` rather than rewritten, normalized, or misreported as a sequence failure;
+4. the foreign-job and duplicate-ID tests now assert the exact typed error and exact expected/actual identities.
 
-The dedicated identity-mismatch error and its expected/actual identity fields remain part of the minimum GREEN contract below. Once the current exact witness executes and proves that the existing validator still accepts both hostile identities, the production repair must add that typed failure and the regression must then assert it exactly. Until then, describing this lane as fully assertion-level typed hardening would overstate the checked-in evidence.
+Runtime emission, public wire fields, schema version, analyzer execution, disposition semantics, and consumer verdict ownership are unchanged. The public JSON Schema is also unchanged: portable Draft 2020-12 does not provide a straightforward cross-instance formatted-string equality relation between top-level `analysis_job_id`, array position, and each `evidence_id`. Do not claim schema parity for this relation without a deliberate versioned dialect contract and independent tests.
 
-Splitting the mutations prevents the first failing assertion from hiding the second; the sequence guard prevents a later unrelated sequence failure from satisfying either hostile case. No production behavior is authorized to change until the current exact witness executes for the intended validator gap.
+## Evidence and provenance rationale
 
-## Smallest causal GREEN after executed RED
+The repair keeps the identifier relation deterministic and independently checkable at receipt validation. That is consistent with provenance systems that require subjects and metadata to remain attributable to the producer context rather than accepting internally contradictory identifiers. SLSA version 1.2 remains the current published specification as checked on 2026-09-18; SLSA provenance is defined using the in-toto attestation framework. in-toto likewise treats signed link metadata and the authorized step/functionary relation as verifiable supply-chain evidence rather than best-effort labels.
 
-After causal execution, the minimum compatible repair is to validate the identity relation the producer already emits: for each one-based sequence `n`, the accepted record identifier is exactly `<analysis_job_id>:evidence:<n padded to four decimal digits>`. Validation should reject a contradiction rather than rewrite or normalize the supplied identifier.
-
-A typed contract error should distinguish evidence-identity mismatch from `InvalidEvidenceSequence`. That preserves the diagnostic boundary between an incorrect numeric position and an identifier that does not belong to the enclosing job/position. The validator should receive the enclosing `analysis_job_id` explicitly rather than recover it by parsing untrusted `evidence_id` text. The post-RED regression must bind both hostile cases to this dedicated error and verify the expected canonical identity for sequence 1 or 2 respectively.
-
-If this deterministic string form is not intended to remain stable public `1.0.0` semantics, the alternative is an explicit versioned contract change. Random record IDs, process-local identity, downstream ignore rules, sequence-only validation while retaining authoritative-looking `evidence_id`, or another unsigned recomputable companion checksum are rejected alternatives.
-
-JSON Schema remains an independent limitation: portable Draft 2020-12 keywords do not provide a straightforward cross-instance string-equality function between `analysis_job_id`, array position, and a formatted `evidence_id`. The Rust validator must not claim the JSON Schema proves this relation unless the published dialect is deliberately extended and independently tested.
+This evidence is supporting architecture rationale, not a claim that issue #60 by itself makes the runtime SLSA-compliant or provides cryptographic attestation. Immutable release provenance remains a separate repository gate.
 
 ## Risk and effect
 
-Without the binding, a receipt can be structurally well formed yet expose conflicting reference identities. That weakens audit reconstruction and can make a signed or stored record identifier appear attributable to evidence outside the job whose top-level provenance is being inspected. The repair narrows admissible receipts to the identity semantics the runtime producer already intends; it does not authorize artifact verdicts, analyzer execution, or consumer admission.
+Without the binding, a receipt can be structurally well formed yet expose conflicting reference identities. That weakens audit reconstruction and can make a stored or later signed record identifier appear attributable to evidence outside the job whose top-level provenance a consumer is evaluating. The repair narrows admissible receipts to the identity semantics the runtime producer already emits; it does not authorize artifact verdicts, analyzer execution, or consumer admission.
 
 ## Related release gates
 
