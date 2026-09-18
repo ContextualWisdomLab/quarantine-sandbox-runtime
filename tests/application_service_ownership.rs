@@ -66,12 +66,17 @@ fn write_fake_podman(program: &Path, log: &Path, mode: &str, ready_port: u16) {
         network,
         container,
     );
-    fs::write(program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(program)
-        .expect("fake Podman metadata should exist")
+    // Never truncate an executable path that a just-finished backend process may
+    // still reference. Stage a complete inode and atomically replace the pathname.
+    let staged_program = program.with_extension("next");
+    fs::write(&staged_program, script).expect("staged fake Podman should be writable");
+    let mut permissions = fs::metadata(&staged_program)
+        .expect("staged fake Podman metadata should exist")
         .permissions();
     permissions.set_mode(0o700);
-    fs::set_permissions(program, permissions).expect("fake Podman should be executable");
+    fs::set_permissions(&staged_program, permissions)
+        .expect("staged fake Podman should be executable");
+    fs::rename(&staged_program, program).expect("fake Podman replacement should be atomic");
 }
 
 fn count_calls(log: &Path, needle: &str) -> usize {
