@@ -2,11 +2,11 @@
 
 ## Current regression and bounded-context ownership
 
-Canonical application-service/network parent #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f` validates a consumer-supplied immutable image reference, then places that string directly after Podman `create` options and before consumer command argv without an explicit `--` terminator. Draft successor #133 repairs that lost boundary on the current #127 ancestry rather than transplanting an older owner tree.
+Canonical application-service/network parent #127 is exact `4306462ddbd90ce137074e70af7c9c0bbee18d9e`. Draft successor #133 has now adopted that exact parent non-force while preserving its option-delimiter production/test/documentation delta. `application_service` owns immutable workload intent; `infrastructure::podman` owns translation into Podman's CLI grammar. The invariant is that the digest-validated workload identity remains Podman's image positional operand and cannot be reinterpreted as provider control syntax.
 
 The request validator accepts a repository component beginning with `-` and containing `=` when the overall value ends in a valid lower-case `@sha256:<64-hex>` digest. A Podman-shaped token such as `--annotation=qsr.boundary=value@sha256:<digest>` therefore reaches the infrastructure plan as domain-valid image data.
 
-This is not a new control. It is a succession regression of reopened issue #90 / historical PR #91. `application_service` owns immutable workload intent; `infrastructure::podman` owns translation into Podman's CLI grammar. The invariant is that the digest-validated workload identity remains Podman's image positional operand and cannot be reinterpreted as provider control syntax.
+This is not a new control. It is a succession regression of reopened issue #90 / historical PR #91.
 
 ## Historical causal evidence
 
@@ -24,9 +24,9 @@ Podman's current `cmd/podman/containers/create.go` declares `create [options] IM
 
 The request also contains consumer-controlled command argv. If the accepted image token is consumed as a Podman option, a following command token can become the first positional `IMAGE`. The SHA-256 identity validated by the runtime can then cease to describe the workload operand presented to Podman.
 
-## Current-owner regression replay and repair
+## Current-owner replay and repair
 
-Issue #132 / Draft #133 is the current regression-instance lane. Test-only `088fd10e794b5c02a13ed45e082d509dc77ccfb9` adds `tests/podman_application_service_option_delimiter_red.rs` on exact #127 parent `1a3cd0427bbf99e41c1d8bd4089747561237071f`.
+Issue #132 / Draft #133 is the current regression-instance lane. Test-only `088fd10e794b5c02a13ed45e082d509dc77ccfb9` added `tests/podman_application_service_option_delimiter_red.rs` on the earlier #127 exact `1a3cd0427bbf99e41c1d8bd4089747561237071f`.
 
 The witness:
 
@@ -36,11 +36,17 @@ The witness:
 - requires exactly one literal `--` immediately before the exact validated image reference;
 - requires command argv after the image to remain entry-preserving.
 
-Historical #90/#91 execution remains the causal RED authority for restoring this semantic. Current-owner production commit `3f84f02b46e44aac61092a520fcbc35cb05aa2f1` performs the minimum repair on the evolved #127 source: its complete source diff is one added `"--".to_owned()` immediately before `request.image_reference.clone()`. It changes no network selector, cleanup/lifecycle authority, typed spawn mapping, digest validation, image text, command entries, or no-shell behavior.
+Historical #90/#91 execution remains the causal RED authority for restoring this semantic. Current-owner production commit `3f84f02b46e44aac61092a520fcbc35cb05aa2f1` performs the minimum repair on the evolved application-service source: its complete production diff is one added `"--".to_owned()` immediately before `request.image_reference.clone()`. It changes no network selector, cleanup/lifecycle authority, typed spawn mapping, digest validation, image text, command entries, or no-shell behavior.
 
-Commit `6a763370250957c6fc92108bca1e27a9146bc48c` removes the temporary one-shot source-fix workflow after the direct exact-blob write path became available. The workflow is therefore not part of current release authority. Older source-fix runs from superseded heads cannot establish current branch status or safely move the current ref.
+Commit `6a763370250957c6fc92108bca1e27a9146bc48c` removes the temporary one-shot source-fix workflow. The workflow is not part of release authority.
 
-The first CI materialized after source repair plus workflow removal is `35203360276`. Its verify, coverage, branch-coverage, hosted negative rootless/AppArmor, and positive-LSM jobs were still pre-runner queued when this record was refreshed. Do not call #133 current-head GREEN until an unchanged descendant containing this doctoring update executes the focused witness and the full required gates.
+Exact predecessor `4d5794b1a41d49ee80e3f116db705538e247606f`, CI `35203507971`, has executed. Exact checkout, dependency lock, repository policy and coverage-parser tests passed; verify then failed at `cargo fmt --check` before Rust tests, lint or rustdoc. Hosted negative rootless/AppArmor was GREEN. Coverage and branch-coverage reached Rust evidence generation but failed there; positive SELinux never acquired a runner and was cancelled after the queue window. This execution is not focused semantic GREEN because the option-delimiter test did not run in verify.
+
+Formatter-only descendant `8265dd5e2a1a19c4de2e5b647c3a5ff0788fdf09` applies rustfmt's multiline layout to the long `iter().filter().count()` assertion in the focused regression. Production source and assertions are unchanged.
+
+GitHub then materialized merge commit `8d18fb5701fb7b5690fed270a24c9d55b2785cd1` with parents current #127 `4306462ddbd90ce137074e70af7c9c0bbee18d9e` and formatter-clean #133 `8265dd5e2a1a19c4de2e5b647c3a5ff0788fdf09`. The #133 branch was advanced to that commit with a non-force fast-forward. The resulting tree adopts #127's acquired-network-ID fixture repair and preserves all three #133-owned files; no production option-delimiter delta or parent fixture delta was discarded.
+
+No predecessor CI conclusion transfers after that ancestry movement. The current descendant must execute independently.
 
 ## Applied minimum repair
 
@@ -52,7 +58,7 @@ Do not shell-join values, escape or rewrite the image identity, restore generate
 
 - Joining image/command text into one shell string enlarges the injection boundary and breaks direct argv.
 - Escaping or prefixing the image token mutates workload identity instead of delimiting provider syntax.
-- Relying on current repository validation is insufficient because the demonstrated option-shaped token is accepted, and future validation changes must not reopen the CLI boundary.
+- Relying on request validation is insufficient because the demonstrated option-shaped token is accepted, and future validation changes must not reopen the CLI boundary.
 - Treating a backend parse error as containment does not prove the validated image remains the actual image operand.
 - Folding this into #46 or #47 would conflate applied image-digest attestation or ENTRYPOINT semantics with provider CLI parsing.
 
