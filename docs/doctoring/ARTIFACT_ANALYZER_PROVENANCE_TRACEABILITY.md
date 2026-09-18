@@ -12,21 +12,26 @@ This is an evidence-provenance defect, not a maliciousness-verdict concern. Ward
 
 ## Current authority
 
-Parent artifact-analysis Draft #18 is `178cd90dd298fd3c02c78e77c285d1893fa83617`.
+Parent artifact-analysis Draft #18 is `703b4b1a047321bb08d1d6cb1de78d01cb350696`. PR #55 adopted that parent through ordinary non-force ancestry before the current hardening. Review `5243077338` identified two generic-error false-GREEN paths on exact `6a77634007260f2cb732cda959f3e23edc314a45`; test-only descendant `7d9e6ff7c4e4b5369e468a3048ca94c2ead3caa2` removes both without changing production, schema, or wire behavior.
 
-On that source:
+On the inherited production source:
 
 - `StaticAnalyzer` exposes `analyzer_id()` and `analyze()` only;
 - `AnalysisEngine::new()` validates analyzer identifier syntax and rejects duplicate IDs only within one engine instance;
 - `deterministic_job_id()` hashes request ID, profile, artifact SHA-256, policy ID, runtime source revision, and analyzer ID strings;
 - `EvidenceRecord.producer_id` carries the analyzer ID but no immutable analyzer implementation/configuration identity;
-- `RuntimeManifest.source_revision` identifies runtime source, not an independently versioned analyzer artifact.
+- `RuntimeManifest.source_revision` identifies runtime source, not an independently versioned analyzer artifact;
+- externally supplied analyzers still stop at the isolated-worker prerequisite before invocation.
 
 The PRD requires attributable evidence and an auditor-verifiable execution identity. The TRD states evidence identifiers/order are deterministic for the same request/configuration/bytes. A configuration dimension that can change evidence semantics must therefore participate in provenance rather than be collapsed into a reusable display identifier.
 
 ## RED
 
-Initial test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`. Review-hardening commit `87f579311e992a5815e7887e83e050598d23902d` closes a false-GREEN by requiring identical analyzer configuration/input to retain identical job identity and semantic evidence across independent engine instances. Commit `c32c2c489356213e70360087851b6c08df855c61` closes two additional false-GREEN paths: changing only the job digest while leaving serialized analyzer `producer_id` ambiguous, and deriving purported provenance circularly from analyzer findings. Commit `671b81dfca03ba345c8a5b01d93edffbc79995ac` removes a RED overconstraint by allowing the future contract to reject missing stable provenance symmetrically either during engine construction or during pre-invocation analysis validation.
+Initial test-bearing commit `06ee0a1264960843a8ecd93d0e5ecff247866b17` adds `tests/artifact_analysis_analyzer_provenance_red.rs`. Review-hardening commit `87f579311e992a5815e7887e83e050598d23902d` closes a false-GREEN by requiring identical analyzer configuration/input to retain identical job identity and semantic evidence across independent engine instances. Commit `c32c2c489356213e70360087851b6c08df855c61` closes two additional false-GREEN paths: changing only the job digest while leaving serialized analyzer `producer_id` ambiguous, and deriving purported provenance circularly from analyzer findings. Commit `671b81dfca03ba345c8a5b01d93edffbc79995ac` intentionally allowed a future dedicated provenance-specific fail-closed outcome at engine construction or pre-invocation analysis validation.
+
+That allowance was too broad in the concrete test. Exact `6a776340...` accepted `(Err(_), Err(_))` during engine construction and accepted any symmetric analysis error other than `IsolatedAnalyzerWorkerRequired`. Current `AnalysisError` also contains contract, ingestion, invalid configuration, invalid analyzer identifier, duplicate identifier, and no-analyzer failures. Any of those unrelated failures could therefore have made #54 appear GREEN without proving analyzer provenance.
+
+Review `5243077338` records this causal finding. Test-only `7d9e6ff7c4e4b5369e468a3048ca94c2ead3caa2` now treats every current construction error and every current analysis error as a failed witness. The isolated-worker prerequisite therefore remains an explicit blocker rather than a provenance success. A future provenance-specific typed failure may be admitted only after the worker prerequisite is satisfied, the provenance RED executes for its intended collision, and production introduces a dedicated provenance contract that can be asserted exactly. Generic `Err(_)` is not acceptable evidence.
 
 The hardened fixture has three analyzer implementations sharing one display `analyzer_id`:
 
@@ -36,12 +41,12 @@ The hardened fixture has three analyzer implementations sharing one display `ana
 
 Current production collapses all three onto the same deterministic job input and the same serialized analyzer `producer_id`. The third fixture matters because output hashing is not provenance: two different executable/configuration identities can legitimately emit identical findings and still must remain attributable to what actually ran.
 
-The RED permits two future outcomes:
+After the isolated-worker prerequisite is satisfied, the RED permits two provenance-specific future outcomes:
 
-1. fail closed before analyzer/worker invocation when stable analyzer provenance is unavailable, whether that validation occurs at engine construction or at the analysis boundary; or
-2. admit analyzers only when a stable versioned provenance identity makes materially different implementations/configurations distinct while repeated identical provenance/input remains stable.
+1. a dedicated typed fail-closed provenance rejection before analyzer/worker invocation when stable analyzer provenance is unavailable; or
+2. successful admission only when a stable versioned provenance identity makes materially different implementations/configurations distinct while repeated identical provenance/input remains stable.
 
-The RED rejects asymmetric admission, random/non-repeatable identity, different evidence under one identical job identity, job-only provenance that leaves serialized producer identity ambiguous, and provenance inferred from emitted findings.
+The RED rejects generic error substitution, asymmetric admission, random/non-repeatable identity, different evidence under one identical job identity, job-only provenance that leaves serialized producer identity ambiguous, and provenance inferred from emitted findings.
 
 ## Alternatives
 
@@ -100,7 +105,7 @@ request/profile
 
 Before analyzer provenance can support an immutable release claim, one unchanged integrated protected candidate must prove:
 
-- causal RED then focused/full GREEN for provenance collision, repeat determinism, producer attribution, same-output/different-producer, and symmetric fail-closed guards;
+- causal RED then focused/full GREEN for provenance collision, repeat determinism, producer attribution, same-output/different-producer, and fail-closed provenance guards;
 - exact analyzer package/artifact digest and approved configuration bound to the worker invocation before findings are accepted;
 - exact worker isolation evidence from #49 and bounded result ingestion from #50;
 - truthful dynamic execution semantics from #52 where applicable;
