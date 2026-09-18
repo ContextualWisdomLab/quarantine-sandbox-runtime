@@ -58,7 +58,9 @@ fn plan_terminates_podman_options_before_untrusted_image_operand() {
         "an accepted leading-dash image token must not be reinterpretable as a Podman option"
     );
     assert_eq!(
-        argv.iter().filter(|argument| argument.as_str() == "--").count(),
+        argv.iter()
+            .filter(|argument| argument.as_str() == "--")
+            .count(),
         1,
         "the create plan needs one unambiguous option terminator"
     );
