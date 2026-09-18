@@ -17,7 +17,7 @@ The test-only causal candidate `be040a3e308fc09e6286bf0a5d0801b0a5c047b5` fixes 
 - `request_id = "é" × 65`: 65 characters, 130 UTF-8 bytes. Stock `maxLength: 128` admits the character count while runtime validation rejects `InvalidRequestId`.
 - one command argument `"é" × 513`: 513 characters, 1,026 UTF-8 bytes. Stock `maxLength: 1024` admits the character count while runtime validation rejects `InvalidCommandArgument { argument_index: 0 }`.
 
-The final RED assertion requires the public application-service validation path to stop declaring stock Draft 2020-12 alone as sufficient authority for a keyword that stock validators may ignore.
+Review `5253486572` found a false-GREEN in the original final assertion: requiring only `$schema != https://json-schema.org/draft/2020-12/schema` would allow an unrelated custom dialect to satisfy the regression while still giving `x-cwl-maxUtf8Bytes` no executable semantics. Test-only successor `cc6a6d901101d4cd35be78db525f312a23a35f39` therefore binds the RED to the versioned CWL artifact-analysis contract dialect identity owned by #101/#102. It still changes no production Rust, public schema, or vocabulary source. The live schema remains on stock Draft 2020-12, so the intended causal failure is preserved.
 
 ## Decision boundary
 
@@ -25,13 +25,13 @@ Do not change the runtime to character counting. The byte ceiling is a resource/
 
 After the causal RED executes, the minimum GREEN is to adopt the released/versioned CWL byte-assertion contract into the application-service public schema validation path, with unsupported implementations failing closed. Exact-bound positive vectors and one-byte-overflow negative vectors are required for both `request_id` and command arguments.
 
-The application-service schema remains domain truth for application-service fields. The vocabulary definition remains a separately versioned repository contract owned by #101/#102. Mutable-branch dependency and source copying are forbidden.
+The application-service schema remains domain truth for application-service fields. The vocabulary definition remains a separately versioned repository contract owned by #101/#102. Referring to its versioned dialect identity in this RED does not make mutable #102 source consumer authority; publication and semantics remain prerequisites. Mutable-branch dependency and source copying are forbidden.
 
 ## Risks and follow-up
 
 A schema-only consumer can currently accept requests that the runtime later rejects, creating interoperability drift at an external contract boundary. Conversely, weakening runtime byte bounds to match `maxLength` would change resource semantics and is not an acceptable compatibility repair.
 
-No release claim is valid until the causal RED executes, the released vocabulary is adopted, exact-head repository/fmt/test/Clippy/rustdoc and complete owned-production coverage gates pass, applicable security/review/isolation gates are terminal, and the contract is included in immutable publication with SBOM/provenance/reproducibility/rollback evidence.
+No release claim is valid until the hardened causal RED executes, the released vocabulary is adopted, exact-head repository/fmt/test/Clippy/rustdoc and complete owned-production coverage gates pass, applicable security/review/isolation gates are terminal, and the contract is included in immutable publication with SBOM/provenance/reproducibility/rollback evidence.
 
 ## References
 
