@@ -32,6 +32,8 @@ Canonical network successor #127 is now exact `71063882948daf5819839d8059c37857a
 
 Application-service option/operand successor #133 is now exact `4191ac0051093c30150734f6b4e98c05f36a0ef4`, Draft/open/mergeable, normally restacked on current #127 through two-parent `b151753269beee627c30c8e9711b48c63882dddf` and then docs-only parent adoption `4191ac0...`. Its retained semantic delta remains exactly one literal `--` immediately before `request.image_reference`, with focused regression and owner-local TRACEABILITY. The restacks change no image, argv, digest, network, or cleanup semantics. Current CI `35384712828` is queued; historical #90/#91/#14 and predecessor #133 GREEN cannot be promoted.
 
+Issue #138 / Draft #139 now owns the application-service public-schema UTF-8-byte mismatch independently of network/runtime lifecycle. #139 exact `d08cbe499d222e7ccbfa7bd496b640c5fc599a17` is an ordinary child of #21 exact `717edef...`, ahead 2 / behind 0, changing only `tests/application_service_schema_utf8_byte_contract_red.rs` and `docs/doctoring/APPLICATION_SERVICE_UTF8_BYTE_SCHEMA_TRACEABILITY.md`. Test-bearing `be040a3e308fc09e6286bf0a5d0801b0a5c047b5` proves that stock Draft 2020-12 character-length assertions admit 65×`é` as a request ID and 513×`é` as one command argument while runtime UTF-8-byte validation rejects them at 130 and 1,026 bytes respectively. The intended RED requires the public schema to stop presenting stock Draft 2020-12 alone as executable authority for `x-cwl-maxUtf8Bytes`. #101/#102 remains the canonical byte-vocabulary/dialect prerequisite; #139 must consume/adapt its released contract rather than copy mutable source or publish a competing vocabulary. Native #139 CI `35404702085` is queued, so this is checked-in RED only.
+
 Issue #128 remains P0: hostile application payload must not execute before effective isolation attestation. Reusable gate logic may be consumed only through stable owner integration, not mutable sibling source copying.
 
 Issue #136/#137 remains a separate self-hosted-runner boundary. `linux-cluster-ops#326` owns s1 placement/registration and the true pre-lease enablement gate; this repository owns reusable isolation-attestation evidence. Draft #137 exact `57052b925c7f812e72e280d695aa2929a88bd85a` requires machine-verifiable RFC1918, Redis 6379, PostgreSQL 5432, and DNS denial evidence before checkout in the positive-LSM job. In-job pre-checkout evidence is defense in depth and does not prove the stronger pre-lease condition.
@@ -64,6 +66,7 @@ Core foundation repositories are optional released contract owners rather than m
 | Branch coverage can false-underreport repeated codegen records. | #112 current `8991d4a...`; predecessor has causal RED. | Execute current exact; require complementary outcome and denominator-mismatch controls GREEN without denominator/threshold reduction. |
 | Application-service network authority is not fully exact-ID and foreign-safe end to end. | #127 `7106388...`, CI `35384682678`; current #21 ancestry is adopted normally and recorded in checked-in TRACEABILITY. | Execute unchanged current exact, then progress provenance → pre-ID cleanup → post-ID cleanup → effective attachment → private authority → non-force termination → mandatory evidence. |
 | Leading-dash image references need explicit Podman option termination. | #133 `4191ac0...`, CI `35384712828`, normally restacked on current #127. | Execute focused delimiter witness and prove all #127 network/lifecycle deltas remain intact. |
+| Application-service public schema can admit multibyte request IDs and command arguments that the runtime rejects by UTF-8 byte length. | #138/#139 current `d08cbe4...`, CI `35404702085`; test-only RED above exact #21. | Execute the current mismatch RED; after #101/#102 publishes a versioned byte-vocabulary contract, adopt it without mutable source copying and prove exact-bound/overflow vectors for both fields. |
 | Hostile application payload can precede effective isolation attestation. | #128 downstream of network lifecycle. | Hold created workload, attest exact sandbox, release only after successful effective proof, preserve cleanup/recovery evidence. |
 | Future self-hosted CI may expose LAN/host services. | #136/#137 plus `linux-cluster-ops#326`. | Obtain current local RED, then reusable denial evidence plus real s1 pre-lease failed-reachability proof. |
 | Dynamic analysis completeness/execution semantics are not proven end to end. | #53 formatter-clean current exact. | Execute hardened RED before any semantic GREEN. |
@@ -80,11 +83,12 @@ Core foundation repositories are optional released contract owners rather than m
 2. Let #112 exact `8991d4a...` execute its physical branch-union repair; do not weaken measured surface or transfer predecessor success.
 3. Let #127 exact `7106388...` / CI `35384682678` execute after normal adoption of current #21 and checked-in owner-adoption TRACEABILITY; classify any remaining network failure at its intended owner boundary.
 4. Let #133 exact `4191ac0...` / CI `35384712828` execute on current #127; require delimiter GREEN plus parent network/lifecycle preservation.
-5. Let #53 and #61 execute current exacts before any further semantic promotion.
-6. Let #65 and then #130 execute without predecessor promotion.
-7. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
-8. Let #51/#55/#59 and #67 exact `010330580...` / CI `35400068729` execute independently without wake commits; #67 must first prove descriptor-identity aliasing before any new semantic GREEN.
-9. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
-10. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
-11. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
-12. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
+5. Let #139 exact `d08cbe4...` / CI `35404702085` execute its application-service schema/runtime UTF-8 mismatch RED; after #101/#102 releases the byte-vocabulary contract, adopt that versioned contract rather than mutable source.
+6. Let #53 and #61 execute current exacts before any further semantic promotion.
+7. Let #65 and then #130 execute without predecessor promotion.
+8. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
+9. Let #51/#55/#59 and #67 exact `010330580...` / CI `35400068729` execute independently without wake commits; #67 must first prove descriptor-identity aliasing before any new semantic GREEN.
+10. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
+11. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
+12. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
+13. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
