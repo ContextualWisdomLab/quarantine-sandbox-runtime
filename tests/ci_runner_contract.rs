@@ -151,3 +151,43 @@ fn pull_request_ci_does_not_skip_documentation_only_heads() {
         "PR CI must materialize for documentation-only head movement; predecessor exact-head evidence is not transferable"
     );
 }
+
+#[test]
+fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+    let job = job_section(&workflow, "podman-e2e-positive-lsm");
+    let checkout = job
+        .find("- uses: actions/checkout@")
+        .expect("positive LSM job must retain exact-head checkout");
+    let gate_name = "- name: Attest self-hosted runner LAN and host-service denial";
+    let gate = job.find(gate_name).unwrap_or_else(|| {
+        panic!(
+            "positive LSM self-hosted runner must machine-attest LAN/host-service denial before checkout"
+        )
+    });
+
+    assert!(
+        gate < checkout,
+        "self-hosted network-isolation attestation must run before repository checkout"
+    );
+
+    let pre_checkout_gate = &job[gate..checkout];
+    for required_scope in [
+        "192.168.0.0/16",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "6379",
+        "5432",
+        "DNS",
+    ] {
+        assert!(
+            pre_checkout_gate.contains(required_scope),
+            "pre-checkout self-hosted attestation must cover {required_scope}"
+        );
+    }
+    assert!(
+        pre_checkout_gate.contains("evidence"),
+        "self-hosted isolation gate must emit machine-verifiable reachability evidence rather than only inspect configuration"
+    );
+}
