@@ -1,6 +1,6 @@
 # Artifact Analyzer Result-Channel Traceability
 
-Status: RED-only design/verification evidence for issue #50. Current parent is #18 exact `7a48b7f904ce41ce2d2f184028c2eec7a9201d55`. This document does not authorize production behavior or release claims.
+Status: RED-only design/verification evidence for issue #50. Current parent is #18 exact `703b4b1a047321bb08d1d6cb1de78d01cb350696`. Current test-bearing head is ordinary descendant `61b5e42744f791dd6e4e6edc2d23215b0c904460`. This document does not authorize production behavior or release claims.
 
 ## Problem and bounded-context ownership
 
@@ -28,7 +28,11 @@ Serde Developers. (2026). *StreamDeserializer* (`serde_json` 1.0.151 documentati
 
 Initial test-bearing commit `618f3dae4fa7909a8725ab67895375abebba6339` adds `tests/artifact_analysis_result_channel_budget_red.rs`. The fixture uses issue #17's 65,536-byte `maximum_output_bytes` example and amplifies a small immutable artifact into 512 individually valid `StaticCapability` findings.
 
-After #49's fail-closed production repair landed on the parent candidate, the previous broad `Err(_)` acceptance became a false-GREEN path: the test could pass because no worker existed, without exercising any result channel. The current hardening distinguishes `AnalysisError::IsolatedAnalyzerWorkerRequired` and deliberately fails in that state. Other fail-closed outcomes are acceptable only after a worker/result-channel path exists and rejects the invocation for the bounded-ingestion contract.
+After #49's fail-closed production repair landed on the parent candidate, the previous broad `Err(_)` acceptance became a false-GREEN path: the test could pass because no worker existed, without exercising any result channel. The first hardening distinguished `AnalysisError::IsolatedAnalyzerWorkerRequired` and deliberately failed in that state.
+
+Formal current-head review `5242670613` found a second false-GREEN path: the remaining `Err(_)` arm still treated every other request, ingestion, contract, or engine error as acceptable bounded-ingestion evidence. Test-only `61b5e42744f791dd6e4e6edc2d23215b0c904460` removes that escape hatch. Every currently available non-isolation `AnalysisError` now fails the witness. A future dedicated bounded result-channel overflow outcome may become an accepted rejection only after this RED reaches the worker path causally and the production contract introduces that typed result. This prevents an unrelated fail-closed error from satisfying issue #50.
+
+The `Ok(bundle)` control remains intentionally strict: an over-budget result must not be materialized as `Completed`, and the serialized evidence returned to the controller must remain within the declared fixture budget. This witness still does not claim that final bundle size alone proves streaming/pre-materialization enforcement; that property requires the worker-port implementation and hostile framing/overflow tests listed below.
 
 The 65,536-byte value is fixture/profile authority, not a proposed global runtime constant. When issue #17's profile contract becomes executable, the RED must consume that versioned policy directly rather than duplicating the fixture value.
 
@@ -41,8 +45,8 @@ The 65,536-byte value is fixture/profile authority, not a proposed global runtim
 5. Return a bounded attributable failure/receipt tied to artifact SHA-256, analyzer/profile identity, runtime release and worker invocation; do not retain unbounded raw output.
 6. Preserve deterministic record ordering and per-record validation within the aggregate budget.
 
-Rejected alternatives include a magic repository-wide finding count, post-hoc validation of a complete attacker-sized `Vec`, worker OOM as controller enforcement, silent truncation, larger controller memory, and treating a missing isolated worker as proof that the result channel itself is bounded.
+Rejected alternatives include a magic repository-wide finding count, post-hoc validation of a complete attacker-sized `Vec`, worker OOM as controller enforcement, silent truncation, generic unrelated `AnalysisError` acceptance, larger controller memory, and treating a missing isolated worker as proof that the result channel itself is bounded.
 
 ## Completion evidence
 
-#49 host-capability isolation and #50 bounded result ingestion must both be GREEN on one unchanged integrated candidate. Hostile byte/count amplification, malformed framing, an oversized single record, truncated stream, worker timeout/termination, and cleanup failure need independent tests. Release evidence additionally requires exact protected-head CI, owned production rustdoc/test/edge coverage policy, security/SBOM/provenance/reproducibility, and real isolation evidence. Mutable PR heads are not consumer authority.
+#49 host-capability isolation and #50 bounded result ingestion must both be GREEN on one unchanged integrated candidate. Hostile byte/count amplification, malformed framing, an oversized single record, truncated stream, worker timeout/termination, cleanup failure, and a typed overflow outcome need independent tests. Release evidence additionally requires exact protected-head CI, owned production rustdoc/test/edge coverage policy, security/SBOM/provenance/reproducibility, and real isolation evidence. Mutable PR heads are not consumer authority.
