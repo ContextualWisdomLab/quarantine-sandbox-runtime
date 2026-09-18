@@ -52,7 +52,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Changed
 
-- Artifact-analysis job identity validation now uses the additive evidence `1.1.0` contract rather than redefining `analysis_job_id` under `1.0.0`. The companion digest binds the opaque job ID to request/profile/artifact/policy/runtime identity while leaving analyzer provenance to its own contract.
+- Artifact-analysis job identity validation now uses the additive evidence `1.1.0` contract rather than redefining `analysis_job_id` under `1.0.0`. The companion digest detects contradictions among the opaque job ID and receipt-visible request/profile/artifact/policy/runtime identity while leaving analyzer provenance and independent derivation proof to their own contracts.
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.
 - Artifact-analysis implementation moved from generic crate-root files into `src/artifact_analysis/` to match the accepted DDD bounded context while preserving the public crate facade.
 - Rootless Podman implementation moved from the Core `sandbox_execution` path into `src/infrastructure/`; the Core no longer depends on `application_service` error types.
@@ -71,7 +71,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Fixed
 
-- Artifact-analysis receipts with stale job identity evidence now fail closed when the job ID, request ID, artifact subject, runtime policy ID, or runtime source revision changes. Missing or duplicated policy-boundary identity also fails closed instead of being selected by record order.
+- Artifact-analysis evidence `1.1.0` now fails closed when receipt identity-bearing fields contradict an unchanged `analysis_job_identity_sha256`, and missing or duplicated policy-boundary identity fails closed instead of being selected by record order. The companion digest remains attacker-recomputable unsigned self-consistency evidence; #66 self-verifiable job derivation is still open.
 - `production_source_has_no_panic_shortcuts` (`tests/ddd_architecture.rs`) excludes each source file's own `#[cfg(test)] mod tests` block before scanning for `.unwrap(`/`.expect(`/`panic!(` so legitimate test-only assertions are not classified as production shortcuts.
 - Podman inspection/process parsing accepts explicit JSON `null` capability fields, accepts the `io.podman.annotations.userns` annotation as effective user-namespace evidence when `HostConfig.UsernsMode` is empty, and strips a trailing NUL from `/proc/<pid>/attr/current`-derived LSM labels. These compatibility repairs affect the shared application-service verification path as well as command execution.
 
