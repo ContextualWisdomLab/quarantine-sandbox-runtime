@@ -1,4 +1,12 @@
-use std::{io::ErrorKind, path::Path, time::Duration};
+#![cfg(all(test, unix))]
+
+use std::{
+    io::ErrorKind,
+    path::Path,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 
@@ -39,6 +47,65 @@ fn concrete_child_timeout_is_killed_and_reaped() {
         .err();
 
     assert_eq!(error, Some(BoundedCommandError::Timeout));
+}
+
+#[test]
+fn descendant_holding_output_pipe_cannot_outlive_command_deadline() {
+    // The direct shell exits immediately while the background descendant keeps
+    // stdout/stderr open. The descendant has a finite lifetime shorter than the
+    // harness envelope, so the current bug returns a wrong result instead of
+    // leaving a detached Rust worker behind after the expected RED.
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker = thread::spawn(move || {
+        let args = vec!["-c".to_owned(), "sleep 2 & exit 0".to_owned()];
+        let started = Instant::now();
+        let error = BoundedCommandRunner::new(Duration::from_millis(100), 64)
+            .run(Path::new("/bin/sh"), &args)
+            .err();
+        let _ = sender.send((error, started.elapsed()));
+    });
+
+    let (error, elapsed) = receiver
+        .recv_timeout(Duration::from_secs(3))
+        .expect("bounded command did not return inside the outer deadline envelope");
+    worker.join().expect("bounded command worker panicked");
+
+    assert_eq!(error, Some(BoundedCommandError::Timeout));
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "bounded command returned after its deadline: {elapsed:?}"
+    );
+}
+
+#[test]
+fn descendant_holding_pipe_preserves_output_limit_precedence() {
+    // The direct shell exits after starting a descendant that first exceeds the
+    // retained-output budget and then keeps the inherited pipe open. OutputLimit
+    // must abort the owned process group immediately instead of being converted
+    // into a later wall-clock Timeout while capture waits for EOF.
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker = thread::spawn(move || {
+        let args = vec![
+            "-c".to_owned(),
+            "(printf 'overflow'; sleep 2) & exit 0".to_owned(),
+        ];
+        let started = Instant::now();
+        let error = BoundedCommandRunner::new(Duration::from_secs(1), 4)
+            .run(Path::new("/bin/sh"), &args)
+            .err();
+        let _ = sender.send((error, started.elapsed()));
+    });
+
+    let (error, elapsed) = receiver
+        .recv_timeout(Duration::from_secs(3))
+        .expect("bounded command did not return inside the outer deadline envelope");
+    worker.join().expect("bounded command worker panicked");
+
+    assert_eq!(error, Some(BoundedCommandError::OutputLimit));
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "output overflow was not surfaced before the command deadline: {elapsed:?}"
+    );
 }
 
 #[test]
