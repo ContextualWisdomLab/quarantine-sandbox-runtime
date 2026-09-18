@@ -219,9 +219,7 @@ fn enforce_capture_deadline<P, T, U>(
 where
     P: ChildProcess,
 {
-    if status_result.is_err() {
-        return status_result;
-    }
+    status_result?;
     match streams_finished_before_deadline(stdout_handle, stderr_handle, deadline, overflow) {
         CaptureWaitOutcome::Finished => status_result,
         CaptureWaitOutcome::Deadline => {
