@@ -197,7 +197,8 @@ fn relevant_schema_accepts(schema: &Value, instance: &Value) -> bool {
                 }
             }
 
-            if let Some(dependent_schemas) = object.get("dependentSchemas").and_then(Value::as_object)
+            if let Some(dependent_schemas) =
+                object.get("dependentSchemas").and_then(Value::as_object)
                 && let Some(instance_object) = instance.as_object()
             {
                 for (property, dependent_schema) in dependent_schemas {
@@ -334,7 +335,8 @@ fn evidence_bundle_schema_executes_dynamic_completeness_semantics() {
         AnalysisProfile::LinuxDynamic,
         AnalysisProfile::WindowsDynamic,
     ] {
-        let completed = serde_json::to_value(dynamic_bundle(profile)).expect("fixture must serialize");
+        let completed =
+            serde_json::to_value(dynamic_bundle(profile)).expect("fixture must serialize");
         let inconclusive = serde_json::to_value(unavailable_dynamic_bundle(profile))
             .expect("fixture must serialize");
         let mut false_completion = unavailable_dynamic_bundle(profile);
