@@ -2,16 +2,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::Error as SerializationError;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    AnalysisProfile, AnalysisRequest, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
+    AnalysisProfile, AnalysisRequest, ContractError, EvidenceKind, EvidenceRecord,
     IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
 };
 
-use super::ingestion::ingest_bytes_with_optional_name;
+use super::{contracts::EvidenceBundle, ingestion::ingest_bytes_with_optional_name};
 
 const MAX_ENGINE_IDENTIFIER_BYTES: usize = 128;
 
@@ -453,15 +452,6 @@ impl Default for AnalysisEngine {
             analyzer_execution_path: AnalyzerExecutionPath::BundledRuntime,
         }
     }
-}
-
-/// Serialize a bundle as stable human-readable JSON.
-///
-/// # Errors
-///
-/// Returns [`SerializationError`] if serialization fails.
-pub fn to_pretty_json(bundle: &EvidenceBundle) -> Result<String, SerializationError> {
-    serde_json::to_string_pretty(bundle)
 }
 
 fn is_valid_engine_identifier(value: &str) -> bool {

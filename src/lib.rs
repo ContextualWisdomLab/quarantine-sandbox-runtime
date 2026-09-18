@@ -26,9 +26,9 @@ pub use artifact_analysis::{
     AnalyzerFinding, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION,
     ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError, ContractError,
-    EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact, IngestionError,
-    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes,
-    to_pretty_json,
+    EVIDENCE_BUNDLE_SCHEMA_VERSION, EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer,
+    IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
+    StaticAnalyzer, ingest_bytes, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 pub use pr_source_artifact::{

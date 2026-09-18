@@ -14,7 +14,9 @@
 ```text
 src/
 ├── artifact_analysis/         Supporting bounded context
-│   ├── contracts.rs
+│   ├── analysis_engine.rs     Public analysis application boundary
+│   ├── contracts.rs           Internal v1.0 assembly/request primitives
+│   ├── evidence_bundle.rs     Public versioned evidence + semantic integrity
 │   ├── ingestion.rs
 │   └── runtime.rs
 ├── application_service/      Supporting bounded context
@@ -62,17 +64,17 @@ There are intentionally no environment, mount, device, privileged, host-namespac
 
 ### `ApplicationServiceLease`
 
-Schema `1.1.0` records:
+Schema `1.2.0` records:
 
 - schema version;
 - original request ID;
 - image digest reference;
-- runtime backend ID;
+- runtime backend ID and backend version;
 - sandbox/network IDs;
 - policy ID and canonical SHA-256 of every effective policy field;
 - loopback endpoint;
 - start/expiry/shutdown values;
-- P0 isolation attestation.
+- P0 isolation attestation including effective seccomp/LSM/resource-control state.
 
 ### `CleanupReceipt`
 
@@ -165,13 +167,18 @@ P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplie
 
 ## Artifact-analysis technical contract
 
-Existing artifact-analysis code remains source-compatible through root crate re-exports after moving implementation under `artifact_analysis`.
+Artifact-analysis remains source-compatible through root crate re-exports while implementation stays inside the Supporting bounded context.
 
+- `AnalysisRequest` remains schema `1.0.0`.
+- `EvidenceBundle` schema `1.1.0` adds required `analysis_job_identity_sha256` security evidence while preserving the existing opaque `analysis_job_id` meaning and format.
+- Immutable schema snapshots `schemas/evidence-bundle-1.0.0.schema.json` and `schemas/evidence-bundle-1.1.0.schema.json` make compatibility review explicit; `schemas/evidence-bundle.schema.json` tracks the current evidence revision.
 - Ingestion validates size/name before cloning bytes.
 - SHA-256 binds artifact identity.
 - Format recognition is non-executing.
 - Static analyzers implement `StaticAnalyzer` and emit normalized findings/failures.
 - Evidence identifiers and ordering are deterministic for the same request/configuration/bytes.
+- Evidence `1.1.0` binds `analysis_job_id`, request ID, requested profile, artifact SHA-256, one unambiguous runtime policy ID, and runtime source revision into the required companion digest. JSON Schema validates its canonical SHA-256 syntax; Rust recomputes cross-field equality.
+- The companion digest proves receipt self-consistency, not producer authentication. Stable analyzer provenance and signed/attested origin remain separate contracts.
 - Dynamic profiles without a worker fail closed as incomplete rather than silently downgrading to static completeness.
 
 ## Backend evolution
@@ -200,7 +207,9 @@ Required metrics for a real backend include:
 
 ## Compatibility
 
-- JSON contract versions are explicit.
+- JSON contract versions are explicit and independently versioned by public wire surface.
 - Public Rust facade should preserve existing artifact-analysis names when moving internal paths.
-- New incompatible contract behavior requires a version increment and compatibility tests.
-- No silent coercion of mutable image tags, unsupported profiles, malformed backend output, or excessive resource requests.
+- A field removal, field-meaning change, or other incompatible behavior requires a new major contract version plus compatibility tests.
+- A minor contract revision may add required security evidence for that explicit revision; consumers must opt into the new version rather than silently receiving new semantics under an old version number.
+- Artifact-analysis evidence `1.1.0` therefore adds a companion identity digest instead of redefining `analysis_job_id` under `1.0.0`.
+- No silent coercion of mutable image tags, unsupported profiles, malformed backend output, excessive resource requests, or unsupported schema revisions.
