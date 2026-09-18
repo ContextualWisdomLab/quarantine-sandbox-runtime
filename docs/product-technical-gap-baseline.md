@@ -12,6 +12,8 @@ Canonical integration root #1 remains exact `a85dc86c00f00354d9ddb9bf7c291c2c1cd
 
 ### Command runtime and repository fitness
 
+Lease-ownership owner #6 is now exact `7029537b2165c5ad0adf64183c0aa733257a5d4a`, Draft/open/mergeable on current root #1. Predecessor `785c2cc84861d3bce5fb78a7183cf3102b743bf5` executed CI `35180780227`: repository policy, coverage-parser and formatting passed; six of seven lease-owner controls passed, while `failed_launch_releases_idempotency_reservation_for_retry` failed on the retry with `BackendInvocationFailed { operation: "rootless_probe" }`. The fixture had rewritten the same executable pathname in place between the forced first failure and retry. Current test-only `7029537...` stages the same script on a sibling inode, sets its executable mode and atomically renames it over the pathname, preserving production/idempotency semantics and every assertion. This is the minimum owner-local analogue of the later immutable-fixture invariant without backporting newer adapter behavior. Current CI `35389946520` is queued; no predecessor GREEN transfers. Root issue #131 is completed and is no longer an open #6 gate.
+
 Command/runtime owner #14 remains exact `73a191c65cfe1dd16447921acc8f96b306583439`. Its hosted verify and negative-rootless jobs are GREEN, while coverage admission remains below repository-wide 100% and positive SELinux has no qualifying execution.
 
 Repository-fitness descendant #112 is exact `8991d4a22004d07077db78e57e125088fcd16de4`. Predecessor `48ad86148be70fff165800d07221409bc7521af5` executed the physical-branch/codegen RED: complementary true/false execution across duplicate LLVM codegen records for one physical branch was still reported as `1/2`. Semantic `89c182151051668f4f468c53e64a947d965dda95` now unions outcomes by physical source identity, preserves two outcomes per physical branch, fails closed on denominator mismatch, and uses the same physical counts in diagnostics. Current CI `35379471155` remains current-head authority; predecessor success never transfers.
@@ -58,6 +60,7 @@ Core foundation repositories are optional released contract owners rather than m
 
 | Gap | Current authority | Required next evidence |
 | --- | --- | --- |
+| Lease-owner retry CI can be invalidated by mutating an executable fixture pathname between backend phases. | #6 current `7029537...`; predecessor `785c2cc...` has assertion-level failure in the retry control. | Execute current atomic-replacement fixture exact and require the retry plus all sibling ownership controls GREEN without changing production/idempotency semantics. |
 | Branch coverage can false-underreport repeated codegen records. | #112 current `8991d4a...`; predecessor has causal RED. | Execute current exact; require complementary outcome and denominator-mismatch controls GREEN without denominator/threshold reduction. |
 | Application-service network authority is not fully exact-ID and foreign-safe end to end. | #127 `7106388...`, CI `35384682678`; current #21 ancestry is adopted normally and recorded in checked-in TRACEABILITY. | Execute unchanged current exact, then progress provenance → pre-ID cleanup → post-ID cleanup → effective attachment → private authority → non-force termination → mandatory evidence. |
 | Leading-dash image references need explicit Podman option termination. | #133 `4191ac0...`, CI `35384712828`, normally restacked on current #127. | Execute focused delimiter witness and prove all #127 network/lifecycle deltas remain intact. |
@@ -72,14 +75,15 @@ Core foundation repositories are optional released contract owners rather than m
 
 ## Current bounded action order
 
-1. Let #112 exact `8991d4a...` execute its physical branch-union repair; do not weaken measured surface or transfer predecessor success.
-2. Let #127 exact `7106388...` / CI `35384682678` execute after normal adoption of current #21 and checked-in owner-adoption TRACEABILITY; classify any remaining network failure at its intended owner boundary.
-3. Let #133 exact `4191ac0...` / CI `35384712828` execute on current #127; require delimiter GREEN plus parent network/lifecycle preservation.
-4. Let #53 and #61 execute current exacts before any further semantic promotion.
-5. Let #65 and then #130 execute without predecessor promotion.
-6. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
-7. Let #51/#55/#59, current #67, and #70 children execute independently without wake commits.
-8. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
-9. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
-10. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
-11. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
+1. Let #6 exact `7029537...` / CI `35389946520` execute the atomic fixture replacement and reacquire the failed-launch retry witness before any descendant adoption.
+2. Let #112 exact `8991d4a...` execute its physical branch-union repair; do not weaken measured surface or transfer predecessor success.
+3. Let #127 exact `7106388...` / CI `35384682678` execute after normal adoption of current #21 and checked-in owner-adoption TRACEABILITY; classify any remaining network failure at its intended owner boundary.
+4. Let #133 exact `4191ac0...` / CI `35384712828` execute on current #127; require delimiter GREEN plus parent network/lifecycle preservation.
+5. Let #53 and #61 execute current exacts before any further semantic promotion.
+6. Let #65 and then #130 execute without predecessor promotion.
+7. Preserve focused GREEN semantics on #63/#70/#76; stabilize #14/#112 before ordinary adoption into #18.
+8. Let #51/#55/#59, current #67, and #70 children execute independently without wake commits.
+9. Let #125 current exact execute the minimum Clippy repair and reacquire its own lint/rustdoc/coverage evidence.
+10. Let #137 execute unchanged, then require separate real s1 pre-lease evidence from `linux-cluster-ops#326`.
+11. Keep root #1 Draft until positive effective-LSM, central Dependency Review/CodeQL terminal evidence, protected integration, and immutable release evidence exist.
+12. Merge/release only from one unchanged dependency-safe protected candidate satisfying every gate.
