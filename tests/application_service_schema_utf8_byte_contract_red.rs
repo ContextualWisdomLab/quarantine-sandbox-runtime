@@ -14,7 +14,8 @@ use quarantine_sandbox_runtime::{
 };
 use serde_json::Value;
 
-const STOCK_DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+const CWL_ARTIFACT_ANALYSIS_DIALECT: &str =
+    "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
 
 fn schema() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -114,9 +115,9 @@ fn public_schema_must_enforce_runtime_utf8_byte_bounds_for_request_id_and_comman
         Err(ApplicationServiceError::InvalidCommandArgument { argument_index: 0 })
     );
 
-    assert_ne!(
+    assert_eq!(
         schema["$schema"].as_str(),
-        Some(STOCK_DRAFT_2020_12_DIALECT),
-        "stock Draft 2020-12 does not make x-cwl-maxUtf8Bytes an executable assertion"
+        Some(CWL_ARTIFACT_ANALYSIS_DIALECT),
+        "application-service schema must consume the versioned CWL byte-assertion dialect; an arbitrary non-stock dialect does not make x-cwl-maxUtf8Bytes executable"
     );
 }
