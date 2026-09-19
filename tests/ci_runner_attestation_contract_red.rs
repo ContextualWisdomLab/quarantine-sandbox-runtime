@@ -5,16 +5,30 @@
 
 use std::fs;
 
+fn section_end(workflow: &str, body_start: usize) -> usize {
+    let remainder = &workflow[body_start..];
+    let mut offset = 0;
+    for line in remainder.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches('\n');
+        let sibling_header = line_without_newline.starts_with("  ")
+            && !line_without_newline.starts_with("   ")
+            && !line_without_newline.trim().is_empty();
+        let top_level = !line_without_newline.is_empty() && !line_without_newline.starts_with(' ');
+        if sibling_header || top_level {
+            return body_start + offset;
+        }
+        offset += line.len();
+    }
+    workflow.len()
+}
+
 fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     let marker = format!("\n  {job_name}:\n");
     let start = workflow
         .find(&marker)
         .unwrap_or_else(|| panic!("missing CI job {job_name}"));
     let body_start = start + marker.len();
-    let remainder = &workflow[body_start..];
-    let end = remainder
-        .find("\n  ")
-        .map_or(workflow.len(), |offset| body_start + offset);
+    let end = section_end(workflow, body_start);
     &workflow[start..end]
 }
 
@@ -62,6 +76,13 @@ fn shell_function_body<'a>(script: &'a str, function_name: &str) -> &'a str {
     &script[body_start..end]
 }
 
+fn contains_probe_token(command: &str) -> bool {
+    [" nc ", " ncat ", " curl ", " dig ", " getent ", " ping "]
+        .iter()
+        .any(|needle| command.contains(needle))
+        || command.contains("/dev/tcp/")
+}
+
 fn is_executable_probe_line(line: &str) -> bool {
     let mut command = line.trim();
     if let Some(rest) = command.strip_prefix("if ") {
@@ -74,9 +95,8 @@ fn is_executable_probe_line(line: &str) -> bool {
     ["nc ", "ncat ", "curl ", "dig ", "getent ", "ping "]
         .iter()
         .any(|prefix| command.starts_with(prefix))
-        || command.starts_with("timeout ")
+        || command.starts_with("timeout ") && contains_probe_token(command)
         || command.starts_with("bash -c ") && command.contains("/dev/tcp/")
-        || command.contains("/dev/tcp/")
 }
 
 #[test]
