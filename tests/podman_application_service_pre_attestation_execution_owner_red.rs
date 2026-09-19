@@ -2,9 +2,10 @@
 //!
 //! `podman start` may start a trusted runtime-owned hold process, but it must not make the
 //! untrusted image command runnable before the exact acquired sandbox has passed effective
-//! process/isolation verification. This fixture records a side effect only when container create
-//! directly arms the image payload without an explicit OCI entrypoint hold. A deliberately
-//! contradictory capability inspection must then fail closed without that side effect.
+//! process/isolation verification. The fixture treats only the exact runtime-gate entrypoint plus
+//! its runtime-owned read-only bind and interactive release channel as a hold. Any other
+//! entrypoint still arms the hostile payload. A deliberately contradictory capability inspection
+//! must then fail closed without that side effect.
 
 #![cfg(target_os = "linux")]
 
@@ -12,6 +13,7 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    process::Command,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,6 +26,7 @@ use quarantine_sandbox_runtime::{
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_005_000;
 const OWNED_NETWORK_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OWNED_CONTAINER_ID: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const TRUSTED_GATE_CONTAINER_PATH: &str = "/qsr-runtime-gate";
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -75,6 +78,7 @@ fn request() -> ApplicationServiceRequest {
 fn write_fake_podman(
     log: &Path,
     created_network_name: &Path,
+    trusted_gate_path: &Path,
     direct_payload_armed: &Path,
     payload_side_effect: &Path,
 ) -> PathBuf {
@@ -85,6 +89,7 @@ fn write_fake_podman(
 set -eu
 printf '%s\n' "$*" >> '{log}'
 network_name_file='{network_name_file}'
+trusted_gate_path='{trusted_gate_path}'
 direct_payload_armed='{direct_payload_armed}'
 payload_side_effect='{payload_side_effect}'
 network_id='{network_id}'
@@ -109,19 +114,25 @@ case "${{1:-}}:${{2:-}}" in
   create:--name)
     cidfile=''
     network=''
-    has_explicit_entrypoint=0
+    has_interactive=0
+    has_trusted_entrypoint=0
+    has_trusted_gate_mount=0
     previous=''
     for argument in "$@"; do
       case "$argument" in
         --cidfile=*) cidfile=${{argument#--cidfile=}} ;;
-        --entrypoint=*) has_explicit_entrypoint=1 ;;
+        --interactive) has_interactive=1 ;;
+        --entrypoint={trusted_gate_container_path}) has_trusted_entrypoint=1 ;;
       esac
       if [ "$previous" = '--network' ]; then network="$argument"; fi
+      if [ "$previous" = '--volume' ] && [ "$argument" = "$trusted_gate_path:{trusted_gate_container_path}:ro" ]; then
+        has_trusted_gate_mount=1
+      fi
       previous="$argument"
     done
     [ "$network" = "$network_id" ] || exit 92
     [ -n "$cidfile" ] || exit 93
-    if [ "$has_explicit_entrypoint" -eq 0 ]; then
+    if [ "$has_interactive" -ne 1 ] || [ "$has_trusted_entrypoint" -ne 1 ] || [ "$has_trusted_gate_mount" -ne 1 ]; then
       : > "$direct_payload_armed"
     fi
     printf '%s\n' "$container_id" > "$cidfile"
@@ -149,6 +160,8 @@ esac
 "#,
         log = log.display(),
         network_name_file = created_network_name.display(),
+        trusted_gate_path = trusted_gate_path.display(),
+        trusted_gate_container_path = TRUSTED_GATE_CONTAINER_PATH,
         direct_payload_armed = direct_payload_armed.display(),
         payload_side_effect = payload_side_effect.display(),
         network_id = OWNED_NETWORK_ID,
@@ -165,15 +178,104 @@ esac
     program
 }
 
+fn run_fake_podman(program: &Path, arguments: &[String]) {
+    let status = Command::new(program)
+        .args(arguments)
+        .status()
+        .expect("fake Podman invocation must start");
+    assert!(status.success(), "fake Podman invocation must succeed");
+}
+
+fn exercise_fake_create_with_entrypoint(entrypoint: &str) -> bool {
+    let log = temporary_path("fixture-calls");
+    let created_network_name = temporary_path("fixture-network-name");
+    let trusted_gate_path = temporary_path("fixture-trusted-gate");
+    let direct_payload_armed = temporary_path("fixture-direct-payload-armed");
+    let payload_side_effect = temporary_path("fixture-payload-side-effect");
+    let cidfile = temporary_path("fixture-cidfile");
+    fs::write(&trusted_gate_path, b"trusted-runtime-gate").expect("gate fixture must be writable");
+    let program = write_fake_podman(
+        &log,
+        &created_network_name,
+        &trusted_gate_path,
+        &direct_payload_armed,
+        &payload_side_effect,
+    );
+
+    run_fake_podman(
+        &program,
+        &[
+            "network".to_owned(),
+            "create".to_owned(),
+            "--internal".to_owned(),
+            "--disable-dns".to_owned(),
+            "qsr-net-fixture".to_owned(),
+        ],
+    );
+    run_fake_podman(
+        &program,
+        &[
+            "create".to_owned(),
+            "--name".to_owned(),
+            "qsr-app-fixture".to_owned(),
+            format!("--cidfile={}", cidfile.display()),
+            "--interactive".to_owned(),
+            "--volume".to_owned(),
+            format!(
+                "{}:{TRUSTED_GATE_CONTAINER_PATH}:ro",
+                trusted_gate_path.display()
+            ),
+            format!("--entrypoint={entrypoint}"),
+            "--network".to_owned(),
+            OWNED_NETWORK_ID.to_owned(),
+            "localhost/cwl/tool@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                .to_owned(),
+        ],
+    );
+    run_fake_podman(
+        &program,
+        &["start".to_owned(), OWNED_CONTAINER_ID.to_owned()],
+    );
+
+    let consumer_ran = payload_side_effect.exists();
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    let _ = fs::remove_file(created_network_name);
+    let _ = fs::remove_file(trusted_gate_path);
+    let _ = fs::remove_file(direct_payload_armed);
+    let _ = fs::remove_file(payload_side_effect);
+    let _ = fs::remove_file(cidfile);
+    consumer_ran
+}
+
+#[test]
+fn arbitrary_entrypoint_does_not_count_as_runtime_owned_hold() {
+    assert!(
+        exercise_fake_create_with_entrypoint("/bin/false"),
+        "an arbitrary explicit entrypoint must still arm the hostile payload in the witness"
+    );
+}
+
+#[test]
+fn exact_runtime_gate_binding_holds_payload_in_fixture() {
+    assert!(
+        !exercise_fake_create_with_entrypoint(TRUSTED_GATE_CONTAINER_PATH),
+        "the fixture's exact runtime-owned gate binding must hold the payload at start"
+    );
+}
+
 #[test]
 fn hostile_service_payload_is_not_released_before_effective_attestation() {
     let log = temporary_path("calls");
     let created_network_name = temporary_path("network-name");
+    let trusted_gate_path = temporary_path("trusted-gate");
     let direct_payload_armed = temporary_path("direct-payload-armed");
     let payload_side_effect = temporary_path("payload-side-effect");
+    fs::write(&trusted_gate_path, b"trusted-runtime-gate").expect("gate fixture must be writable");
     let program = write_fake_podman(
         &log,
         &created_network_name,
+        &trusted_gate_path,
         &direct_payload_armed,
         &payload_side_effect,
     );
@@ -186,6 +288,7 @@ fn hostile_service_payload_is_not_released_before_effective_attestation() {
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     let _ = fs::remove_file(created_network_name);
+    let _ = fs::remove_file(trusted_gate_path);
     let _ = fs::remove_file(direct_payload_armed);
     let _ = fs::remove_file(payload_side_effect);
 
