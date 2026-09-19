@@ -1,6 +1,7 @@
 //! Rootless Podman infrastructure adapter for isolated application services.
 
 use std::{
+    io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::{Path, PathBuf},
     process::Output,
@@ -12,8 +13,9 @@ use serde::Deserialize;
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner};
 use crate::{
-    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationPolicy, ServiceEndpoint, sandbox_execution::RuntimeLeaseMetadata,
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest,
+    BackendInvocationFailureKind, CleanupReceipt, IsolationPolicy, ServiceEndpoint,
+    sandbox_execution::RuntimeLeaseMetadata,
 };
 
 const PODMAN_BACKEND_ID: &str = "rootless_podman";
@@ -96,6 +98,11 @@ struct NetworkInspection {
     internal: bool,
     #[serde(default)]
     dns_enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct NetworkIdentityInspection {
+    id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -370,6 +377,15 @@ impl RootlessPodmanAdapter {
         create_args.insert(3, format!("--cidfile={create_receipt_path_text}"));
 
         self.checked_output("network_create", plan.network_create_args())?;
+        let network_id = match self.acquire_network_id(&plan) {
+            Ok(network_id) => network_id,
+            Err(error) => {
+                self.cleanup_network(&plan)?;
+                return Err(error);
+            }
+        };
+        bind_network_selector(&mut create_args, &network_id)?;
+
         let create_output = match self.checked_output("container_create", &create_args) {
             Ok(output) => output,
             Err(error) => {
@@ -514,6 +530,28 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
+    /// Acquire the backend network identity by exact generated correlation name.
+    fn acquire_network_id(
+        &self,
+        plan: &PodmanLaunchPlan,
+    ) -> Result<String, ApplicationServiceError> {
+        let network_args = [
+            "network".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            plan.network_name().to_owned(),
+        ];
+        let network_output = self.checked_output("network_identity_inspect", &network_args)?;
+        let network: NetworkIdentityInspection =
+            parse_single_inspection("network_identity_inspect", &network_output.stdout)?;
+        parse_backend_identifier(network.id.as_bytes()).ok_or(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: "network_identity_inspect",
+            },
+        )
+    }
+
     /// Verify configured and live process isolation against the exact acquired container ID.
     fn verify_effective_isolation(
         &self,
@@ -644,22 +682,10 @@ impl RootlessPodmanAdapter {
         operation: &'static str,
         args: &[String],
     ) -> Result<Output, ApplicationServiceError> {
-        let output =
-            self.command_runner()
-                .run(&self.program, args)
-                .map_err(|error| match error {
-                    BoundedCommandError::Timeout => {
-                        ApplicationServiceError::BackendCommandTimedOut { operation }
-                    }
-                    BoundedCommandError::OutputLimit => {
-                        ApplicationServiceError::BackendOutputLimitExceeded { operation }
-                    }
-                    BoundedCommandError::Spawn
-                    | BoundedCommandError::Wait
-                    | BoundedCommandError::Capture => {
-                        ApplicationServiceError::BackendInvocationFailed { operation }
-                    }
-                })?;
+        let output = self
+            .command_runner()
+            .run(&self.program, args)
+            .map_err(|error| map_bounded_command_error(operation, error))?;
         if !output.status.success() {
             return Err(ApplicationServiceError::BackendCommandFailed { operation });
         }
@@ -740,6 +766,38 @@ impl RootlessPodmanAdapter {
 impl Default for RootlessPodmanAdapter {
     fn default() -> Self {
         Self::new("podman")
+    }
+}
+
+fn map_bounded_command_error(
+    operation: &'static str,
+    error: BoundedCommandError,
+) -> ApplicationServiceError {
+    match error {
+        BoundedCommandError::Timeout => {
+            ApplicationServiceError::BackendCommandTimedOut { operation }
+        }
+        BoundedCommandError::OutputLimit => {
+            ApplicationServiceError::BackendOutputLimitExceeded { operation }
+        }
+        BoundedCommandError::Spawn(error_kind) => ApplicationServiceError::BackendSpawnFailed {
+            operation,
+            failure_kind: classify_spawn_failure(error_kind),
+        },
+        BoundedCommandError::Wait | BoundedCommandError::Capture => {
+            ApplicationServiceError::BackendInvocationFailed { operation }
+        }
+    }
+}
+
+fn classify_spawn_failure(error_kind: ErrorKind) -> BackendInvocationFailureKind {
+    match error_kind {
+        ErrorKind::NotFound => BackendInvocationFailureKind::NotFound,
+        ErrorKind::PermissionDenied => BackendInvocationFailureKind::PermissionDenied,
+        ErrorKind::WouldBlock | ErrorKind::OutOfMemory => {
+            BackendInvocationFailureKind::ResourceExhausted
+        }
+        _ => BackendInvocationFailureKind::Other,
     }
 }
 
@@ -914,7 +972,28 @@ where
         .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
 }
 
-/// Parse a canonical lowercase 64-hex container identifier from Podman stdout.
+/// Bind container creation to the exact backend network identity acquired by inspection.
+fn bind_network_selector(
+    create_args: &mut [String],
+    network_id: &str,
+) -> Result<(), ApplicationServiceError> {
+    let selector_index = create_args
+        .iter()
+        .position(|argument| argument == "--network")
+        .and_then(|index| index.checked_add(1))
+        .ok_or(ApplicationServiceError::BackendInvocationFailed {
+            operation: "container_create_network_selector",
+        })?;
+    let selector = create_args.get_mut(selector_index).ok_or(
+        ApplicationServiceError::BackendInvocationFailed {
+            operation: "container_create_network_selector",
+        },
+    )?;
+    *selector = network_id.to_owned();
+    Ok(())
+}
+
+/// Parse a canonical lowercase 64-hex backend resource identifier from Podman output.
 fn parse_backend_identifier(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
     let identifier = text.strip_suffix('\n').unwrap_or(text);
@@ -1009,7 +1088,7 @@ fn wait_for_readiness(
 
 #[cfg(test)]
 mod runtime_identity_tests {
-    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, runtime_identity_with};
+    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, bind_network_selector, runtime_identity_with};
     use crate::ApplicationServiceError;
 
     #[test]
@@ -1074,6 +1153,37 @@ mod runtime_identity_tests {
         assert_eq!(
             result,
             Err(ApplicationServiceError::RuntimeIdentityUnavailable)
+        );
+    }
+
+    #[test]
+    fn network_selector_binding_replaces_only_the_selector_value() {
+        let mut args = vec![
+            "create".to_owned(),
+            "--network".to_owned(),
+            "qsr-net-correlation".to_owned(),
+            "image".to_owned(),
+        ];
+        assert_eq!(bind_network_selector(&mut args, &"a".repeat(64)), Ok(()));
+        assert_eq!(args[2], "a".repeat(64));
+        assert_eq!(args[3], "image");
+    }
+
+    #[test]
+    fn network_selector_binding_fails_closed_when_selector_is_missing_or_unbound() {
+        let expected = Err(ApplicationServiceError::BackendInvocationFailed {
+            operation: "container_create_network_selector",
+        });
+        let mut missing = vec!["create".to_owned(), "image".to_owned()];
+        assert_eq!(
+            bind_network_selector(&mut missing, &"a".repeat(64)),
+            expected
+        );
+
+        let mut unbound = vec!["create".to_owned(), "--network".to_owned()];
+        assert_eq!(
+            bind_network_selector(&mut unbound, &"a".repeat(64)),
+            expected
         );
     }
 }

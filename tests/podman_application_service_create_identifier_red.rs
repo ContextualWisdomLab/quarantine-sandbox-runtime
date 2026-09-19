@@ -72,11 +72,13 @@ fn write_fake_podman(create_identifier: &str, lifecycle_marker: &Path) -> (PathB
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
+    let network = r#"[{"id":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nmarker='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 93 ;;\n  container:inspect|top:*|port:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 94 ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nmarker='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 93 ;;\n  container:inspect|top:*|port:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 94 ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         lifecycle_marker.display(),
         info,
+        network,
         create_identifier,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
