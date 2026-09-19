@@ -39,6 +39,31 @@ fn event_section<'a>(workflow: &'a str, event_name: &str) -> &'a str {
     &workflow[start..end]
 }
 
+fn named_step_section<'a>(job: &'a str, step_name: &str) -> &'a str {
+    let marker = format!("\n      - name: {step_name}\n");
+    let start = job
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing CI step {step_name}"));
+    let body_start = start + marker.len();
+    let remainder = &job[body_start..];
+    let end = remainder
+        .find("\n      - ")
+        .map_or(job.len(), |offset| body_start + offset);
+    &job[start..end]
+}
+
+fn executable_run_script(step: &str) -> &str {
+    let run_marker = step
+        .find("\n        run: |")
+        .or_else(|| step.find("\n        run: >-"))
+        .unwrap_or_else(|| panic!("attestation step must execute an inline run script"));
+    let script_start = step[run_marker + 1..]
+        .find('\n')
+        .map(|offset| run_marker + 1 + offset + 1)
+        .unwrap_or(step.len());
+    &step[script_start..]
+}
+
 fn leading_spaces(line: &str) -> usize {
     line.len() - line.trim_start_matches(' ').len()
 }
@@ -160,8 +185,9 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
     let checkout = job
         .find("- uses: actions/checkout@")
         .expect("positive LSM job must retain exact-head checkout");
-    let gate_name = "- name: Attest self-hosted runner LAN and host-service denial";
-    let gate = job.find(gate_name).unwrap_or_else(|| {
+    let gate_name = "Attest self-hosted runner LAN and host-service denial";
+    let gate_marker = format!("- name: {gate_name}");
+    let gate = job.find(&gate_marker).unwrap_or_else(|| {
         panic!(
             "positive LSM self-hosted runner must machine-attest LAN/host-service denial before checkout"
         )
@@ -172,7 +198,23 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
         "self-hosted network-isolation attestation must run before repository checkout"
     );
 
-    let pre_checkout_gate = &job[gate..checkout];
+    let gate_step = named_step_section(job, gate_name);
+    assert!(
+        !gate_step.contains("uses:"),
+        "pre-checkout isolation attestation must execute directly rather than fetch another action before repository checkout"
+    );
+    let script = executable_run_script(gate_step);
+    let active_lines: Vec<&str> = script
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+
+    assert!(
+        active_lines.iter().any(|line| *line == "set -euo pipefail"),
+        "attestation script must fail closed on shell errors and unset inputs"
+    );
+
     for required_scope in [
         "192.168.0.0/16",
         "10.0.0.0/8",
@@ -182,12 +224,35 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
         "DNS",
     ] {
         assert!(
-            pre_checkout_gate.contains(required_scope),
-            "pre-checkout self-hosted attestation must cover {required_scope}"
+            active_lines.iter().any(|line| {
+                line.contains(required_scope)
+                    && ["probe", "attest", "deny", "reach"]
+                        .iter()
+                        .any(|semantic| line.to_ascii_lowercase().contains(semantic))
+            }),
+            "pre-checkout attestation must actively bind {required_scope} to a denial/reachability probe rather than mention it only in comments or descriptive text"
         );
     }
+
     assert!(
-        pre_checkout_gate.contains("evidence"),
-        "self-hosted isolation gate must emit machine-verifiable reachability evidence rather than only inspect configuration"
+        active_lines.iter().any(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.starts_with("if ")
+                && ["probe", "reach", "connect"]
+                    .iter()
+                    .any(|semantic| lower.contains(semantic))
+        }),
+        "attestation script must branch on an actual reachability/probe result"
+    );
+    assert!(
+        active_lines.iter().any(|line| line.contains("exit 1")),
+        "a reachable forbidden endpoint must fail the attestation gate nonzero"
+    );
+    assert!(
+        active_lines.iter().any(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("evidence") && lower.contains(".json")
+        }),
+        "attestation gate must emit machine-readable JSON evidence that binds probes to observed denial results"
     );
 }
