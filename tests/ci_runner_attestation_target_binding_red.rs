@@ -164,15 +164,10 @@ fn parse_endpoint(target: &str) -> Option<Endpoint<'_>> {
     })
 }
 
-fn local_or_private_host(host: &str) -> bool {
-    if let Ok(address) = host.parse::<Ipv4Addr>() {
-        return address.is_private() || address.is_loopback() || address.is_link_local();
-    }
-
-    matches!(
-        host,
-        "localhost" | "host.containers.internal" | "host.docker.internal" | "host-gateway"
-    )
+fn host_boundary_literal_ipv4(host: &str) -> bool {
+    host.parse::<Ipv4Addr>().is_ok_and(|address| {
+        !address.is_loopback() && (address.is_private() || address.is_link_local())
+    })
 }
 
 fn target_matches_scope(required_scope: &str, target: &str) -> bool {
@@ -193,9 +188,9 @@ fn target_matches_scope(required_scope: &str, target: &str) -> bool {
             let octets = address.octets();
             octets[0] == 172 && (16..=31).contains(&octets[1])
         }),
-        "6379" => endpoint.port == Some(6379) && local_or_private_host(endpoint.host),
-        "5432" => endpoint.port == Some(5432) && local_or_private_host(endpoint.host),
-        "DNS" => endpoint.port == Some(53) && local_or_private_host(endpoint.host),
+        "6379" => endpoint.port == Some(6379) && host_boundary_literal_ipv4(endpoint.host),
+        "5432" => endpoint.port == Some(5432) && host_boundary_literal_ipv4(endpoint.host),
+        "DNS" => endpoint.port == Some(53) && host_boundary_literal_ipv4(endpoint.host),
         _ => false,
     }
 }
@@ -219,6 +214,10 @@ fn scope_labels_cannot_substitute_for_actual_probe_targets() {
     )
     .expect("literal helper call must parse");
     assert!(!target_matches_scope("5432", &postgres_public.1));
+
+    assert!(!target_matches_scope("6379", "127.0.0.1:6379"));
+    assert!(!target_matches_scope("5432", "127.0.0.1:5432"));
+    assert!(!target_matches_scope("DNS", "127.0.0.1:53"));
 }
 
 #[test]
@@ -227,9 +226,9 @@ fn required_scopes_accept_only_literal_semantically_bound_targets() {
         ("192.168.0.0/16", "192.168.50.1:443"),
         ("10.0.0.0/8", "10.23.4.5:443"),
         ("172.16.0.0/12", "172.31.255.2:443"),
-        ("6379", "127.0.0.1:6379"),
-        ("5432", "10.0.0.1:5432"),
-        ("DNS", "10.0.0.53:53"),
+        ("6379", "10.0.0.1:6379"),
+        ("5432", "192.168.50.1:5432"),
+        ("DNS", "169.254.1.53:53"),
     ] {
         assert!(
             target_matches_scope(scope, target),
