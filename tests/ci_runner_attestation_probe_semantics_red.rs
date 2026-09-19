@@ -2,7 +2,7 @@
 //!
 //! A failed probe is evidence only when the operand is meaningful for the claimed boundary.
 //! A closed arbitrary TCP port inside an RFC1918 range does not prove the range is unreachable,
-//! and an unresolved symbolic host alias does not prove a host service is unreachable.
+//! and loopback/symbolic guest-local endpoints do not prove the s1 host boundary is unreachable.
 
 use std::{fs, net::Ipv4Addr};
 
@@ -164,9 +164,9 @@ fn parse_endpoint(target: &str) -> Option<Endpoint<'_>> {
     })
 }
 
-fn private_literal_ipv4(host: &str) -> bool {
+fn host_boundary_literal_ipv4(host: &str) -> bool {
     host.parse::<Ipv4Addr>().is_ok_and(|address| {
-        address.is_private() || address.is_loopback() || address.is_link_local()
+        !address.is_loopback() && (address.is_private() || address.is_link_local())
     })
 }
 
@@ -193,15 +193,15 @@ fn target_has_meaningful_probe_semantics(scope: &str, target: &str) -> bool {
         "192.168.0.0/16" | "10.0.0.0/8" | "172.16.0.0/12" => {
             endpoint.port.is_none() && host_in_scope(scope, endpoint.host)
         }
-        "6379" => endpoint.port == Some(6379) && private_literal_ipv4(endpoint.host),
-        "5432" => endpoint.port == Some(5432) && private_literal_ipv4(endpoint.host),
-        "DNS" => endpoint.port == Some(53) && private_literal_ipv4(endpoint.host),
+        "6379" => endpoint.port == Some(6379) && host_boundary_literal_ipv4(endpoint.host),
+        "5432" => endpoint.port == Some(5432) && host_boundary_literal_ipv4(endpoint.host),
+        "DNS" => endpoint.port == Some(53) && host_boundary_literal_ipv4(endpoint.host),
         _ => false,
     }
 }
 
 #[test]
-fn closed_service_ports_and_unresolved_aliases_cannot_masquerade_as_network_denial() {
+fn closed_service_ports_guest_loopback_and_unresolved_aliases_cannot_masquerade_as_host_denial() {
     assert!(!target_has_meaningful_probe_semantics(
         "10.0.0.0/8",
         "10.23.4.5:65535"
@@ -210,6 +210,15 @@ fn closed_service_ports_and_unresolved_aliases_cannot_masquerade_as_network_deni
         "192.168.0.0/16",
         "192.168.50.1:1"
     ));
+    assert!(!target_has_meaningful_probe_semantics(
+        "6379",
+        "127.0.0.1:6379"
+    ));
+    assert!(!target_has_meaningful_probe_semantics(
+        "5432",
+        "127.0.0.1:5432"
+    ));
+    assert!(!target_has_meaningful_probe_semantics("DNS", "127.0.0.1:53"));
     assert!(!target_has_meaningful_probe_semantics(
         "6379",
         "host-gateway:6379"
@@ -222,14 +231,14 @@ fn closed_service_ports_and_unresolved_aliases_cannot_masquerade_as_network_deni
 }
 
 #[test]
-fn network_scopes_require_host_reachability_targets_and_services_require_literal_private_addresses() {
+fn network_scopes_require_host_targets_and_services_require_non_loopback_host_boundary_addresses() {
     for (scope, target) in [
         ("192.168.0.0/16", "192.168.50.1"),
         ("10.0.0.0/8", "10.23.4.5"),
         ("172.16.0.0/12", "172.31.255.2"),
-        ("6379", "127.0.0.1:6379"),
-        ("5432", "10.0.0.1:5432"),
-        ("DNS", "10.0.0.53:53"),
+        ("6379", "10.0.0.1:6379"),
+        ("5432", "192.168.50.1:5432"),
+        ("DNS", "169.254.1.53:53"),
     ] {
         assert!(
             target_has_meaningful_probe_semantics(scope, target),
@@ -239,7 +248,7 @@ fn network_scopes_require_host_reachability_targets_and_services_require_literal
 }
 
 #[test]
-fn positive_lsm_attestation_does_not_reduce_network_denial_to_a_closed_port_probe() {
+fn positive_lsm_attestation_does_not_reduce_host_denial_to_guest_loopback_or_closed_ports() {
     let workflow = fs::read_to_string(".github/workflows/ci.yml")
         .expect("CI workflow must be readable from the repository root");
     let job = job_section(&workflow, "podman-e2e-positive-lsm");
@@ -260,7 +269,7 @@ fn positive_lsm_attestation_does_not_reduce_network_denial_to_a_closed_port_prob
                 scope.contains(required_scope)
                     && target_has_meaningful_probe_semantics(required_scope, target)
             }),
-            "{required_scope} must use a semantically meaningful probe operand: RFC1918 range checks require a host target without an arbitrary service port, while service checks require the exact port on a literal private/loopback/link-local IPv4 address"
+            "{required_scope} must use a semantically meaningful probe operand: RFC1918 range checks require an in-range host target without an arbitrary service port, while host-service checks require the exact port on a literal non-loopback private/link-local IPv4 address"
         );
     }
 }
