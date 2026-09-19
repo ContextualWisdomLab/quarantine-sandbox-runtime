@@ -17,11 +17,27 @@ const CWL_CONTRACT_VOCABULARY: &str =
     "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0";
 const CWL_RFC3339_PROFILE: &str =
     "utc_z_only_with_gregorian_day_validation_no_leap_second_notation";
+const VOCABULARY_SPEC_PATH: &str =
+    "docs/contracts/cwl_artifact_analysis_contract_vocabulary_1_0_0.md";
+const CONFORMANCE_VECTORS_PATH: &str =
+    "tests/fixtures/cwl_artifact_analysis_contract_vocabulary_1_0_0_vectors.json";
+const REQUIRED_PROFILE_SPECIFICATION_CLAUSES: [&str; 5] = [
+    "x-cwl-rfc3339Profile",
+    "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+    "MUST reject a calendar date whose day exceeds the Gregorian month length",
+    "MUST treat a year divisible by 4 as a leap year except a century year not divisible by 400",
+    "MUST reject leap-second notation and require the uppercase UTC designator Z",
+];
 
 fn schema(path: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
     let text = fs::read_to_string(path).expect("published schema must be readable");
     serde_json::from_str(&text).expect("published schema must be valid JSON")
+}
+
+fn read_text(path: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+    fs::read_to_string(path).expect("published vocabulary artifact must be readable")
 }
 
 fn analysis_request_schema() -> Value {
@@ -30,6 +46,31 @@ fn analysis_request_schema() -> Value {
 
 fn cwl_contract_dialect() -> Value {
     schema("schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json")
+}
+
+fn vector_by_id<'a>(vectors: &'a Value, vector_id: &str) -> &'a Value {
+    vectors["cases"]
+        .as_array()
+        .expect("vocabulary conformance publication must contain a cases array")
+        .iter()
+        .find(|case| case["id"].as_str() == Some(vector_id))
+        .unwrap_or_else(|| panic!("missing required vocabulary conformance vector {vector_id}"))
+}
+
+fn assert_profile_vector(
+    vectors: &Value,
+    vector_id: &str,
+    instance: &str,
+    expected_valid: bool,
+) {
+    let vector = vector_by_id(vectors, vector_id);
+    assert_eq!(vector["keyword"].as_str(), Some("x-cwl-rfc3339Profile"));
+    assert_eq!(
+        vector["keyword_value"].as_str(),
+        Some(CWL_RFC3339_PROFILE)
+    );
+    assert_eq!(vector["instance"].as_str(), Some(instance));
+    assert_eq!(vector["valid"].as_bool(), Some(expected_valid));
 }
 
 fn request_with_submitted_at(value: &str) -> AnalysisRequest {
@@ -106,5 +147,51 @@ fn published_schema_requires_fail_closed_gregorian_validation_authority() {
         dialect["properties"]["x-cwl-rfc3339Profile"]["type"].as_str(),
         Some("string"),
         "the canonical dialect must recognize the RFC3339 profile keyword owned by the required CWL vocabulary"
+    );
+
+    let specification = read_text(VOCABULARY_SPEC_PATH);
+    for required_clause in REQUIRED_PROFILE_SPECIFICATION_CLAUSES {
+        assert!(
+            specification.contains(required_clause),
+            "vocabulary specification must normatively define the Gregorian profile: {required_clause}"
+        );
+    }
+
+    let vectors: Value = serde_json::from_str(&read_text(CONFORMANCE_VECTORS_PATH))
+        .expect("vocabulary conformance vectors must be valid JSON");
+    assert_eq!(
+        vectors["vocabulary_id"].as_str(),
+        Some(CWL_CONTRACT_VOCABULARY),
+        "Gregorian profile vectors must bind the exact required vocabulary identity"
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_gregorian_leap_day_valid",
+        "2024-02-29T23:59:59Z",
+        true,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_non_leap_february_29_invalid",
+        "2023-02-29T00:00:00Z",
+        false,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_impossible_month_day_invalid",
+        "2026-02-31T00:00:00Z",
+        false,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_leap_second_invalid",
+        "2016-12-31T23:59:60Z",
+        false,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_offset_instead_of_z_invalid",
+        "2024-02-29T23:59:59+00:00",
+        false,
     );
 }
