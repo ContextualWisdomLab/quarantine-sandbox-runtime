@@ -747,4 +747,43 @@ mod tests {
             "cleanup failure must remain the externally visible safety result even when state recovery also fails"
         );
     }
+
+    #[test]
+    fn expired_cleanup_failure_is_not_hidden_by_later_registry_failure() {
+        let terminate_entered = Arc::new(Barrier::new(2));
+        let terminate_resume = Arc::new(Barrier::new(2));
+        let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+            TerminationFailureBackend {
+                terminate_entered: Arc::clone(&terminate_entered),
+                terminate_resume: Arc::clone(&terminate_resume),
+            },
+        ));
+        let owner = LeaseOwnerId::new("urn:cwl:agent:test")
+            .expect("test owner should satisfy the bounded identity contract");
+        coordinator
+            .launch_at(&owner, &request(), &policy(), 1_780_000_000)
+            .expect("test lease should register before expiry cleanup");
+        let worker_coordinator = Arc::clone(&coordinator);
+        let worker = thread::spawn(move || worker_coordinator.cleanup_expired_at(1_780_000_031));
+
+        terminate_entered.wait();
+        let poison_target = Arc::clone(&coordinator);
+        let poison = thread::spawn(move || {
+            let _guard = poison_target
+                .leases
+                .lock()
+                .expect("registry should be healthy before explicit poisoning");
+            panic!("poison registry after expired backend cleanup begins");
+        });
+        assert!(poison.join().is_err());
+        terminate_resume.wait();
+
+        assert_eq!(
+            worker.join().expect("expired cleanup worker should not panic"),
+            Err(ApplicationServiceCoordinatorError::Backend(
+                ApplicationServiceError::CleanupFailed,
+            )),
+            "expired cleanup failure must remain visible when recording the failed cleanup also loses registry state"
+        );
+    }
 }
