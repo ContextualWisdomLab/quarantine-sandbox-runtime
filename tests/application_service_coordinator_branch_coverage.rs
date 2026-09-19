@@ -1,8 +1,8 @@
 //! Branch-outcome coverage for caller-scoped coordinator state transitions.
 
 use std::sync::{
-    Arc, Barrier,
     atomic::{AtomicUsize, Ordering},
+    Arc, Barrier,
 };
 use std::thread;
 
