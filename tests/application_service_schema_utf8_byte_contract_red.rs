@@ -15,12 +15,10 @@ use quarantine_sandbox_runtime::{
 use serde_json::Value;
 
 const DRAFT_2020_12_META_SCHEMA: &str = "https://json-schema.org/draft/2020-12/schema";
-const CWL_ARTIFACT_ANALYSIS_DIALECT: &str =
-    "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const CWL_ARTIFACT_ANALYSIS_DIALECT: &str = "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
 const CWL_CONTRACT_VOCABULARY: &str =
     "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0";
-const CWL_DIALECT_PATH: &str =
-    "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const CWL_DIALECT_PATH: &str = "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
 
 fn read_json(relative_path: &str, description: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
@@ -100,11 +98,11 @@ fn public_schema_must_enforce_runtime_utf8_byte_bounds_for_request_id_and_comman
     let request_id = "é".repeat(65);
     assert_eq!(request_id.chars().count(), 65);
     assert_eq!(request_id.len(), 130);
-    assert_eq!(
-        request_id_schema["x-cwl-maxUtf8Bytes"].as_u64(),
-        Some(128)
-    );
-    assert!(stock_string_assertions_accept(request_id_schema, &request_id));
+    assert_eq!(request_id_schema["x-cwl-maxUtf8Bytes"].as_u64(), Some(128));
+    assert!(stock_string_assertions_accept(
+        request_id_schema,
+        &request_id
+    ));
 
     let mut request_id_candidate = request();
     request_id_candidate.request_id = request_id;
