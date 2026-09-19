@@ -320,7 +320,11 @@ pub struct EvidenceRecord {
 }
 
 impl EvidenceRecord {
-    fn validate(&self, expected_sequence: usize, analysis_job_id: &str) -> Result<(), ContractError> {
+    fn validate(
+        &self,
+        expected_sequence: usize,
+        analysis_job_id: &str,
+    ) -> Result<(), ContractError> {
         validate_text("evidence_id", &self.evidence_id, MAX_EVIDENCE_ID_BYTES)?;
         if self.sequence_number != expected_sequence {
             return Err(ContractError::InvalidEvidenceSequence {
