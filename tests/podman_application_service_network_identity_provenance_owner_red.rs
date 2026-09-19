@@ -167,6 +167,31 @@ fn assert_identity_contradiction_stops_before_create(contradiction: IdentityCont
     let _ = fs::remove_file(created_network_name);
     let _ = fs::remove_file(container_create_marker);
 
+    let lines: Vec<&str> = calls.lines().collect();
+    let network_create_index = lines
+        .iter()
+        .position(|line| line.starts_with("network create --internal --disable-dns qsr-net-"))
+        .expect("the provenance witness must reach runtime-owned network creation");
+    let network_name = lines[network_create_index]
+        .split_whitespace()
+        .last()
+        .expect("network creation must include the exact correlation name");
+    let expected_identity_inspect = format!("network inspect --format json {network_name}");
+    let identity_inspect_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (*line == expected_identity_inspect).then_some(index))
+        .collect();
+
+    assert_eq!(
+        identity_inspect_indices.len(),
+        1,
+        "the intended RED must exercise exactly one exact-name identity inspection rather than pass on an unrelated earlier failure or retry a contradictory object; calls were:\n{calls}"
+    );
+    assert!(
+        network_create_index < identity_inspect_indices[0],
+        "network identity provenance must be checked only after the runtime-owned network is created; calls were:\n{calls}"
+    );
     assert!(
         result.is_err(),
         "contradictory network identity evidence must fail closed"
