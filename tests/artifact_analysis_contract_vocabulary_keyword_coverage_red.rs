@@ -3,8 +3,8 @@
 //! A required JSON Schema vocabulary cannot expose a keyword syntactically and
 //! defer its semantics to a later mutable publication under the same versioned
 //! vocabulary URI. Every custom keyword declared by the dialect must therefore
-//! have normative semantics and at least one conformance vector in the same
-//! immutable vocabulary version before release.
+//! have normative semantics plus accepting and rejecting conformance vectors in
+//! the same immutable vocabulary version before release.
 
 use std::{fs, path::Path};
 
@@ -34,6 +34,19 @@ fn read_json(relative_path: &str) -> Value {
         .unwrap_or_else(|error| panic!("required JSON artifact {relative_path} must parse: {error}"))
 }
 
+fn normative_keyword_section<'a>(specification: &'a str, keyword: &str) -> &'a str {
+    let heading = format!("## `{keyword}`");
+    let heading_start = specification.find(&heading).unwrap_or_else(|| {
+        panic!(
+            "required vocabulary keyword {keyword} is declared by dialect 1.0.0 but has no normative semantics in the same 1.0.0 publication"
+        )
+    });
+    let section_start = heading_start + heading.len();
+    let section_tail = &specification[section_start..];
+    let section_end = section_tail.find("\n## ").unwrap_or(section_tail.len());
+    &section_tail[..section_end]
+}
+
 #[test]
 fn required_vocabulary_declares_no_undefined_custom_keywords() {
     let dialect = read_json(DIALECT_PATH);
@@ -56,16 +69,23 @@ fn required_vocabulary_declares_no_undefined_custom_keywords() {
         .keys()
         .filter(|keyword| keyword.starts_with("x-cwl-"))
     {
-        let normative_heading = format!("## `{keyword}`");
+        let normative_section = normative_keyword_section(&specification, keyword);
         assert!(
-            specification.contains(&normative_heading),
-            "required vocabulary keyword {keyword} is declared by dialect 1.0.0 but has no normative semantics in the same 1.0.0 publication"
+            normative_section.contains("**MUST"),
+            "required vocabulary keyword {keyword} has a heading but no normative MUST requirement in the same 1.0.0 publication"
+        );
+
+        let keyword_cases: Vec<&Value> = cases
+            .iter()
+            .filter(|case| case["keyword"].as_str() == Some(keyword.as_str()))
+            .collect();
+        assert!(
+            keyword_cases.iter().any(|case| case["valid"].as_bool() == Some(true)),
+            "required vocabulary keyword {keyword} has no accepting conformance vector in the same 1.0.0 publication"
         );
         assert!(
-            cases
-                .iter()
-                .any(|case| case["keyword"].as_str() == Some(keyword.as_str())),
-            "required vocabulary keyword {keyword} is declared by dialect 1.0.0 but has no conformance vector in the same 1.0.0 publication"
+            keyword_cases.iter().any(|case| case["valid"].as_bool() == Some(false)),
+            "required vocabulary keyword {keyword} has no rejecting conformance vector in the same 1.0.0 publication"
         );
     }
 }
