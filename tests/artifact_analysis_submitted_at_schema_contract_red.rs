@@ -57,18 +57,10 @@ fn vector_by_id<'a>(vectors: &'a Value, vector_id: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("missing required vocabulary conformance vector {vector_id}"))
 }
 
-fn assert_profile_vector(
-    vectors: &Value,
-    vector_id: &str,
-    instance: &str,
-    expected_valid: bool,
-) {
+fn assert_profile_vector(vectors: &Value, vector_id: &str, instance: &str, expected_valid: bool) {
     let vector = vector_by_id(vectors, vector_id);
     assert_eq!(vector["keyword"].as_str(), Some("x-cwl-rfc3339Profile"));
-    assert_eq!(
-        vector["keyword_value"].as_str(),
-        Some(CWL_RFC3339_PROFILE)
-    );
+    assert_eq!(vector["keyword_value"].as_str(), Some(CWL_RFC3339_PROFILE));
     assert_eq!(vector["instance"].as_str(), Some(instance));
     assert_eq!(vector["valid"].as_bool(), Some(expected_valid));
 }
@@ -98,9 +90,11 @@ fn runtime_gregorian_profile_rejects_impossible_dates_and_accepts_leap_day() {
         request_with_submitted_at("2023-02-29T00:00:00Z").validate(),
         Err(ContractError::InvalidSubmittedAt)
     );
-    assert!(request_with_submitted_at("2024-02-29T23:59:59Z")
-        .validate()
-        .is_ok());
+    assert!(
+        request_with_submitted_at("2024-02-29T23:59:59Z")
+            .validate()
+            .is_ok()
+    );
 }
 
 #[test]
