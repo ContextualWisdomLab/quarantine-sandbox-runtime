@@ -320,12 +320,23 @@ pub struct EvidenceRecord {
 }
 
 impl EvidenceRecord {
-    fn validate(&self, expected_sequence: usize) -> Result<(), ContractError> {
+    fn validate(
+        &self,
+        expected_sequence: usize,
+        analysis_job_id: &str,
+    ) -> Result<(), ContractError> {
         validate_text("evidence_id", &self.evidence_id, MAX_EVIDENCE_ID_BYTES)?;
         if self.sequence_number != expected_sequence {
             return Err(ContractError::InvalidEvidenceSequence {
                 expected_sequence,
                 actual_sequence: self.sequence_number,
+            });
+        }
+        let expected_evidence_id = format!("{analysis_job_id}:evidence:{expected_sequence:04}");
+        if self.evidence_id != expected_evidence_id {
+            return Err(ContractError::InvalidEvidenceIdentity {
+                expected_evidence_id,
+                actual_evidence_id: self.evidence_id.clone(),
             });
         }
         validate_text("producer_id", &self.producer_id, MAX_IDENTIFIER_BYTES)?;
@@ -452,7 +463,7 @@ impl EvidenceBundle {
         }
 
         for (index, record) in self.evidence.iter().enumerate() {
-            record.validate(index + 1)?;
+            record.validate(index + 1, &self.analysis_job_id)?;
         }
 
         let mut unique_limitations = BTreeSet::new();
@@ -553,6 +564,14 @@ pub enum ContractError {
         expected_sequence: usize,
         /// Actual sequence.
         actual_sequence: usize,
+    },
+    /// Evidence identifier does not belong to the enclosing analysis job and sequence.
+    #[error("invalid evidence identity: expected {expected_evidence_id}, got {actual_evidence_id}")]
+    InvalidEvidenceIdentity {
+        /// Canonical identifier for the enclosing job and sequence.
+        expected_evidence_id: String,
+        /// Supplied record identifier.
+        actual_evidence_id: String,
     },
     /// The foundation boundary claims artifact execution, network, or credentials.
     #[error("foundation runtime boundary violated: {boundary_name}")]
