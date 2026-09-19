@@ -14,14 +14,31 @@ use quarantine_sandbox_runtime::{
 };
 use serde_json::Value;
 
+const DRAFT_2020_12_META_SCHEMA: &str = "https://json-schema.org/draft/2020-12/schema";
 const CWL_ARTIFACT_ANALYSIS_DIALECT: &str =
     "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const CWL_CONTRACT_VOCABULARY: &str =
+    "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0";
+const CWL_DIALECT_PATH: &str =
+    "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+
+fn read_json(relative_path: &str, description: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{description} must be readable: {error}"));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("{description} must be valid JSON: {error}"))
+}
 
 fn schema() -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("schemas/application-service-request.schema.json");
-    let text = fs::read_to_string(path).expect("application-service schema must be readable");
-    serde_json::from_str(&text).expect("application-service schema must be valid JSON")
+    read_json(
+        "schemas/application-service-request.schema.json",
+        "application-service schema",
+    )
+}
+
+fn dialect() -> Value {
+    read_json(CWL_DIALECT_PATH, "CWL artifact-analysis contract dialect")
 }
 
 fn policy() -> IsolationPolicy {
@@ -120,4 +137,25 @@ fn public_schema_must_enforce_runtime_utf8_byte_bounds_for_request_id_and_comman
         Some(CWL_ARTIFACT_ANALYSIS_DIALECT),
         "application-service schema must consume the versioned CWL byte-assertion dialect; an arbitrary non-stock dialect does not make x-cwl-maxUtf8Bytes executable"
     );
+
+    let dialect = dialect();
+    assert_eq!(
+        dialect["$id"].as_str(),
+        Some(CWL_ARTIFACT_ANALYSIS_DIALECT),
+        "the referenced dialect artifact must publish the exact versioned identity"
+    );
+    assert_eq!(
+        dialect["$schema"].as_str(),
+        Some(DRAFT_2020_12_META_SCHEMA),
+        "the CWL dialect must remain explicitly based on Draft 2020-12"
+    );
+    assert_eq!(
+        dialect["$vocabulary"][CWL_CONTRACT_VOCABULARY].as_bool(),
+        Some(true),
+        "the CWL byte-assertion vocabulary must be required so implementations that do not recognize it fail closed"
+    );
+
+    let byte_keyword = &dialect["properties"]["x-cwl-maxUtf8Bytes"];
+    assert_eq!(byte_keyword["type"].as_str(), Some("integer"));
+    assert_eq!(byte_keyword["minimum"].as_u64(), Some(0));
 }
