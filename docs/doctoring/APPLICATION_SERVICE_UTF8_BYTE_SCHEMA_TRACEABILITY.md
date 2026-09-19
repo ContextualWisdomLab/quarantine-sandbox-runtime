@@ -17,7 +17,11 @@ The test-only causal candidate `be040a3e308fc09e6286bf0a5d0801b0a5c047b5` fixes 
 - `request_id = "é" × 65`: 65 characters, 130 UTF-8 bytes. Stock `maxLength: 128` admits the character count while runtime validation rejects `InvalidRequestId`.
 - one command argument `"é" × 513`: 513 characters, 1,026 UTF-8 bytes. Stock `maxLength: 1024` admits the character count while runtime validation rejects `InvalidCommandArgument { argument_index: 0 }`.
 
-Review `5253486572` found a false-GREEN in the original final assertion: requiring only `$schema != https://json-schema.org/draft/2020-12/schema` would allow an unrelated custom dialect to satisfy the regression while still giving `x-cwl-maxUtf8Bytes` no executable semantics. Test-only successor `cc6a6d901101d4cd35be78db525f312a23a35f39` therefore binds the RED to the versioned CWL artifact-analysis contract dialect identity owned by #101/#102. It still changes no production Rust, public schema, or vocabulary source. The live schema remains on stock Draft 2020-12, so the intended causal failure is preserved.
+Review `5253486572` found a false-GREEN in the original final assertion: requiring only `$schema != https://json-schema.org/draft/2020-12/schema` would allow an unrelated custom dialect to satisfy the regression while still giving `x-cwl-maxUtf8Bytes` no executable semantics. Test-only successor `cc6a6d901101d4cd35be78db525f312a23a35f39` therefore binds the RED to the versioned CWL artifact-analysis contract dialect identity owned by #101/#102.
+
+Review `5253616141` then found a narrower false-GREEN in that hardened witness: changing only the application-service `$schema` string to the canonical URI could pass while the referenced dialect artifact was absent or did not require the CWL vocabulary/declare the byte keyword. Test-only `5d0434019e152832577e62a079f4ec5c17cbcad1` keeps the same first failure on the live stock `$schema`, but once that identity is adopted it additionally requires the referenced dialect artifact to publish the exact `$id`, remain based on Draft 2020-12, require `https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0`, and declare `x-cwl-maxUtf8Bytes` as a non-negative integer keyword. This still changes no production Rust, public schema, or vocabulary source.
+
+The live application-service schema remains on stock Draft 2020-12, so the intended causal failure is preserved. The extra assertions prevent a URI-only substitution from being mistaken for consumer integration.
 
 ## Decision boundary
 
@@ -25,11 +29,11 @@ Do not change the runtime to character counting. The byte ceiling is a resource/
 
 After the causal RED executes, the minimum GREEN is to adopt the released/versioned CWL byte-assertion contract into the application-service public schema validation path, with unsupported implementations failing closed. Exact-bound positive vectors and one-byte-overflow negative vectors are required for both `request_id` and command arguments.
 
-The application-service schema remains domain truth for application-service fields. The vocabulary definition remains a separately versioned repository contract owned by #101/#102. Referring to its versioned dialect identity in this RED does not make mutable #102 source consumer authority; publication and semantics remain prerequisites. Mutable-branch dependency and source copying are forbidden.
+The application-service schema remains domain truth for application-service fields. The vocabulary definition remains a separately versioned repository contract owned by #101/#102. Referring to its versioned dialect identity in this RED does not make mutable #102 source consumer authority; publication and semantics remain prerequisites. The local consumer RED may verify the adopted dialect surface, but the normative vocabulary specification and conformance vectors remain #101/#102 authority. Mutable-branch dependency and source copying are forbidden.
 
 ## Risks and follow-up
 
-A schema-only consumer can currently accept requests that the runtime later rejects, creating interoperability drift at an external contract boundary. Conversely, weakening runtime byte bounds to match `maxLength` would change resource semantics and is not an acceptable compatibility repair.
+A schema-only consumer can currently accept requests that the runtime later rejects, creating interoperability drift at an external contract boundary. A URI-only repair would create a second interoperability defect: the application-service schema could claim a dialect contract that is absent or not actually required. Conversely, weakening runtime byte bounds to match `maxLength` would change resource semantics and is not an acceptable compatibility repair.
 
 No release claim is valid until the hardened causal RED executes, the released vocabulary is adopted, exact-head repository/fmt/test/Clippy/rustdoc and complete owned-production coverage gates pass, applicable security/review/isolation gates are terminal, and the contract is included in immutable publication with SBOM/provenance/reproducibility/rollback evidence.
 
