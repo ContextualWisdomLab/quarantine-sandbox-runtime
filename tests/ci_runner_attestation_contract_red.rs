@@ -99,6 +99,43 @@ fn is_executable_probe_line(line: &str) -> bool {
         || command.starts_with("bash -c ") && command.contains("/dev/tcp/")
 }
 
+fn shell_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn caller_target_tokens(helper: &str) -> Vec<String> {
+    let mut tokens = vec!["$2".to_owned(), "${2}".to_owned()];
+
+    for line in helper.lines().map(str::trim) {
+        let assignment = line.strip_prefix("local ").unwrap_or(line).trim_start();
+        let Some((name, value)) = assignment.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if !shell_identifier(name) {
+            continue;
+        }
+        if ["$2", "${2}", "\"$2\"", "\"${2}\""]
+            .iter()
+            .any(|candidate| value == *candidate)
+        {
+            tokens.push(format!("${name}"));
+            tokens.push(format!("${{{name}}}"));
+        }
+    }
+
+    tokens
+}
+
+fn code_before_inline_comment(line: &str) -> &str {
+    line.split_once(" #")
+        .map_or(line, |(code, _comment)| code)
+        .trim_end()
+}
+
 #[test]
 fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
     let workflow = fs::read_to_string(".github/workflows/ci.yml")
@@ -117,11 +154,15 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
         helper.lines().any(is_executable_probe_line),
         "the probe helper body itself must execute a concrete network or DNS probe"
     );
+
+    let caller_target_tokens = caller_target_tokens(helper);
     assert!(
         helper.lines().any(|line| {
-            line.trim_start().starts_with("if ") && is_executable_probe_line(line)
+            line.trim_start().starts_with("if ")
+                && is_executable_probe_line(line)
+                && caller_target_tokens.iter().any(|token| line.contains(token))
         }),
-        "the helper must branch directly on the concrete probe result"
+        "the helper must branch directly on a concrete probe whose target operand is caller-supplied, not on an unrelated fixed target while merely logging caller arguments"
     );
     assert!(
         helper.lines().any(|line| line.contains("exit 1")),
@@ -146,6 +187,7 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
     let direct_calls: Vec<&str> = script
         .lines()
         .map(str::trim)
+        .map(code_before_inline_comment)
         .filter(|line| {
             line.starts_with("probe_forbidden_endpoint ")
                 || line.starts_with("if probe_forbidden_endpoint ")
@@ -162,7 +204,7 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
     ] {
         assert!(
             direct_calls.iter().any(|line| line.contains(required_scope)),
-            "{required_scope} must be passed by a direct executable helper invocation, not merely mentioned in output/configuration text"
+            "{required_scope} must be passed as executable helper input before any inline comment, not merely mentioned in output/configuration/comment text"
         );
     }
 }
