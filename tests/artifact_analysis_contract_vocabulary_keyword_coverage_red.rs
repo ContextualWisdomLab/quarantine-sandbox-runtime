@@ -104,12 +104,14 @@ fn required_vocabulary_declares_no_undefined_custom_keywords() {
             assert_conformance_case_shape(keyword, case);
         }
 
-        let accepting_cases: Vec<&&Value> = keyword_cases
+        let accepting_cases: Vec<&Value> = keyword_cases
             .iter()
+            .copied()
             .filter(|case| case["valid"].as_bool() == Some(true))
             .collect();
-        let rejecting_cases: Vec<&&Value> = keyword_cases
+        let rejecting_cases: Vec<&Value> = keyword_cases
             .iter()
+            .copied()
             .filter(|case| case["valid"].as_bool() == Some(false))
             .collect();
         assert!(
