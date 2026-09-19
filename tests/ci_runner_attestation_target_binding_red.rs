@@ -102,7 +102,7 @@ fn literal_shell_words(input: &str) -> Option<Vec<String>> {
                 } else {
                     current.push(character);
                 }
-            }
+            },
             QuoteState::Double => match character {
                 '"' => quote = QuoteState::Unquoted,
                 '\\' => escaped = true,
@@ -176,18 +176,27 @@ fn target_matches_scope(required_scope: &str, target: &str) -> bool {
     };
 
     match required_scope {
-        "192.168.0.0/16" => endpoint
-            .host
-            .parse::<Ipv4Addr>()
-            .is_ok_and(|address| address.octets()[..2] == [192, 168]),
-        "10.0.0.0/8" => endpoint
-            .host
-            .parse::<Ipv4Addr>()
-            .is_ok_and(|address| address.octets()[0] == 10),
-        "172.16.0.0/12" => endpoint.host.parse::<Ipv4Addr>().is_ok_and(|address| {
-            let octets = address.octets();
-            octets[0] == 172 && (16..=31).contains(&octets[1])
-        }),
+        "192.168.0.0/16" => {
+            endpoint.port.is_none()
+                && endpoint
+                    .host
+                    .parse::<Ipv4Addr>()
+                    .is_ok_and(|address| address.octets()[..2] == [192, 168])
+        }
+        "10.0.0.0/8" => {
+            endpoint.port.is_none()
+                && endpoint
+                    .host
+                    .parse::<Ipv4Addr>()
+                    .is_ok_and(|address| address.octets()[0] == 10)
+        }
+        "172.16.0.0/12" => {
+            endpoint.port.is_none()
+                && endpoint.host.parse::<Ipv4Addr>().is_ok_and(|address| {
+                    let octets = address.octets();
+                    octets[0] == 172 && (16..=31).contains(&octets[1])
+                })
+        }
         "6379" => endpoint.port == Some(6379) && host_boundary_literal_ipv4(endpoint.host),
         "5432" => endpoint.port == Some(5432) && host_boundary_literal_ipv4(endpoint.host),
         "DNS" => endpoint.port == Some(53) && host_boundary_literal_ipv4(endpoint.host),
@@ -215,6 +224,11 @@ fn scope_labels_cannot_substitute_for_actual_probe_targets() {
     .expect("literal helper call must parse");
     assert!(!target_matches_scope("5432", &postgres_public.1));
 
+    assert!(!target_matches_scope("10.0.0.0/8", "10.23.4.5:443"));
+    assert!(!target_matches_scope(
+        "192.168.0.0/16",
+        "192.168.50.1:443"
+    ));
     assert!(!target_matches_scope("6379", "127.0.0.1:6379"));
     assert!(!target_matches_scope("5432", "127.0.0.1:5432"));
     assert!(!target_matches_scope("DNS", "127.0.0.1:53"));
@@ -223,9 +237,9 @@ fn scope_labels_cannot_substitute_for_actual_probe_targets() {
 #[test]
 fn required_scopes_accept_only_literal_semantically_bound_targets() {
     for (scope, target) in [
-        ("192.168.0.0/16", "192.168.50.1:443"),
-        ("10.0.0.0/8", "10.23.4.5:443"),
-        ("172.16.0.0/12", "172.31.255.2:443"),
+        ("192.168.0.0/16", "192.168.50.1"),
+        ("10.0.0.0/8", "10.23.4.5"),
+        ("172.16.0.0/12", "172.31.255.2"),
         ("6379", "10.0.0.1:6379"),
         ("5432", "192.168.50.1:5432"),
         ("DNS", "169.254.1.53:53"),
@@ -236,7 +250,7 @@ fn required_scopes_accept_only_literal_semantically_bound_targets() {
         );
     }
 
-    assert!(!target_matches_scope("172.16.0.0/12", "172.32.0.1:443"));
+    assert!(!target_matches_scope("172.16.0.0/12", "172.32.0.1"));
     assert!(literal_probe_call(r#"probe_forbidden_endpoint "10.0.0.0/8" "$TARGET""#).is_none());
 }
 
