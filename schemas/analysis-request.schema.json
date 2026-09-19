@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json",
   "$id": "https://contextualwisdomlab.org/schemas/quarantine/analysis-request-1.0.0.schema.json",
   "title": "Quarantine Analysis Request",
   "type": "object",
