@@ -64,6 +64,21 @@ fn executable_run_script(step: &str) -> &str {
     &step[script_start..]
 }
 
+fn is_network_probe_command(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        " nc ",
+        " ncat ",
+        " curl ",
+        "/dev/tcp/",
+        " dig ",
+        " getent ",
+        " ping ",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 fn leading_spaces(line: &str) -> usize {
     line.len() - line.trim_start_matches(' ').len()
 }
@@ -214,6 +229,18 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
         active_lines.iter().any(|line| *line == "set -euo pipefail"),
         "attestation script must fail closed on shell errors and unset inputs"
     );
+    assert!(
+        active_lines
+            .iter()
+            .any(|line| line.starts_with("probe_forbidden_endpoint()")),
+        "attestation script must centralize forbidden-endpoint probing in an executable helper"
+    );
+    assert!(
+        active_lines
+            .iter()
+            .any(|line| is_network_probe_command(line)),
+        "forbidden-endpoint helper must execute a concrete network/DNS probe rather than only print or describe evidence"
+    );
 
     for required_scope in [
         "192.168.0.0/16",
@@ -225,24 +252,21 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
     ] {
         assert!(
             active_lines.iter().any(|line| {
-                line.contains(required_scope)
-                    && ["probe", "attest", "deny", "reach"]
-                        .iter()
-                        .any(|semantic| line.to_ascii_lowercase().contains(semantic))
+                line.contains("probe_forbidden_endpoint")
+                    && line.contains(required_scope)
+                    && !line.starts_with("echo ")
+                    && !line.starts_with("printf ")
             }),
-            "pre-checkout attestation must actively bind {required_scope} to a denial/reachability probe rather than mention it only in comments or descriptive text"
+            "pre-checkout attestation must pass {required_scope} through the executable forbidden-endpoint probe instead of mentioning it only in comments, output, or configuration text"
         );
     }
 
     assert!(
         active_lines.iter().any(|line| {
             let lower = line.to_ascii_lowercase();
-            lower.starts_with("if ")
-                && ["probe", "reach", "connect"]
-                    .iter()
-                    .any(|semantic| lower.contains(semantic))
+            lower.starts_with("if ") && is_network_probe_command(line)
         }),
-        "attestation script must branch on an actual reachability/probe result"
+        "forbidden-endpoint helper must branch directly on an actual network/DNS probe result"
     );
     assert!(
         active_lines.iter().any(|line| line.contains("exit 1")),
