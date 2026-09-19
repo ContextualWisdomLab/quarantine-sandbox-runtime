@@ -3,8 +3,8 @@
 //! A required JSON Schema vocabulary cannot expose a keyword syntactically and
 //! defer its semantics to a later mutable publication under the same versioned
 //! vocabulary URI. Every custom keyword declared by the dialect must therefore
-//! have normative semantics plus accepting and rejecting conformance vectors in
-//! the same immutable vocabulary version before release.
+//! have normative semantics plus concrete accepting and rejecting conformance
+//! vectors in the same immutable vocabulary version before release.
 
 use std::{fs, path::Path};
 
@@ -47,6 +47,27 @@ fn normative_keyword_section<'a>(specification: &'a str, keyword: &str) -> &'a s
     &section_tail[..section_end]
 }
 
+fn assert_conformance_case_shape(keyword: &str, case: &Value) {
+    let object = case.as_object().unwrap_or_else(|| {
+        panic!("required vocabulary keyword {keyword} conformance case must be a JSON object")
+    });
+    assert!(
+        case["id"]
+            .as_str()
+            .map(|case_id| !case_id.trim().is_empty())
+            .unwrap_or(false),
+        "required vocabulary keyword {keyword} conformance case must have a non-empty id"
+    );
+    assert!(
+        object.contains_key("keyword_value") && !case["keyword_value"].is_null(),
+        "required vocabulary keyword {keyword} conformance case must publish the asserted keyword_value"
+    );
+    assert!(
+        object.contains_key("instance"),
+        "required vocabulary keyword {keyword} conformance case must publish the evaluated instance"
+    );
+}
+
 #[test]
 fn required_vocabulary_declares_no_undefined_custom_keywords() {
     let dialect = read_json(DIALECT_PATH);
@@ -79,13 +100,34 @@ fn required_vocabulary_declares_no_undefined_custom_keywords() {
             .iter()
             .filter(|case| case["keyword"].as_str() == Some(keyword.as_str()))
             .collect();
+        for case in &keyword_cases {
+            assert_conformance_case_shape(keyword, case);
+        }
+
+        let accepting_cases: Vec<&&Value> = keyword_cases
+            .iter()
+            .filter(|case| case["valid"].as_bool() == Some(true))
+            .collect();
+        let rejecting_cases: Vec<&&Value> = keyword_cases
+            .iter()
+            .filter(|case| case["valid"].as_bool() == Some(false))
+            .collect();
         assert!(
-            keyword_cases.iter().any(|case| case["valid"].as_bool() == Some(true)),
+            !accepting_cases.is_empty(),
             "required vocabulary keyword {keyword} has no accepting conformance vector in the same 1.0.0 publication"
         );
         assert!(
-            keyword_cases.iter().any(|case| case["valid"].as_bool() == Some(false)),
+            !rejecting_cases.is_empty(),
             "required vocabulary keyword {keyword} has no rejecting conformance vector in the same 1.0.0 publication"
+        );
+        assert!(
+            accepting_cases.iter().any(|accepting| {
+                rejecting_cases.iter().any(|rejecting| {
+                    accepting["keyword_value"] != rejecting["keyword_value"]
+                        || accepting["instance"] != rejecting["instance"]
+                })
+            }),
+            "required vocabulary keyword {keyword} accepting and rejecting vectors must exercise materially distinct assertion inputs"
         );
     }
 }
