@@ -16,6 +16,7 @@ SCHEMA_FILES = (
     "schemas/application-service-lease.schema.json",
     "schemas/application-service-cleanup.schema.json",
     "schemas/isolation-policy.schema.json",
+    "schemas/release-evidence.schema.json",
 )
 REQUIRED_FILES = (
     "AGENTS.md",
@@ -23,6 +24,9 @@ REQUIRED_FILES = (
     "CLAUDE.md",
     "LICENSE",
     "README.md",
+    "RELEASE.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
     "src/artifact_analysis/mod.rs",
     "src/artifact_analysis/contracts.rs",
     "src/artifact_analysis/ingestion.rs",
@@ -64,6 +68,7 @@ FORBIDDEN_DATABASE_NAME = re.compile(
     re.IGNORECASE,
 )
 ADR_NAME = re.compile(r"^(\d{4})-.*\.md$")
+ACTION_REFERENCE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def main() -> int:
@@ -146,19 +151,27 @@ def main() -> int:
         if schema.get("additionalProperties") is not False:
             errors.append(f"top-level schema must fail closed: {schema_path.name}")
 
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    uses_lines = [
-        line.strip()
-        for line in workflow.splitlines()
-        if line.strip().startswith("uses:")
-    ]
-    for uses_line in uses_lines:
-        if "@" not in uses_line:
-            errors.append(f"workflow action is unpinned: {uses_line}")
-            continue
-        reference = uses_line.rsplit("@", maxsplit=1)[1].split()[0]
-        if not re.fullmatch(r"[0-9a-f]{40}", reference):
-            errors.append(f"workflow action is not pinned by commit SHA: {uses_line}")
+    workflow_root = ROOT / ".github/workflows"
+    workflow_paths = sorted(workflow_root.glob("*.yml")) + sorted(workflow_root.glob("*.yaml"))
+    for workflow_path in workflow_paths:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        uses_lines = [
+            line.strip()
+            for line in workflow.splitlines()
+            if line.strip().startswith("uses:")
+        ]
+        for uses_line in uses_lines:
+            if "@" not in uses_line:
+                errors.append(
+                    f"workflow action is unpinned in {workflow_path.name}: {uses_line}"
+                )
+                continue
+            reference = uses_line.rsplit("@", maxsplit=1)[1].split()[0]
+            if not ACTION_REFERENCE.fullmatch(reference):
+                errors.append(
+                    "workflow action is not pinned by commit SHA in "
+                    f"{workflow_path.name}: {uses_line}"
+                )
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
