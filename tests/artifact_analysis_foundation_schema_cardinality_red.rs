@@ -98,6 +98,25 @@ fn assert_evidence_record_items_contract(items: &Value) {
             "EvidenceBundle evidence_kind enum must retain {evidence_kind}"
         );
     }
+
+    let expected_items = baseline_evidence_record_items();
+    let expected_properties = expected_items
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("baseline EvidenceRecord properties must be an object");
+    for field_name in [
+        "evidence_id",
+        "sequence_number",
+        "producer_id",
+        "summary",
+        "attributes",
+    ] {
+        assert_eq!(
+            properties.get(field_name),
+            expected_properties.get(field_name),
+            "foundation-cardinality repair must preserve EvidenceRecord field semantics for {field_name}"
+        );
+    }
 }
 
 fn assert_evidence_array_baseline_contract(evidence_schema: &Map<String, Value>) {
@@ -288,8 +307,17 @@ fn baseline_evidence_record_items() -> Value {
         "additionalProperties": false,
         "required": EVIDENCE_RECORD_FIELDS,
         "properties": {
-            "evidence_id": {},
-            "sequence_number": {},
+            "evidence_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                "x-cwl-maxUtf8Bytes": 256
+            },
+            "sequence_number": {
+                "type": "integer",
+                "minimum": 1
+            },
             "evidence_kind": {
                 "enum": [
                     "artifact_identity",
@@ -301,9 +329,37 @@ fn baseline_evidence_record_items() -> Value {
                     "tool_failure"
                 ]
             },
-            "producer_id": {},
-            "summary": {},
-            "attributes": {}
+            "producer_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                "x-cwl-maxUtf8Bytes": 128
+            },
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                "x-cwl-maxUtf8Bytes": 4096
+            },
+            "attributes": {
+                "type": "object",
+                "maxProperties": 32,
+                "propertyNames": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                    "x-cwl-maxUtf8Bytes": 128
+                },
+                "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                    "x-cwl-maxUtf8Bytes": 1024
+                }
+            }
         }
     })
 }
@@ -320,6 +376,20 @@ fn baseline_evidence_schema(all_of: Vec<Value>) -> Value {
             }
         }
     })
+}
+
+#[test]
+fn cardinality_witness_accepts_unchanged_evidence_record_contract() {
+    let baseline = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    let constraints = direct_evidence_occurrence_constraints_from(&baseline);
+    for evidence_kind in FOUNDATION_EVIDENCE_KINDS {
+        assert_eq!(constraints.get(evidence_kind), Some(&(1, 1)));
+    }
 }
 
 #[test]
@@ -448,6 +518,26 @@ fn cardinality_witness_rejects_weakened_evidence_record_items() {
     assert!(
         result.is_err(),
         "cardinality witness must reject weakening the pre-existing evidence-record item contract"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_weakened_evidence_record_field_semantics() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_id"]
+        ["maxLength"] = json!(4096);
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject weakening nested EvidenceRecord field semantics"
     );
 }
 
