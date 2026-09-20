@@ -4,11 +4,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-const FOUNDATION_EVIDENCE_KINDS: [&str; 3] = [
-    "artifact_identity",
-    "file_format",
-    "policy_boundary",
-];
+const FOUNDATION_EVIDENCE_KINDS: [&str; 3] =
+    ["artifact_identity", "file_format", "policy_boundary"];
 
 const NON_FOUNDATION_EVIDENCE_KINDS: [&str; 4] = [
     "static_capability",
@@ -50,10 +47,8 @@ fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
         let max_contains = constraint.get("maxContains").and_then(Value::as_u64);
 
         if let (Some(min_contains), Some(max_contains)) = (min_contains, max_contains) {
-            let previous = constraints.insert(
-                evidence_kind.to_owned(),
-                (min_contains, max_contains),
-            );
+            let previous =
+                constraints.insert(evidence_kind.to_owned(), (min_contains, max_contains));
             assert!(
                 previous.is_none(),
                 "schema must not declare conflicting direct occurrence bounds for {evidence_kind}"
