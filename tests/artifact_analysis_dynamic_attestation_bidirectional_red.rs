@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use quarantine_sandbox_runtime::{
-    AnalysisProfile, ArtifactDescriptor, ArtifactKind, EvidenceBundle, EvidenceKind, EvidenceRecord,
-    RuntimeDisposition, RuntimeManifest,
+    AnalysisProfile, ArtifactDescriptor, ArtifactKind, ContractError, EvidenceBundle, EvidenceKind,
+    EvidenceRecord, RuntimeDisposition, RuntimeManifest,
 };
 
 fn completed_dynamic_bundle_without_runtime_behavior(profile: AnalysisProfile) -> EvidenceBundle {
@@ -61,9 +61,12 @@ fn dynamic_execution_flag_requires_runtime_behavior_evidence() {
     ] {
         let bundle = completed_dynamic_bundle_without_runtime_behavior(profile);
 
-        assert!(
-            bundle.validate().is_err(),
-            "a completed dynamic receipt must not treat dynamic_execution_performed=true as sufficient execution evidence without RuntimeBehavior: profile={profile:?}"
+        assert_eq!(
+            bundle.validate(),
+            Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "dynamic_execution_without_runtime_behavior",
+            }),
+            "a completed dynamic receipt must reject the exact execution-without-RuntimeBehavior contradiction: profile={profile:?}"
         );
     }
 }
