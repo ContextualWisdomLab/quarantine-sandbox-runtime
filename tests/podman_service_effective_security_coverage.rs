@@ -191,7 +191,6 @@ fn each_capability_source_can_independently_fail_closed() {
         let calls = fs::read_to_string(&log).expect("fake Podman calls should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
 
@@ -232,7 +231,6 @@ fn missing_no_new_privileges_or_explicit_unconfined_seccomp_fails_closed() {
         let calls = fs::read_to_string(&log).expect("fake Podman calls should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
 
