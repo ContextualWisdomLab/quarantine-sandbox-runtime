@@ -238,3 +238,72 @@ fn missing_no_new_privileges_or_explicit_unconfined_seccomp_fails_closed() {
 
     drop(listener);
 }
+
+#[test]
+fn remaining_service_isolation_controls_fail_closed_independently() {
+    let _fixture_guard = serialize_subprocess_fixture();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener
+        .local_addr()
+        .expect("listener address should resolve")
+        .port();
+
+    for (name, original, replacement, control_name) in [
+        (
+            "host-user-namespace",
+            "\"UsernsMode\":\"auto\"",
+            "\"UsernsMode\":\"host\"",
+            "isolated_user_namespace",
+        ),
+        (
+            "host-pid-namespace",
+            "\"PidMode\":\"private\"",
+            "\"PidMode\":\"host\"",
+            "isolated_pid_namespace",
+        ),
+        (
+            "host-ipc-namespace",
+            "\"IpcMode\":\"none\"",
+            "\"IpcMode\":\"host\"",
+            "isolated_ipc_namespace",
+        ),
+        (
+            "root-container-user",
+            "\"User\":\"65532:65532\"",
+            "\"User\":\"0:0\"",
+            "non_root_identity",
+        ),
+        (
+            "memory-limit-drift",
+            "\"Memory\":268435456",
+            "\"Memory\":268435457",
+            "resource_limits",
+        ),
+    ] {
+        let (program, log) = write_fake_podman(
+            name,
+            ready_port,
+            "[]",
+            "[]",
+            r#"["no-new-privileges"]"#,
+            "filter",
+            "-",
+        );
+        let script = fs::read_to_string(&program).expect("fake Podman script should be readable");
+        assert!(
+            script.contains(original),
+            "fixture mutation must target one known effective-control field"
+        );
+        fs::write(&program, script.replacen(original, replacement, 1))
+            .expect("fake Podman script mutation should be writable");
+
+        let adapter = RootlessPodmanAdapter::new(program.clone());
+        assert_eq!(
+            adapter.launch_at(&request(), &policy(), 1_780_000_044),
+            Err(ApplicationServiceError::IsolationVerificationFailed { control_name })
+        );
+        remove_fixture(program, log);
+    }
+
+    drop(listener);
+}
