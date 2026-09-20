@@ -104,10 +104,32 @@ fn direct_evidence_occurrence_constraints_from(
     let evidence_schema = schema
         .pointer("/properties/evidence")
         .expect("EvidenceBundle schema must declare the evidence array");
+    let evidence_schema = evidence_schema
+        .as_object()
+        .expect("EvidenceBundle evidence schema must be an object");
+
+    let allowed_parent_keywords = ["type", "minItems", "items", "allOf"];
+    assert_eq!(
+        evidence_schema.len(),
+        allowed_parent_keywords.len(),
+        "foundation-cardinality repair must not add evidence-array sibling restrictions"
+    );
+    for keyword in allowed_parent_keywords {
+        assert!(
+            evidence_schema.contains_key(keyword),
+            "foundation-cardinality repair must retain evidence-array {keyword}"
+        );
+    }
+
     let all_of = evidence_schema
         .get("allOf")
         .and_then(Value::as_array)
         .expect("evidence cardinality constraints must apply directly through allOf");
+    assert_eq!(
+        all_of.len(),
+        FOUNDATION_EVIDENCE_KINDS.len(),
+        "evidence allOf must contain only the three foundation occurrence constraints"
+    );
 
     let mut constraints = BTreeMap::new();
     for constraint in all_of {
@@ -148,28 +170,50 @@ fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
     direct_evidence_occurrence_constraints_from(&evidence_bundle_schema())
 }
 
-#[test]
-fn cardinality_witness_rejects_hidden_contains_predicates() {
-    let malformed_repair = json!({
+fn exact_foundation_constraint(evidence_kind: &str) -> Value {
+    json!({
+        "contains": {
+            "required": ["evidence_kind"],
+            "properties": {
+                "evidence_kind": { "const": evidence_kind }
+            }
+        },
+        "minContains": 1,
+        "maxContains": 1
+    })
+}
+
+fn baseline_evidence_schema(all_of: Vec<Value>) -> Value {
+    json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
             "evidence": {
-                "allOf": [
-                    {
-                        "contains": {
-                            "required": ["evidence_kind"],
-                            "properties": {
-                                "evidence_kind": { "const": "artifact_identity" },
-                                "producer_id": { "const": "__never__" }
-                            }
-                        },
-                        "minContains": 1,
-                        "maxContains": 1
-                    }
-                ]
+                "type": "array",
+                "minItems": 1,
+                "items": {},
+                "allOf": all_of
             }
         }
-    });
+    })
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_contains_predicates() {
+    let malformed_repair = baseline_evidence_schema(vec![
+        json!({
+            "contains": {
+                "required": ["evidence_kind"],
+                "properties": {
+                    "evidence_kind": { "const": "artifact_identity" },
+                    "producer_id": { "const": "__never__" }
+                }
+            },
+            "minContains": 1,
+            "maxContains": 1
+        }),
+        exact_foundation_constraint("file_format"),
+        exact_foundation_constraint("policy_boundary"),
+    ]);
 
     let result = std::panic::catch_unwind(|| {
         direct_evidence_occurrence_constraints_from(&malformed_repair)
@@ -182,26 +226,21 @@ fn cardinality_witness_rejects_hidden_contains_predicates() {
 
 #[test]
 fn cardinality_witness_rejects_hidden_occurrence_predicates() {
-    let malformed_repair = json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-            "evidence": {
-                "allOf": [
-                    {
-                        "contains": {
-                            "required": ["evidence_kind"],
-                            "properties": {
-                                "evidence_kind": { "const": "artifact_identity" }
-                            }
-                        },
-                        "minContains": 1,
-                        "maxContains": 1,
-                        "maxItems": 0
-                    }
-                ]
-            }
-        }
-    });
+    let malformed_repair = baseline_evidence_schema(vec![
+        json!({
+            "contains": {
+                "required": ["evidence_kind"],
+                "properties": {
+                    "evidence_kind": { "const": "artifact_identity" }
+                }
+            },
+            "minContains": 1,
+            "maxContains": 1,
+            "maxItems": 0
+        }),
+        exact_foundation_constraint("file_format"),
+        exact_foundation_constraint("policy_boundary"),
+    ]);
 
     let result = std::panic::catch_unwind(|| {
         direct_evidence_occurrence_constraints_from(&malformed_repair)
@@ -209,6 +248,43 @@ fn cardinality_witness_rejects_hidden_occurrence_predicates() {
     assert!(
         result.is_err(),
         "cardinality witness must reject outer occurrence constraints with hidden predicates"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_evidence_array_predicates() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["maxItems"] = json!(3);
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject evidence-array siblings that globally cap optional evidence"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_extra_all_of_predicates() {
+    let mut all_of: Vec<Value> = FOUNDATION_EVIDENCE_KINDS
+        .iter()
+        .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+        .collect();
+    all_of.push(json!({ "maxItems": 3 }));
+    let malformed_repair = baseline_evidence_schema(all_of);
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject unrelated evidence-array predicates hidden in allOf"
     );
 }
 
