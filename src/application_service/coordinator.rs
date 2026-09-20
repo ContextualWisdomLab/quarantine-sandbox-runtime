@@ -779,7 +779,9 @@ mod tests {
         terminate_resume.wait();
 
         assert_eq!(
-            worker.join().expect("expired cleanup worker should not panic"),
+            worker
+                .join()
+                .expect("expired cleanup worker should not panic"),
             Err(ApplicationServiceCoordinatorError::Backend(
                 ApplicationServiceError::CleanupFailed,
             )),
