@@ -24,19 +24,21 @@ CI run `35175389416` on predecessor head
 `b26642bb86bafa8b7f2cfb0b25c0f13b4aa5a6c4` exposed two distinct evidence classes.
 
 - The deterministic release-owner RED was
-  `tests/release_delivery_contract.rs::repository_exposes_fail_closed_release_delivery_contract`:
-  the checked-in contract requires native CI for both live `develop` integration and stable
-  `main`, while `.github/workflows/ci.yml` listened only to `develop` pushes. Commit
-  `90b491cf0c9274abae8591ae52785b6ab914bd11` adds `main` to the existing push branch
-  filter without changing permissions, required jobs, runner identities, or test thresholds.
+  `tests/release_delivery_contract.rs::repository_exposes_fail_closed_release_delivery_contract`.
+  Repository evidence confirmed that `develop`, not legacy `main`, is the protected default
+  branch. The stale contract required both branches while the release preflight itself
+  hard-coded `main`. Commit `402534cc86a42035883e9ee1f4db353158aa5c5d`
+  binds the test and executable exact-source/protection checks to `develop`.
+- A concurrent repair briefly added legacy `main` back to CI in
+  `90b491cf0c9274abae8591ae52785b6ab914bd11`. Ordinary corrective commit
+  `7e2ce232adebd231ef38fdc1d294dba5ae91ee10` restores the canonical protected-default
+  tree without force-push or history deletion.
 - The branch-coverage shard alone failed
   `confined_apparmor_mode_suffix_is_the_same_effective_profile`, while the same test passed
-  on the exact-head ordinary verify shard. That inconsistent same-head result is retained as
-  a possible parallel fixture/runtime race, not reclassified as GREEN and not used to weaken
-  the LSM contract. Fresh exact-head evidence after the deterministic cause change must show
-  whether it recurs before any fixture or runtime repair is justified.
+  on the exact-head ordinary verify shard. That inconsistent same-head result remains a
+  possible parallel fixture/runtime race, not GREEN and not grounds to weaken the LSM contract.
+  Fresh evidence after the deterministic cause change must show whether it recurs.
 
-The positive-LSM job was cancelled after the aggregate failure and therefore supplies no
-acceptance evidence. The PR remains Draft; neither this PR-head result nor predecessor results
-authorize immutable publication.
-
+The positive-LSM job was cancelled after the aggregate failure and supplies no acceptance
+evidence. The PR remains Draft; neither this PR-head result nor predecessor results authorize
+immutable publication.
