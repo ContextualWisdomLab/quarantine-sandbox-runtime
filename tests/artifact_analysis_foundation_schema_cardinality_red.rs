@@ -99,24 +99,11 @@ fn assert_evidence_record_items_contract(items: &Value) {
         );
     }
 
-    let expected_items = baseline_evidence_record_items();
-    let expected_properties = expected_items
-        .get("properties")
-        .and_then(Value::as_object)
-        .expect("baseline EvidenceRecord properties must be an object");
-    for field_name in [
-        "evidence_id",
-        "sequence_number",
-        "producer_id",
-        "summary",
-        "attributes",
-    ] {
-        assert_eq!(
-            properties.get(field_name),
-            expected_properties.get(field_name),
-            "foundation-cardinality repair must preserve EvidenceRecord field semantics for {field_name}"
-        );
-    }
+    assert_eq!(
+        Value::Object(items.clone()),
+        baseline_evidence_record_items(),
+        "foundation-cardinality repair must preserve the complete existing EvidenceRecord item schema"
+    );
 }
 
 fn assert_evidence_array_baseline_contract(evidence_schema: &Map<String, Value>) {
@@ -538,6 +525,45 @@ fn cardinality_witness_rejects_weakened_evidence_record_field_semantics() {
     assert!(
         result.is_err(),
         "cardinality witness must reject weakening nested EvidenceRecord field semantics"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_evidence_kind_predicates() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_kind"]
+        ["const"] = json!("artifact_identity");
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject hidden evidence_kind predicates that make other required kinds impossible"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_evidence_record_predicates() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["items"]["maxProperties"] = json!(0);
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject item-level sibling predicates that invalidate ordinary evidence records"
     );
 }
 
