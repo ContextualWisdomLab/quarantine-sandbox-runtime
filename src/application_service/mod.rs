@@ -1,5 +1,12 @@
 //! Supporting bounded context for launching an approved application as an isolated service.
 
+mod coordinator;
+
+pub use coordinator::{
+    ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
+    ExpiredLeaseCleanupResult, LeaseOwnerId,
+};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

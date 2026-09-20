@@ -14,8 +14,10 @@ mod infrastructure;
 mod sandbox_execution;
 
 pub use application_service::{
+    ApplicationServiceBackend, ApplicationServiceCoordinator, ApplicationServiceCoordinatorError,
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationAttestation, ServiceEndpoint, ServiceProtocol,
+    ExpiredLeaseCleanupResult, IsolationAttestation, LeaseOwnerId, ServiceEndpoint,
+    ServiceProtocol,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
