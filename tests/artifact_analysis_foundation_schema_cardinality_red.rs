@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 const FOUNDATION_EVIDENCE_KINDS: [&str; 3] =
     ["artifact_identity", "file_format", "policy_boundary"];
@@ -19,8 +19,60 @@ fn evidence_bundle_schema() -> Value {
         .expect("checked-in EvidenceBundle schema must be valid JSON")
 }
 
-fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
-    let schema = evidence_bundle_schema();
+fn assert_narrow_foundation_contains_selector(evidence_kind: &str, contains: &Value) {
+    let contains = contains
+        .as_object()
+        .expect("foundation contains selector must be an object");
+    assert_eq!(
+        contains.len(),
+        2,
+        "foundation contains selector must not constrain unrelated evidence fields"
+    );
+
+    let required = contains
+        .get("required")
+        .and_then(Value::as_array)
+        .expect("foundation contains selector must explicitly require evidence_kind");
+    assert_eq!(
+        required.len(),
+        1,
+        "foundation contains selector must require only evidence_kind"
+    );
+    assert_eq!(
+        required[0].as_str(),
+        Some("evidence_kind"),
+        "foundation contains selector must require evidence_kind"
+    );
+
+    let properties = contains
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("foundation contains selector must constrain evidence_kind");
+    assert_eq!(
+        properties.len(),
+        1,
+        "foundation contains selector must not constrain unrelated evidence properties"
+    );
+
+    let evidence_kind_selector = properties
+        .get("evidence_kind")
+        .and_then(Value::as_object)
+        .expect("foundation contains selector must constrain evidence_kind");
+    assert_eq!(
+        evidence_kind_selector.len(),
+        1,
+        "foundation evidence_kind selector must contain only const"
+    );
+    assert_eq!(
+        evidence_kind_selector.get("const").and_then(Value::as_str),
+        Some(evidence_kind),
+        "foundation evidence_kind selector must bind the counted evidence kind"
+    );
+}
+
+fn direct_evidence_occurrence_constraints_from(
+    schema: &Value,
+) -> BTreeMap<String, (u64, u64)> {
     assert_eq!(
         schema.get("$schema").and_then(Value::as_str),
         Some("https://json-schema.org/draft/2020-12/schema"),
@@ -37,12 +89,23 @@ fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
 
     let mut constraints = BTreeMap::new();
     for constraint in all_of {
-        let Some(evidence_kind) = constraint
-            .pointer("/contains/properties/evidence_kind/const")
+        let Some(contains) = constraint.get("contains") else {
+            continue;
+        };
+        let Some(evidence_kind) = contains
+            .pointer("/properties/evidence_kind/const")
             .and_then(Value::as_str)
         else {
             continue;
         };
+
+        if FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .any(|candidate| *candidate == evidence_kind)
+        {
+            assert_narrow_foundation_contains_selector(evidence_kind, contains);
+        }
+
         let min_contains = constraint.get("minContains").and_then(Value::as_u64);
         let max_contains = constraint.get("maxContains").and_then(Value::as_u64);
 
@@ -57,6 +120,42 @@ fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
     }
 
     constraints
+}
+
+fn direct_evidence_occurrence_constraints() -> BTreeMap<String, (u64, u64)> {
+    direct_evidence_occurrence_constraints_from(&evidence_bundle_schema())
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_contains_predicates() {
+    let malformed_repair = json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+            "evidence": {
+                "allOf": [
+                    {
+                        "contains": {
+                            "required": ["evidence_kind"],
+                            "properties": {
+                                "evidence_kind": { "const": "artifact_identity" },
+                                "producer_id": { "const": "__never__" }
+                            }
+                        },
+                        "minContains": 1,
+                        "maxContains": 1
+                    }
+                ]
+            }
+        }
+    });
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject contains selectors with hidden predicates"
+    );
 }
 
 #[test]
