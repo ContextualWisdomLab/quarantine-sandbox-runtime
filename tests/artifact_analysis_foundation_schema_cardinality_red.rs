@@ -70,6 +70,28 @@ fn assert_narrow_foundation_contains_selector(evidence_kind: &str, contains: &Va
     );
 }
 
+fn assert_narrow_foundation_occurrence_constraint(
+    evidence_kind: &str,
+    constraint: &Value,
+    contains: &Value,
+) {
+    let constraint = constraint
+        .as_object()
+        .expect("foundation occurrence constraint must be an object");
+    assert_eq!(
+        constraint.len(),
+        3,
+        "foundation occurrence constraint must not add unrelated assertions or applicators"
+    );
+    for keyword in ["contains", "minContains", "maxContains"] {
+        assert!(
+            constraint.contains_key(keyword),
+            "foundation occurrence constraint must contain only the exact-count keywords"
+        );
+    }
+    assert_narrow_foundation_contains_selector(evidence_kind, contains);
+}
+
 fn direct_evidence_occurrence_constraints_from(
     schema: &Value,
 ) -> BTreeMap<String, (u64, u64)> {
@@ -103,7 +125,7 @@ fn direct_evidence_occurrence_constraints_from(
             .iter()
             .any(|candidate| *candidate == evidence_kind)
         {
-            assert_narrow_foundation_contains_selector(evidence_kind, contains);
+            assert_narrow_foundation_occurrence_constraint(evidence_kind, constraint, contains);
         }
 
         let min_contains = constraint.get("minContains").and_then(Value::as_u64);
@@ -155,6 +177,38 @@ fn cardinality_witness_rejects_hidden_contains_predicates() {
     assert!(
         result.is_err(),
         "cardinality witness must reject contains selectors with hidden predicates"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_hidden_occurrence_predicates() {
+    let malformed_repair = json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+            "evidence": {
+                "allOf": [
+                    {
+                        "contains": {
+                            "required": ["evidence_kind"],
+                            "properties": {
+                                "evidence_kind": { "const": "artifact_identity" }
+                            }
+                        },
+                        "minContains": 1,
+                        "maxContains": 1,
+                        "maxItems": 0
+                    }
+                ]
+            }
+        }
+    });
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject outer occurrence constraints with hidden predicates"
     );
 }
 
