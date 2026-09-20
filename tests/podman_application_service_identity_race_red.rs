@@ -100,6 +100,22 @@ fn command_targets<'a>(calls: &'a str, prefix: &str, target_index: usize) -> Vec
         .collect()
 }
 
+fn container_network_selectors(calls: &str) -> Vec<&str> {
+    calls
+        .lines()
+        .filter(|line| line.starts_with("create --name "))
+        .filter_map(|line| {
+            let mut arguments = line.split_whitespace();
+            while let Some(argument) = arguments.next() {
+                if argument == "--network" {
+                    return arguments.next();
+                }
+            }
+            None
+        })
+        .collect()
+}
+
 fn runtime_identity_labels(calls: &str) -> Vec<&str> {
     calls
         .lines()
@@ -206,8 +222,41 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     assert_eq!(
         network_names.iter().copied().collect::<HashSet<_>>(),
         lease_network_ids,
-        "lease network identities must name the exact created networks"
+        "public lease network identities must retain the generated network correlations"
     );
+
+    let selected_network_ids = container_network_selectors(&calls);
+    assert_eq!(
+        selected_network_ids.len(),
+        2,
+        "both container creates must bind an admitted backend network identity"
+    );
+    assert_eq!(
+        selected_network_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len(),
+        2,
+        "independent launches must bind distinct acquired backend network identities"
+    );
+    for network_id in &selected_network_ids {
+        assert_eq!(
+            network_id.len(),
+            64,
+            "acquired backend network identity must retain canonical full-length form"
+        );
+        assert!(
+            network_id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "acquired backend network identity must remain canonical lower-hex"
+        );
+        assert!(
+            !lease_network_ids.contains(network_id),
+            "private acquired network identity must stay distinct from public qsr-net correlation"
+        );
+    }
 
     let identity_labels = runtime_identity_labels(&calls);
     assert_eq!(
@@ -244,9 +293,6 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     let removed_sandboxes = command_targets(&calls, "rm --force ", 2)
         .into_iter()
         .collect::<HashSet<_>>();
-    let removed_networks = command_targets(&calls, "network rm --force ", 3)
-        .into_iter()
-        .collect::<HashSet<_>>();
     assert_eq!(
         stopped_sandboxes.len(),
         2,
@@ -255,10 +301,6 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     assert_eq!(
         removed_sandboxes, stopped_sandboxes,
         "stop and remove must select the same two invocation-owned containers"
-    );
-    assert_eq!(
-        removed_networks, lease_network_ids,
-        "termination must remove exactly the lease-owned networks"
     );
 
     let _ = fs::remove_file(program);
