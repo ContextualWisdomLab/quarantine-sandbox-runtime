@@ -1,8 +1,8 @@
 //! Branch-outcome coverage for caller-scoped coordinator state transitions.
 
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Barrier,
+    atomic::{AtomicUsize, Ordering},
 };
 use std::thread;
 
@@ -202,12 +202,7 @@ fn conflicting_retry_while_launching_reaches_the_idempotency_conflict_guard() {
     let mut conflicting_request = request();
     conflicting_request.command.push("--different".to_owned());
     assert_eq!(
-        coordinator.launch_at(
-            &lease_owner,
-            &conflicting_request,
-            &policy(),
-            1_780_000_001,
-        ),
+        coordinator.launch_at(&lease_owner, &conflicting_request, &policy(), 1_780_000_001,),
         Err(ApplicationServiceCoordinatorError::IdempotencyConflict)
     );
 
@@ -225,10 +220,12 @@ fn conflicting_retry_while_launching_reaches_the_idempotency_conflict_guard() {
 fn terminating_entry_distinguishes_identical_retry_from_conflicting_content() {
     let termination_entered = Arc::new(Barrier::new(2));
     let termination_release = Arc::new(Barrier::new(2));
-    let coordinator = Arc::new(ApplicationServiceCoordinator::new(TerminationBlockingBackend {
-        termination_entered: Arc::clone(&termination_entered),
-        termination_release: Arc::clone(&termination_release),
-    }));
+    let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+        TerminationBlockingBackend {
+            termination_entered: Arc::clone(&termination_entered),
+            termination_release: Arc::clone(&termination_release),
+        },
+    ));
     let lease_owner = owner();
     let lease = coordinator
         .launch_at(&lease_owner, &request(), &policy(), 1_780_000_000)
@@ -248,12 +245,7 @@ fn terminating_entry_distinguishes_identical_retry_from_conflicting_content() {
     let mut conflicting_request = request();
     conflicting_request.command.push("--different".to_owned());
     assert_eq!(
-        coordinator.launch_at(
-            &lease_owner,
-            &conflicting_request,
-            &policy(),
-            1_780_000_012,
-        ),
+        coordinator.launch_at(&lease_owner, &conflicting_request, &policy(), 1_780_000_012,),
         Err(ApplicationServiceCoordinatorError::IdempotencyConflict)
     );
 
