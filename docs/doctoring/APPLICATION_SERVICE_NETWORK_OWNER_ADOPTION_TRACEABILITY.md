@@ -48,6 +48,14 @@ RCA is test-local. The identity-race fake Podman still returned only `internal`/
 
 The repair does not claim the network-owner contract is GREEN. The production path still has active owner REDs around exact acquired network authority, cleanup, effective attachment, and the #128 hold/attest/release boundary. The moved exact must execute independently; predecessor results do not transfer.
 
+## Identity-race witness cleanup-authority separation
+
+Review `5261603733` found a separate owner-boundary defect in the repaired identity-race witness. The test still treated `network rm --force <public qsr-net correlation>` as its expected termination shape even though the same canonical #127 branch already carries the dedicated termination-owner RED requiring the opposite contract: public `qsr-net-*` remains correlation metadata, the acquired Podman network ID remains private attachment/destructive authority, and network cleanup must be non-force so a foreign member cannot be deleted.
+
+Test-only `0daa56eff16dc582332c04cc01bb05d736d9befa` removes that stale cleanup-command assertion from the identity lane. Instead it proves both concurrent container creates bind two distinct canonical 64-lower-hex acquired backend network selectors, while both public lease network identities remain the two generated `qsr-net-*` correlations. Container lifecycle identity checks remain in place. The fake backend continues to accept both current and eventual owner-safe cleanup shapes, so this fixture no longer duplicates or blocks the dedicated cleanup/termination contract.
+
+This is not a production network-cleanup GREEN. Current production still uses generated-name/network-force cleanup on paths owned by the provenance/partial-cleanup/termination REDs. Those owner tests must establish their causal failures before the minimum private-ID, non-force production repair is applied. The current post-documentation exact must independently execute; no result from `d16acb...`, `d2c22a...`, or earlier heads transfers.
+
 #127 must independently execute its own current exact before any network semantic or merge claim. The active network sequence remains provenance → no cleanup before exact-ID admission → exact-ID non-force cleanup → exact effective attachment → private destructive authority → foreign-safe termination → mandatory effective isolation evidence → #128 hold/attest/release.
 
 ## DDD boundary
