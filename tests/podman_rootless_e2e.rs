@@ -259,6 +259,59 @@ fn rootless_podman_effective_isolation_and_cleanup() {
             String::from_utf8_lossy(&tmp_write.stderr)
         );
 
+        let tmp_mount = podman_stdout(&[
+            "exec",
+            &sandbox,
+            "python",
+            "-B",
+            "-c",
+            "import os; line=next(line for line in open('/proc/self/mountinfo') if line.split()[4]=='/tmp'); left,right=line.strip().split(' - ',1); fields=left.split(); post=right.split(); options=sorted(set(fields[5].split(',')) | set(post[2].split(','))); stats=os.statvfs('/tmp'); print(post[0]+'|'+str(stats.f_frsize * stats.f_blocks)+'|'+','.join(options))",
+        ]);
+        let mut tmp_mount_fields = tmp_mount.splitn(3, '|');
+        assert_eq!(
+            tmp_mount_fields.next(),
+            Some("tmpfs"),
+            "live /tmp must be backed by tmpfs, not only declared that way in inspect"
+        );
+        let tmp_capacity = tmp_mount_fields
+            .next()
+            .expect("live /tmp evidence must include capacity")
+            .parse::<u64>()
+            .expect("live /tmp capacity must be numeric");
+        assert_eq!(
+            tmp_capacity, request.resources.tmpfs_bytes,
+            "live /tmp capacity must match the request-bound tmpfs size"
+        );
+        let tmp_options = tmp_mount_fields
+            .next()
+            .expect("live /tmp evidence must include effective mount options")
+            .split(',')
+            .collect::<Vec<_>>();
+        for required_option in ["rw", "noexec", "nosuid", "nodev"] {
+            assert!(
+                tmp_options.contains(&required_option),
+                "live /tmp must retain effective {required_option} confinement, got {tmp_options:?}"
+            );
+        }
+
+        let tmp_exec_setup = podman(&[
+            "exec",
+            &sandbox,
+            "python",
+            "-B",
+            "-c",
+            "from pathlib import Path; probe=Path('/tmp/qsr-noexec-probe'); probe.write_text('#!/bin/sh\\nexit 0\\n'); probe.chmod(0o700)",
+        ]);
+        assert!(
+            tmp_exec_setup.status.success(),
+            "noexec probe must be created on the writable tmpfs: {}",
+            String::from_utf8_lossy(&tmp_exec_setup.stderr)
+        );
+        assert_podman_fails(
+            &["exec", &sandbox, "/tmp/qsr-noexec-probe"],
+            "live /tmp noexec enforcement must reject direct execution",
+        );
+
         let cap_eff = podman_stdout(&[
             "exec",
             &sandbox,

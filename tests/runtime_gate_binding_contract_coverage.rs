@@ -87,6 +87,26 @@ fn binding_plan_exposes_verified_gate_identity_without_reinterpreting_consumer_a
 }
 
 #[test]
+fn binding_plan_propagates_policy_validation_failure() {
+    let directory = tempfile::tempdir().expect("fixture directory should exist");
+    let (artifact, _) = runtime_gate_artifact(directory.path());
+    let adapter = RootlessPodmanAdapter::new("podman").with_runtime_gate_artifact(artifact);
+    let mut invalid_policy = policy();
+    invalid_policy.run_as_user_id = 0;
+
+    let error = adapter
+        .plan_command_binding(&request(), &invalid_policy)
+        .expect_err("an invalid policy must fail before a runtime-gate binding is produced");
+
+    assert_eq!(
+        error,
+        CommandExecutionError::Backend(ApplicationServiceError::InvalidPolicy {
+            field_name: "run_as_user_id",
+        })
+    );
+}
+
+#[test]
 fn gated_run_validates_request_before_any_backend_invocation() {
     let directory = tempfile::tempdir().expect("fixture directory should exist");
     let (artifact, _) = runtime_gate_artifact(directory.path());
