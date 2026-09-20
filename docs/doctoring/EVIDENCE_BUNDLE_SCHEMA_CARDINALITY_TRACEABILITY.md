@@ -6,11 +6,13 @@
 
 This is public contract parity, not analyzer provenance. Stable analyzer/runtime origin remains owned by #54/#55; mutable `producer_id` is not trusted provenance. Subject binding, record/job identity, runtime-boundary consistency, and job-identity derivation remain separate contracts.
 
-## RED design, review finding, and prerequisite adoption
+## RED design, review findings, and prerequisite adoption
 
 The initial #130 witness at `47a60a8f9f0ebcb5c6c49b3f0b61ddd37df9de94` recursively searched every descendant below `properties.evidence` for `contains` with adjacent `minContains` and `maxContains`. Review `5224839312` found a false-positive path: matching keywords could live in an unused `$defs` entry or an optional `anyOf`/`oneOf` branch without constraining every evidence array instance.
 
 Test-only repair `19e6b171a6e6b57d9f5ab048f903297fdc005a1a` therefore recognizes cardinality only when exact-count subschemas are directly composed under `properties.evidence.allOf`. This binds the structural witness to an unconditional conjunction rather than to keyword presence somewhere in the schema document. Production Rust and the public schema remain unchanged until the witness executes a causal RED.
+
+Review `5260036723` found a narrower false-GREEN in that direct-`allOf` witness. A branch could expose `/contains/properties/evidence_kind/const` plus `minContains: 1` and `maxContains: 1` while also hiding an unrelated predicate such as `producer_id: { const: "__never__" }`. The structural map would report `(1, 1)` even though ordinary foundation records would not satisfy that `contains`, allowing an unusable schema repair to pass the owner test. Test-only `2b9e80e9d07096e07adf0a367e9c257e55804aa6` hardens the witness before any schema GREEN: each foundation selector must explicitly require only `evidence_kind`, constrain only that property, and bind it only with the expected `const`. A synthetic hostile control proves an extra `producer_id` predicate is rejected by the harness. Production Rust and `schemas/evidence-bundle.schema.json` remain unchanged.
 
 The prerequisite #65 branch first advanced from historical `1813b49fd908f111ba6f6a43066bacd5f84e836b` to `598a65562968a48ce1fa61814fee1cbc96f7fff8` after review found stale contract fixtures under the new Rust cardinality invariant. #130 adopted that prerequisite through ordinary non-force two-parent commit `7240a80f392e5660d728f8ba0c2df829adba4d87`, preserving this lane's test and TRACEABILITY blobs while inheriting #65's fixture repairs.
 
@@ -24,9 +26,9 @@ These adoptions matter to causality: #130's schema RED must execute on the repai
 
 ## Selected minimum repair after causal RED
 
-After the current witness executes and fails because `properties.evidence.allOf` is absent, the minimum candidate GREEN is three direct subschemas. Each subschema matches one stable foundation `evidence_kind` with `contains` and sets adjacent `minContains: 1` and `maxContains: 1`. The existing `items` schema remains the authority for evidence-record shape.
+After the current witness executes and fails because `properties.evidence.allOf` is absent, the minimum candidate GREEN is three direct subschemas. Each subschema uses a narrow `contains` selector that explicitly requires only `evidence_kind`, constrains only that property to the one expected foundation kind, and sets adjacent `minContains: 1` and `maxContains: 1`. The existing `items` schema remains the authority for evidence-record shape.
 
-The repair must not singleton-constrain `static_capability`, `runtime_behavior`, `network_attempt`, or `tool_failure`. It must not use `minItems: 3`, fixed positions, `uniqueItems`, `producer_id`, schema-version rewriting, undocumented keywords, or constraints hidden in dead/optional branches.
+The repair must not singleton-constrain `static_capability`, `runtime_behavior`, `network_attempt`, or `tool_failure`. It must not use `minItems: 3`, fixed positions, `uniqueItems`, `producer_id`, schema-version rewriting, undocumented keywords, unrelated predicates inside a foundation `contains`, or constraints hidden in dead/optional branches.
 
 A different Draft 2020-12 construction is acceptable only if its test proves that the occurrence constraint is unconditionally effective for the evidence array rather than merely present in the schema document.
 
@@ -42,6 +44,6 @@ APA 7th:
 
 ## Evidence and release gate
 
-The current #130 head must first execute the schema-cardinality witness for the intended missing-effective-constraint cause on top of exact prerequisite #65 `3bb72c6cdbbc07823ba1c5e59f6a7b3528b29591`. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
+The current #130 head must first execute the hardened schema-cardinality witness for the intended missing-effective-constraint cause on top of exact prerequisite #65 `3bb72c6cdbbc07823ba1c5e59f6a7b3528b29591`. Only then may the public schema change. The resulting unchanged exact head must reacquire repository validation, formatting, full locked workspace/all-target tests, Clippy and rustdoc with warnings denied, complete applicable owned-production coverage, review/security gates, prerequisite integration, protected-head verification, and immutable publication evidence.
 
 Neither #65 nor #129 is complete while Rust validation and the published v1 schema disagree or while either exact owner head lacks its own verification. No predecessor GREEN transfers across head movement.
