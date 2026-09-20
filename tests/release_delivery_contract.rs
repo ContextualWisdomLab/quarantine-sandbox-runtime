@@ -27,6 +27,15 @@ fn job_section<'a>(workflow: &'a str, job_name: &str) -> &'a str {
     &workflow[start..end]
 }
 
+fn assignment_line<'a>(script: &'a str, variable_name: &str) -> &'a str {
+    let prefix = format!("{variable_name}=");
+    script
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("missing {variable_name} assignment in release preflight"))
+}
+
 #[test]
 fn repository_exposes_fail_closed_release_delivery_contract() {
     let root = repository_root();
@@ -110,6 +119,55 @@ fn release_preflight_binds_source_to_live_default_branch() {
     assert!(
         !preflight.contains("branches/develop"),
         "release preflight must not hard-code develop in branch-protection admission"
+    );
+
+    let default_branch_assignment = assignment_line(preflight, "default_branch");
+    assert!(
+        default_branch_assignment.contains("gh api")
+            && default_branch_assignment.contains("repos/${GITHUB_REPOSITORY}")
+            && default_branch_assignment.contains(".default_branch"),
+        "default_branch must be assigned directly from live repository metadata rather than a constant or unrelated command"
+    );
+    assert!(
+        preflight.contains("test -n \"$default_branch\"")
+            || preflight.contains("test -n \"${default_branch}\""),
+        "release preflight must fail closed when live default-branch metadata is empty"
+    );
+    assert!(
+        preflight.contains("git check-ref-format --branch \"$default_branch\"")
+            || preflight.contains("git check-ref-format --branch \"${default_branch}\""),
+        "release preflight must reject an invalid default-branch ref before constructing fetch authority"
+    );
+
+    let encoded_default_branch_assignment = assignment_line(preflight, "encoded_default_branch");
+    assert!(
+        encoded_default_branch_assignment.contains("$default_branch")
+            || encoded_default_branch_assignment.contains("${default_branch}"),
+        "encoded_default_branch must be derived from the exact live default_branch value"
+    );
+    assert!(
+        encoded_default_branch_assignment.contains("@uri")
+            || encoded_default_branch_assignment.contains("urllib.parse.quote"),
+        "encoded_default_branch must use an actual URI encoder rather than a second branch constant"
+    );
+
+    assert_eq!(
+        preflight
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("default_branch="))
+            .count(),
+        1,
+        "release preflight must have exactly one live default_branch assignment authority"
+    );
+    assert_eq!(
+        preflight
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("encoded_default_branch="))
+            .count(),
+        1,
+        "release preflight must have exactly one URI-encoded branch-path authority"
     );
 }
 
