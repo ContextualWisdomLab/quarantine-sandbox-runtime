@@ -72,6 +72,30 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
 }
 
 #[test]
+fn release_preflight_binds_source_to_live_default_branch() {
+    let release = fs::read_to_string(repository_root().join(".github/workflows/release.yml"))
+        .expect("release workflow must be readable");
+    let preflight = job_section(&release, "preflight");
+
+    assert!(
+        preflight.contains(".default_branch"),
+        "release preflight must read the repository's live default_branch authority"
+    );
+    assert!(
+        preflight.contains("default_branch="),
+        "release preflight must retain the live default branch as an explicit shell value"
+    );
+    assert!(
+        preflight.contains("refs/remotes/origin/${default_branch}"),
+        "release source SHA must be compared with the live default branch tip"
+    );
+    assert!(
+        preflight.contains("branches/${default_branch}"),
+        "branch protection must be checked for the same live default branch"
+    );
+}
+
+#[test]
 fn release_hosted_jobs_use_explicit_supported_runner_image() {
     let release = fs::read_to_string(repository_root().join(".github/workflows/release.yml"))
         .expect("release workflow must be readable");
