@@ -74,6 +74,7 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_fake_podman(
     name: &str,
     ready_port: u16,
@@ -81,7 +82,11 @@ fn write_fake_podman(
     bounding_caps: &str,
     security_options: &str,
     process_seccomp: &str,
-    process_caps: &str,
+    process_capeff: &str,
+    process_capbnd: &str,
+    process_capinh: &str,
+    process_capprm: &str,
+    process_capamb: &str,
 ) -> (PathBuf, PathBuf) {
     let program = temporary_path(name);
     let log = temporary_path(&format!("{name}-log"));
@@ -95,7 +100,7 @@ case "${{1:-}}:${{2:-}}" in
   create:--name) printf 'service-security-container-id\n' ;;
   start:*) : ;;
   container:inspect) printf '%s\n' '[{{"Id":"service-security-container-id","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":{effective_caps},"BoundingCaps":{bounding_caps},"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":{security_options},"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}}}]' ;;
-  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 {process_seccomp} {process_caps} {process_caps} {process_caps} {process_caps} {process_caps} containers-default (enforce)\n' ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 {process_seccomp} {process_capeff} {process_capbnd} {process_capinh} {process_capprm} {process_capamb} containers-default (enforce)\n' ;;
   network:inspect) printf '%s\n' '[{{"internal":true,"dns_enabled":false}}]' ;;
   port:*) printf '127.0.0.1:{ready_port}\n' ;;
   stop:*) : ;;
@@ -145,6 +150,10 @@ fn alternate_secure_spellings_are_admitted_only_with_empty_live_capabilities() {
         r#"["no-new-privileges=true"]"#,
         "strict",
         "0x0",
+        "0x0",
+        "0x0",
+        "0x0",
+        "0x0",
     );
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
@@ -168,9 +177,41 @@ fn each_capability_source_can_independently_fail_closed() {
         .expect("listener address should resolve")
         .port();
 
-    for (name, effective_caps, bounding_caps, process_caps) in [
-        ("effective-cap", r#"["CAP_SYS_ADMIN"]"#, "[]", "-"),
-        ("live-process-cap", "[]", "[]", "0x1"),
+    for (
+        name,
+        effective_caps,
+        bounding_caps,
+        process_capeff,
+        process_capbnd,
+        process_capinh,
+        process_capprm,
+        process_capamb,
+    ) in [
+        (
+            "effective-cap",
+            r#"["CAP_SYS_ADMIN"]"#,
+            "[]",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+        ),
+        (
+            "bounding-cap",
+            "[]",
+            r#"["CAP_SYS_ADMIN"]"#,
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+        ),
+        ("live-capeff", "[]", "[]", "0x1", "-", "-", "-", "-"),
+        ("live-capbnd", "[]", "[]", "-", "0x1", "-", "-", "-"),
+        ("live-capinh", "[]", "[]", "-", "-", "0x1", "-", "-"),
+        ("live-capprm", "[]", "[]", "-", "-", "-", "0x1", "-"),
+        ("live-capamb", "[]", "[]", "-", "-", "-", "-", "0x1"),
     ] {
         let (program, log) = write_fake_podman(
             name,
@@ -179,7 +220,11 @@ fn each_capability_source_can_independently_fail_closed() {
             bounding_caps,
             r#"["no-new-privileges"]"#,
             "filter",
-            process_caps,
+            process_capeff,
+            process_capbnd,
+            process_capinh,
+            process_capprm,
+            process_capamb,
         );
         let adapter = RootlessPodmanAdapter::new(program.clone());
         assert_eq!(
@@ -221,6 +266,10 @@ fn missing_no_new_privileges_or_explicit_unconfined_seccomp_fails_closed() {
             "[]",
             security_options,
             "filter",
+            "-",
+            "-",
+            "-",
+            "-",
             "-",
         );
         let adapter = RootlessPodmanAdapter::new(program.clone());
@@ -285,6 +334,10 @@ fn remaining_service_isolation_controls_fail_closed_independently() {
             "[]",
             r#"["no-new-privileges"]"#,
             "filter",
+            "-",
+            "-",
+            "-",
+            "-",
             "-",
         );
         let script = fs::read_to_string(&program).expect("fake Podman script should be readable");
