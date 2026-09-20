@@ -20,7 +20,11 @@ Candidate commits `387406c93953e8d8efbe4e32671ec764a2805b00` and `4a9cd5919691cd
 
 Review `5260321336` found that this candidate is still one-directional: `RuntimeBehavior -> dynamic_execution_performed=true` is enforced, but `dynamic_execution_performed=true -> RuntimeBehavior` is not. A completed dynamic receipt can therefore claim execution while carrying no observed runtime-behavior record. A boolean alone is not execution evidence.
 
-Test-only `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8` adds the Rust RED for a completed Linux/Windows dynamic bundle with `execution=true` but no `RuntimeBehavior`. Test-only `5cd2d46af8158f5d3251257b1fe9ef99831fe08e` adds the public-schema structural RED requiring the corresponding narrow `runtime_behavior` occurrence relation. Production Rust and `schemas/evidence-bundle.schema.json` are unchanged from the earlier candidate on those two commits. Current CI `35504137219` is queued; these inverse REDs are checked in but not yet causal execution evidence.
+Test-only `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8` adds the Rust RED for a completed Linux/Windows dynamic bundle with `execution=true` but no `RuntimeBehavior`. Test-only `5cd2d46af8158f5d3251257b1fe9ef99831fe08e` adds the public-schema structural RED requiring the corresponding narrow `runtime_behavior` occurrence relation. Production Rust and `schemas/evidence-bundle.schema.json` are unchanged from the earlier candidate on those two commits.
+
+Review `5260530224` found two false-GREEN paths in those inverse witnesses before production repair is safe. The Rust test accepted any `validate().is_err()`, so an unrelated future validator failure could satisfy the RED. The schema matcher inspected the desired `runtime` and `evidence` children but did not require their enclosing `properties` maps to contain only those children; an impossible sibling predicate such as `disposition: { const: "__never__" }` could therefore make the rule vacuous while still passing the structural matcher.
+
+Test-only `1454ebb19583dfb0c178c544661b44d8ebf2c578` now requires the schema `if` to contain only `runtime.dynamic_execution_performed=true`, requires the `then` to contain only the direct `evidence.contains(runtime_behavior)` consequence, and adds hostile synthetic controls for hidden root/runtime sibling predicates. Test-only `402b6058a113eba42d8438482652bd39b842a46e` binds the Rust RED to the exact `ContractError::RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }` cause instead of accepting arbitrary validation failure. Production Rust, the public schema, runtime behavior, and workflow remain unchanged by both hardenings. A fresh exact-head CI must execute these hardened REDs before any inverse GREEN.
 
 ## Contract boundaries
 
@@ -54,18 +58,22 @@ Observed-runtime consistency hardening authority: `2b540a0a2c24c7e53c183ff2a8ea1
 
 Formatter-clean executed authority: `9d0da2a50e3247fd6cd2e52301d57408d404557d`, CI `35342943374`, review `5259590778`.
 
-Inverse Rust RED authority: `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8`.
+Initial inverse Rust RED authority: `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8`.
 
-Inverse schema RED authority before this documentation update: `5cd2d46af8158f5d3251257b1fe9ef99831fe08e`, review `5260321336`, CI `35504137219` queued.
+Initial inverse schema RED authority: `5cd2d46af8158f5d3251257b1fe9ef99831fe08e`, review `5260321336`.
 
-The current inverse RED must execute for the intended missing relation before production/schema repair. No predecessor success transfers to the moved head.
+Hardened schema inverse RED authority: `1454ebb19583dfb0c178c544661b44d8ebf2c578`, review `5260530224`.
+
+Hardened exact-error Rust inverse RED authority: `402b6058a113eba42d8438482652bd39b842a46e`, review `5260530224`.
+
+The current inverse RED must execute for the intended missing relation before production/schema repair. No predecessor success transfers to a moved head.
 
 ## Smallest causal GREEN after executed inverse RED
 
 The allowed repair is limited to the receipt contract:
 
-1. Rust `EvidenceBundle::validate()` rejects `dynamic_execution_performed=true` when no `RuntimeBehavior` evidence exists.
-2. The Draft 2020-12 schema enforces the same relation with a direct narrow `contains` selector for `evidence_kind=runtime_behavior`, without hidden predicates that make the counted subset impossible.
+1. Rust `EvidenceBundle::validate()` rejects `dynamic_execution_performed=true` with no `RuntimeBehavior` as exactly `RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }`.
+2. The Draft 2020-12 schema enforces the same relation with a direct narrow `contains` selector for `evidence_kind=runtime_behavior`; the trigger and consequence may not contain hidden sibling predicates that narrow the valid instance set or make the relation vacuous.
 3. Existing static-only, unavailable-dynamic, completed-dynamic, network-denial, and credential-denial semantics remain unchanged.
 4. Hostile input is rejected rather than normalized or inferred.
 
