@@ -1,6 +1,6 @@
 # Application-service network owner adoption traceability
 
-Status: current owner-ancestry repair for Draft #127.
+Status: current owner-ancestry and exact-head evidence repair for Draft #127.
 
 ## Finding
 
@@ -33,6 +33,20 @@ The #127 ref was advanced with `force=false`. The merged tree preserves every #1
 - positive SELinux `105024795428`: no eligible runner, cancelled after 24 hours without executing steps.
 
 The workflow is therefore not release-GREEN. These exact parent results prove the adopted owner delta is repository-fit on hosted lanes, but they do not transfer to #127 after ancestry movement.
+
+## Current #127 exact-head fixture RCA
+
+Exact `d2c22a423870e5566b198587e285ecbf66ea0526` eventually acquired hosted runners in native CI `35460751019`; it is no longer valid to classify that run as merely queued.
+
+- verify `105944054999` passed exact checkout, dependency lock, repository policy, coverage-parser tests, and `cargo fmt --check`, then failed during the full locked workspace/all-target test suite;
+- the first failing test was `podman_application_service_identity_race_red::independent_same_request_launches_use_distinct_runtime_owned_resource_identities`, which aborted with `MalformedIsolationInspection { operation: "network_identity_inspect" }` before either launch could exercise the intended independent-resource-identity assertions;
+- production coverage `105944054990` and branch coverage `105944054951` acquired hosted runners and failed while executing the same test corpus, so those failures do not establish a coverage deficit independently of the fixture prerequisite;
+- hosted rootless/AppArmor negative job `105944054969` completed GREEN;
+- positive SELinux job `105944054864` never acquired its required self-hosted runner (`runner_id=0`, no steps) and was cancelled after 24 hours. That remains runner-capacity evidence, not a product-code result.
+
+RCA is test-local. The identity-race fake Podman still returned only `internal`/`dns_enabled` fields for `network inspect`, while current production acquires and validates a backend network ID before container creation. Test-only commit `4053fc1a245a2a49b619f4d26db15cd07bc98087` repairs that prerequisite without changing production Rust/API/schema/network behavior. For each exact generated `qsr-net-*` correlation name the fixture derives a distinct canonical 64-lower-hex backend ID from the invocation identity and returns it together with `internal=true` and `dns_enabled=false`. This avoids the weaker false-GREEN of assigning both concurrent launches one static backend network ID.
+
+The repair does not claim the network-owner contract is GREEN. The production path still has active owner REDs around exact acquired network authority, cleanup, effective attachment, and the #128 hold/attest/release boundary. The moved exact must execute independently; predecessor results do not transfer.
 
 #127 must independently execute its own current exact before any network semantic or merge claim. The active network sequence remains provenance → no cleanup before exact-ID admission → exact-ID non-force cleanup → exact effective attachment → private destructive authority → foreign-safe termination → mandatory effective isolation evidence → #128 hold/attest/release.
 
