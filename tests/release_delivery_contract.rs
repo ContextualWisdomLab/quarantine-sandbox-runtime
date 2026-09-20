@@ -33,8 +33,8 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))
         .expect("CI workflow must be readable");
     assert!(
-        ci.contains("branches: [develop, main]"),
-        "repository CI must cover both live develop integration and stable main"
+        ci.contains("branches: [develop]"),
+        "repository CI must cover the protected default develop integration branch"
     );
 
     let release_runbook = root.join("RELEASE.md");
@@ -50,7 +50,8 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     for required in [
         "tags:",
         "v*",
-        "refs/remotes/origin/main",
+        "refs/remotes/origin/develop",
+        "branches/develop",
         "cargo package --locked",
         "cargo llvm-cov",
         "--branch",
