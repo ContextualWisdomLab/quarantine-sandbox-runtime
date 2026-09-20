@@ -50,8 +50,6 @@ fn repository_exposes_fail_closed_release_delivery_contract() {
     for required in [
         "tags:",
         "v*",
-        "refs/remotes/origin/develop",
-        "branches/develop",
         "cargo package --locked",
         "cargo llvm-cov",
         "--branch",
@@ -86,12 +84,32 @@ fn release_preflight_binds_source_to_live_default_branch() {
         "release preflight must retain the live default branch as an explicit shell value"
     );
     assert!(
+        preflight.contains("refs/heads/${default_branch}:refs/remotes/origin/${default_branch}"),
+        "release preflight must fetch the live default branch into one explicit remote-tracking ref"
+    );
+    assert!(
         preflight.contains("refs/remotes/origin/${default_branch}"),
         "release source SHA must be compared with the live default branch tip"
     );
     assert!(
-        preflight.contains("branches/${default_branch}"),
-        "branch protection must be checked for the same live default branch"
+        preflight.contains("encoded_default_branch="),
+        "release preflight must URI-encode the live branch name before using it as a REST path parameter"
+    );
+    assert!(
+        preflight.contains("branches/${encoded_default_branch}"),
+        "branch protection must be checked for the same URI-encoded live default branch"
+    );
+    assert!(
+        preflight.contains("--jq '.protected'"),
+        "release preflight must read the protection state for the live default branch"
+    );
+    assert!(
+        !preflight.contains("origin develop"),
+        "release preflight must not hard-code develop as publication authority"
+    );
+    assert!(
+        !preflight.contains("branches/develop"),
+        "release preflight must not hard-code develop in branch-protection admission"
     );
 }
 
