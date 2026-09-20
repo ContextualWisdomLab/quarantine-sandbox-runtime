@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 const FOUNDATION_EVIDENCE_KINDS: [&str; 3] =
     ["artifact_identity", "file_format", "policy_boundary"];
@@ -14,9 +14,107 @@ const NON_FOUNDATION_EVIDENCE_KINDS: [&str; 4] = [
     "tool_failure",
 ];
 
+const EVIDENCE_RECORD_FIELDS: [&str; 6] = [
+    "evidence_id",
+    "sequence_number",
+    "evidence_kind",
+    "producer_id",
+    "summary",
+    "attributes",
+];
+
 fn evidence_bundle_schema() -> Value {
     serde_json::from_str(include_str!("../schemas/evidence-bundle.schema.json"))
         .expect("checked-in EvidenceBundle schema must be valid JSON")
+}
+
+fn assert_evidence_record_items_contract(items: &Value) {
+    let items = items
+        .as_object()
+        .expect("EvidenceBundle evidence items must remain an object schema");
+    assert_eq!(
+        items.get("type").and_then(Value::as_str),
+        Some("object"),
+        "EvidenceBundle evidence items must remain object-typed"
+    );
+    assert_eq!(
+        items.get("additionalProperties").and_then(Value::as_bool),
+        Some(false),
+        "EvidenceBundle evidence records must remain closed to unknown members"
+    );
+
+    let required = items
+        .get("required")
+        .and_then(Value::as_array)
+        .expect("EvidenceBundle evidence records must retain required fields");
+    assert_eq!(
+        required.len(),
+        EVIDENCE_RECORD_FIELDS.len(),
+        "EvidenceBundle evidence required-field surface must remain unchanged"
+    );
+    for field_name in EVIDENCE_RECORD_FIELDS {
+        assert!(
+            required.iter().any(|value| value.as_str() == Some(field_name)),
+            "EvidenceBundle evidence records must keep required field {field_name}"
+        );
+    }
+
+    let properties = items
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("EvidenceBundle evidence records must retain their property surface");
+    assert_eq!(
+        properties.len(),
+        EVIDENCE_RECORD_FIELDS.len(),
+        "EvidenceBundle evidence property surface must remain unchanged"
+    );
+    for field_name in EVIDENCE_RECORD_FIELDS {
+        assert!(
+            properties.contains_key(field_name),
+            "EvidenceBundle evidence records must keep property {field_name}"
+        );
+    }
+
+    let evidence_kind_values = properties
+        .get("evidence_kind")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("EvidenceBundle evidence_kind must retain its enum");
+    let expected_evidence_kinds = FOUNDATION_EVIDENCE_KINDS
+        .iter()
+        .chain(NON_FOUNDATION_EVIDENCE_KINDS.iter())
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        evidence_kind_values.len(),
+        expected_evidence_kinds.len(),
+        "EvidenceBundle evidence_kind enum size must remain unchanged"
+    );
+    for evidence_kind in expected_evidence_kinds {
+        assert!(
+            evidence_kind_values
+                .iter()
+                .any(|value| value.as_str() == Some(evidence_kind)),
+            "EvidenceBundle evidence_kind enum must retain {evidence_kind}"
+        );
+    }
+}
+
+fn assert_evidence_array_baseline_contract(evidence_schema: &Map<String, Value>) {
+    assert_eq!(
+        evidence_schema.get("type").and_then(Value::as_str),
+        Some("array"),
+        "foundation-cardinality repair must preserve the evidence array type"
+    );
+    assert_eq!(
+        evidence_schema.get("minItems").and_then(Value::as_u64),
+        Some(1),
+        "foundation-cardinality repair must preserve the existing evidence minItems"
+    );
+    let items = evidence_schema
+        .get("items")
+        .expect("foundation-cardinality repair must retain evidence items");
+    assert_evidence_record_items_contract(items);
 }
 
 fn assert_narrow_foundation_contains_selector(evidence_kind: &str, contains: &Value) {
@@ -120,6 +218,7 @@ fn direct_evidence_occurrence_constraints_from(
             "foundation-cardinality repair must retain evidence-array {keyword}"
         );
     }
+    assert_evidence_array_baseline_contract(evidence_schema);
 
     let all_of = evidence_schema
         .get("allOf")
@@ -183,6 +282,32 @@ fn exact_foundation_constraint(evidence_kind: &str) -> Value {
     })
 }
 
+fn baseline_evidence_record_items() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": EVIDENCE_RECORD_FIELDS,
+        "properties": {
+            "evidence_id": {},
+            "sequence_number": {},
+            "evidence_kind": {
+                "enum": [
+                    "artifact_identity",
+                    "file_format",
+                    "policy_boundary",
+                    "static_capability",
+                    "runtime_behavior",
+                    "network_attempt",
+                    "tool_failure"
+                ]
+            },
+            "producer_id": {},
+            "summary": {},
+            "attributes": {}
+        }
+    })
+}
+
 fn baseline_evidence_schema(all_of: Vec<Value>) -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -190,7 +315,7 @@ fn baseline_evidence_schema(all_of: Vec<Value>) -> Value {
             "evidence": {
                 "type": "array",
                 "minItems": 1,
-                "items": {},
+                "items": baseline_evidence_record_items(),
                 "allOf": all_of
             }
         }
@@ -285,6 +410,44 @@ fn cardinality_witness_rejects_extra_all_of_predicates() {
     assert!(
         result.is_err(),
         "cardinality witness must reject unrelated evidence-array predicates hidden in allOf"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_weakened_evidence_array_minimum() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["minItems"] = json!(0);
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject weakening the pre-existing evidence minItems contract"
+    );
+}
+
+#[test]
+fn cardinality_witness_rejects_weakened_evidence_record_items() {
+    let mut malformed_repair = baseline_evidence_schema(
+        FOUNDATION_EVIDENCE_KINDS
+            .iter()
+            .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
+            .collect(),
+    );
+    malformed_repair["properties"]["evidence"]["items"] = json!({});
+
+    let result = std::panic::catch_unwind(|| {
+        direct_evidence_occurrence_constraints_from(&malformed_repair)
+    });
+    assert!(
+        result.is_err(),
+        "cardinality witness must reject weakening the pre-existing evidence-record item contract"
     );
 }
 
