@@ -2,60 +2,63 @@
 
 ## Current finding
 
-The application-service owner now acquires one canonical 64-character lower-case Podman network ID before container creation and uses that ID for the container `--network` selector. That removes the earlier name-only binding path, but the acquisition admission is still incomplete.
+The application-service owner now acquires one canonical 64-character lower-case Podman network ID before container creation and uses that ID for the container `--network` selector. That removes the earlier name-only binding path, but the acquisition admission remains incomplete in two distinct ways.
 
-`RootlessPodmanAdapter::acquire_network_id` currently deserializes only `id` from the exact-name `podman network inspect` result. Podman exposes the inspected network's `Name`, `ID`, `Internal`, and `DNSEnabled` as distinct properties. A syntactically valid ID therefore becomes backend authority even when the returned object contradicts the generated network name or the deny-by-default state requested during creation.
+First, the inspection object must be internally authoritative: `RootlessPodmanAdapter::acquire_network_id` historically deserialized only `id` from the exact-name `podman network inspect` result. Podman exposes the inspected network's `Name`, `ID`, `Internal`, and `DNSEnabled` as distinct properties. A syntactically valid ID must not become backend authority when the returned object contradicts the generated network name or the deny-by-default state requested during creation.
 
-This is an ownership/provenance boundary, not another random-name-strength problem. Looking up an exact generated name is how the runtime asks Podman for evidence; the returned object still has to prove that the admitted ID describes the intended runtime-created network and retains the P0 configuration that justified admission.
+Second, even a self-consistent first inspection does not by itself prove that the inspected object is the object created by this invocation. The Podman CLI `network create` contract reports the newly created network **name** on success. The current owner then performs a separate name-based inspection to learn the immutable ID. A same-name replacement between create and that first inspection can therefore present a different canonical ID while preserving the expected name, `internal=true`, and DNS-disabled state. The present code would promote that replacement ID to private attachment authority and bind container creation to it.
 
-## Current owner-path RED
+This is an ownership/provenance boundary, not another random-name-strength problem. High-entropy names reduce accidental collision and blind guessing; they do not convert a later name lookup into creation-bound immutable evidence.
 
-Exact test-only commit `5d19f2c2c13b6dfc0e3dd49a28c7d3fcf1f88c51` adds `tests/podman_application_service_network_identity_provenance_owner_red.rs` on Draft #127.
+## Current owner-path REDs
 
-The witness keeps the returned `.id` canonical while independently contradicting:
+Test-only commit `5d19f2c2c13b6dfc0e3dd49a28c7d3fcf1f88c51` added `tests/podman_application_service_network_identity_provenance_owner_red.rs` on Draft #127. It keeps the returned `.id` canonical while independently contradicting the inspected network name, `internal=true`, and `dns_enabled=false`. Every case requires fail-closed rejection before `container create`.
 
-- the inspected network name;
-- `internal=true`;
-- `dns_enabled=false`.
+Review `5266446082` identifies the separate create→first-inspect TOCTOU gap. Test-only commit `d4f05af6cdf5a31b36783bff53839530600b5e48` adds `tests/podman_application_service_network_create_inspect_toctou_red.rs`. Its fake backend makes `network create` succeed and return the generated correlation name, then makes the first exact-name inspection return a different canonical network ID with the same expected name, `internal=true`, and DNS disabled. The witness requires failure before any container creation can consume that replacement ID.
 
-Every case requires fail-closed rejection before `container create`. The fixture records a consumer-container-create marker if a canonical ID alone is accepted. Production Rust/API/schema/runtime remains unchanged in this commit. This source is RED-only until the exact head executes it for the intended cause; predecessor execution is not transferred.
+Production Rust/API/schema/runtime remains unchanged by these RED commits. The new TOCTOU witness is not GREEN authority until its exact head executes and reaches the intended assertion; predecessor execution does not transfer.
 
-## Intended minimum repair after causal execution
+## Causal repair boundary
 
-The smallest owner repair should make network-identity admission one bounded proof rather than several unrelated lookups:
+Do not choose a production mechanism before the create→first-inspect RED executes. In particular, merely adding more predicates to the later name-based inspection is not sufficient: the hostile replacement can satisfy the same name and P0-state predicates.
 
-1. deserialize exactly one inspection object with the network `name`, canonical full `id`, `internal`, and `dns_enabled` fields required;
-2. require the inspected `name` to equal the exact generated correlation name used for this invocation;
-3. require `internal == true` and `dns_enabled == false` before the ID can become private backend authority;
-4. admit the canonical full ID only after those provenance/configuration checks pass;
-5. keep the generated `qsr-net-*` value as public correlation metadata rather than destructive authority;
-6. continue with the already-staged cleanup-authority and exact-container effective-attachment REDs rather than treating identity admission as complete isolation proof.
+After causal execution, the minimum acceptable GREEN must provide creation-bound evidence that cannot be reconstructed from the public correlation name alone. Candidate mechanisms must be evaluated against the actual Podman interface and include one of the following properties:
 
-The future repair must not normalize a contradictory name, silently coerce absent fields to secure defaults, retry until a different object happens to match, or use a larger random name as a substitute for backend evidence.
+1. the create operation itself returns an immutable network identity that the runtime can admit directly; or
+2. a backend transaction/API provides an equivalent atomic create-and-return-identity contract; or
+3. another independently justified receipt binds the immutable ID to the exact creation operation without promoting name/prefix/label/age/dangling metadata by itself to destructive authority.
+
+If the CLI cannot provide such evidence, that is an adapter limitation to document and repair at the infrastructure boundary rather than a reason to weaken the domain invariant. A runtime-generated label may be useful corroboration, but mutable/reproducible metadata alone is not an immutable creation receipt.
+
+Once creation-bound identity exists, admission must still require exactly one object, canonical full ID, expected P0 state, exact-container effective attachment by that ID, private lifecycle retention, and non-force cleanup. The generated `qsr-net-*` name remains consumer-visible correlation metadata.
 
 ## Relationship to adjacent owner gaps
 
-This finding is narrower than the existing pre-ID cleanup and post-ID cleanup REDs. If identity admission fails, #127 still has to stop correlation-name network deletion. If identity admission succeeds, the admitted ID still has to survive every partial-launch and termination path and later be matched against the exact acquired container's effective `NetworkSettings.Networks[*].NetworkID` before readiness. Network-level `--force` remains prohibited because Podman documents that force removal also removes containers using that network.
+This finding is narrower than #141 recovery but precedes later network authority. If creation-bound identity cannot be admitted, no generated-name deletion is authorized and #141 owns durable orphan reconciliation. If identity admission succeeds, the admitted ID still has to survive every partial-launch and termination path and later be matched against the exact acquired container's effective `NetworkSettings.Networks[*].NetworkID` before readiness. Network-level `--force` remains prohibited because it can affect containers attached to that network.
 
-Issue #48 remains the parent P0 authority for acquired network lifecycle identity. Issues #22/#23 own effective attachment, and #41 owns foreign-safe non-force removal. These controls compose; none substitutes for the others.
+Issue #48 remains the parent P0 authority for acquired network lifecycle identity. Issues #22/#23 own effective attachment, #41 owns foreign-safe non-force removal, and #141 owns no-admitted-ID recovery. These controls compose; none substitutes for creation-bound identity.
 
 ## Decision record
 
-**Problem.** A canonical network ID without expected-name and P0-state binding is syntactically valid but incomplete ownership evidence.
+**Problem.** A canonical network ID learned through a later name lookup is syntactically valid but is not necessarily the immutable identity of the object created by this invocation.
 
-**Constraints.** Preserve single-writer application-service ownership, current public correlation vocabulary, exact-ID container binding, fail-closed behavior, no mutable sibling dependency, no force cleanup, and no predecessor-GREEN promotion.
+**Constraints.** Preserve single-writer application-service ownership, current public correlation vocabulary, fail-closed behavior, no mutable sibling dependency, no force cleanup, no predecessor-GREEN promotion, and the rule that correlation/discovery metadata cannot independently become destructive capability.
 
-**Rejected alternatives.** Larger/randomer names do not establish object identity. Labels alone are mutable metadata and are not sufficient ownership receipts. A second post-create name lookup after admitting the ID widens the TOCTOU surface. Secure Serde defaults turn missing evidence into affirmative evidence and are therefore invalid for P0 admission.
+**Rejected alternatives.** Larger/randomer names reduce guessing but do not establish object identity. Expected-name plus P0-state checks reject contradictory inspections but do not distinguish a conforming same-name replacement. Labels alone are mutable metadata and are not sufficient ownership receipts. Retrying name inspection widens the race and can eventually select a different object. Secure Serde defaults turn missing evidence into affirmative evidence and remain invalid for P0 admission.
 
-**Selected direction.** Bind expected name and P0 network configuration into the same exact inspection object that yields the immutable network ID, then carry only the admitted ID as private backend authority.
+**Selected direction.** Establish causal RED first. The eventual adapter repair must bind immutable network identity to the creation operation itself, then use later inspection only as corroborating state/effective-configuration evidence rather than as the sole source of ownership.
 
-**Effect.** A foreign/rebound or misconfigured object cannot become attachment or cleanup authority merely because it returns a canonical-looking ID.
+**Effect.** A same-name replacement cannot become attachment or cleanup authority merely by winning the interval between network creation and the first lookup.
 
-**Follow-up evidence.** Execute the exact RED; apply the minimum admission repair only after causal execution; then reacquire repository/fmt/full tests/Clippy/public+private rustdoc, complete owned-production line/function/region/branch/edge coverage, effective attachment/cleanup REDs, real rootless network evidence, positive effective LSM, independent review/security, protected integration, and immutable release evidence.
+**Follow-up evidence.** Execute the exact RED; classify the first failure; select the smallest creation-bound mechanism supported by the backend; reacquire repository/fmt/full tests/Clippy/public+private rustdoc, complete owned-production line/function/region/branch/edge coverage, effective attachment/cleanup REDs, real rootless network evidence, positive effective LSM, independent review/security, protected integration, and immutable release evidence.
 
 ## References
 
+Podman Authors. (2026). *podman-network-create — Create a Podman network* (Podman 6.0.0). Podman documentation. https://docs.podman.io/en/v6.0.0/markdown/podman-network-create.1.html
+
 Podman Authors. (2026). *podman-network-inspect — Display the network configuration for one or more networks*. Podman documentation. https://docs.podman.io/en/stable/markdown/podman-network-inspect.1.html
+
+Podman Authors. (2026). *podman-create — Create a new container*. Podman documentation. https://docs.podman.io/en/latest/markdown/podman-create.1.html
 
 Podman Authors. (2026). *podman-network-rm — Remove one or more networks*. Podman documentation. https://docs.podman.io/en/latest/markdown/podman-network-rm.1.html
 
