@@ -7,7 +7,8 @@
 | [0003](0003-published-contract-consumption.md) | Accepted | Consumers integrate through immutable published contracts/artifacts and ACLs, not sibling source or backend SDKs. |
 | [0004](0004-truthful-capability-claims.md) | Accepted | Planned analyzers/backends/integrations are not represented as implemented or release-ready. |
 | [0005](0005-sandbox-execution-context.md) | Accepted | `sandbox_execution` is the Core bounded context; `artifact_analysis` and `application_service` are Supporting contexts. |
-| [0006](0006-isolated-application-service.md) | Proposed | Rootless Podman is the proposed first isolated application-service adapter with immutable images, bounded resources, internal network, loopback ingress, readiness and cleanup; acceptance requires protected integration plus current-head real-runtime evidence. |
+| [0006](0006-isolated-application-service.md) | Proposed | Rootless Podman is the proposed first isolated application-service adapter; acceptance requires protected integration plus current-head real-runtime evidence. |
+| [0007](0007-bounded-command-execution-contract.md) | Proposed | `CommandExecutionRequest`/`CommandExecutionResult`/`CommandExecutionBackend` propose a bounded run-to-completion contract; acceptance requires protected integration and fresh contract/security evidence. |
 
 An ADR whose acceptance depends on implementation or runtime evidence stays Proposed while that evidence exists only on an unmerged/Draft candidate. Promote it to Accepted only after the decision is integrated into the protected branch and the required current-head evidence is revalidated under live governance.
 
