@@ -20,6 +20,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -73,9 +74,10 @@ fn write_fake_podman() -> (PathBuf, PathBuf, PathBuf) {
     let destructive_marker = temporary_path("destructive-container-action");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ndestructive_marker='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf 'bad identifier with spaces\\n' ;;\n  rm:--force) printf 'unexpected destructive container action\\n' > \"$destructive_marker\"; exit 93 ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ndestructive_marker='{}'\nowned_network_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '[{{\"id\":\"%s\",\"internal\":true,\"dns_enabled\":false}}]\\n' \"$owned_network_id\" ;;\n  network:rm) : ;;\n  create:--name) printf 'bad identifier with spaces\\n' ;;\n  rm:--force) printf 'unexpected destructive container action\\n' > \"$destructive_marker\"; exit 93 ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         destructive_marker.display(),
+        OWNED_NETWORK_ID,
         info,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
