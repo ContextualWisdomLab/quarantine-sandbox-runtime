@@ -1079,7 +1079,7 @@ fn runtime_identity_with<E>(
     fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,
 ) -> Result<String, ApplicationServiceError> {
     let mut entropy = [0_u8; RUNTIME_IDENTITY_ENTROPY_BYTES];
-    fill_entropy(entropy.as_mut()).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;
+    fill_entropy(&mut entropy).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;
 
     let mut identity = String::with_capacity(RUNTIME_IDENTITY_ENTROPY_BYTES * 2);
     for byte in entropy {
