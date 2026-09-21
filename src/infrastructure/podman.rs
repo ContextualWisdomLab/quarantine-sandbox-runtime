@@ -1,6 +1,7 @@
 //! Rootless Podman infrastructure adapter for isolated application services.
 
 use std::{
+    collections::BTreeMap,
     io::ErrorKind,
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::{Path, PathBuf},
@@ -63,6 +64,8 @@ struct ContainerInspection {
     config: ContainerConfig,
     #[serde(rename = "HostConfig")]
     host_config: ContainerHostConfig,
+    #[serde(default, rename = "NetworkSettings")]
+    network_settings: Option<ContainerNetworkSettings>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -91,6 +94,18 @@ struct ContainerHostConfig {
     nano_cpus: u64,
     #[serde(rename = "PidsLimit")]
     pids_limit: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerNetworkSettings {
+    #[serde(default, rename = "Networks")]
+    networks: BTreeMap<String, ContainerNetworkAttachment>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct ContainerNetworkAttachment {
+    #[serde(rename = "NetworkID")]
+    network_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -377,13 +392,7 @@ impl RootlessPodmanAdapter {
         create_args.insert(3, format!("--cidfile={create_receipt_path_text}"));
 
         self.checked_output("network_create", plan.network_create_args())?;
-        let network_id = match self.acquire_network_id(&plan) {
-            Ok(network_id) => network_id,
-            Err(error) => {
-                self.cleanup_network(&plan)?;
-                return Err(error);
-            }
-        };
+        let network_id = self.acquire_network_id(&plan)?;
         bind_network_selector(&mut create_args, &network_id)?;
 
         let create_output = match self.checked_output("container_create", &create_args) {
@@ -392,14 +401,14 @@ impl RootlessPodmanAdapter {
                 let receipt = match read_application_service_create_receipt(&create_receipt_path) {
                     Ok(receipt) => receipt,
                     Err(receipt_error) => {
-                        self.cleanup_network(&plan)?;
+                        self.cleanup_admitted_network(&network_id)?;
                         return Err(receipt_error);
                     }
                 };
                 if let Some(container_id) = receipt {
-                    self.cleanup_acquired_container(&plan, &container_id)?;
+                    self.cleanup_acquired_container(&container_id, &network_id)?;
                 } else {
-                    self.cleanup_network(&plan)?;
+                    self.cleanup_admitted_network(&network_id)?;
                 }
                 return Err(error);
             }
@@ -413,15 +422,15 @@ impl RootlessPodmanAdapter {
                 let receipt = match read_application_service_create_receipt(&create_receipt_path) {
                     Ok(receipt) => receipt,
                     Err(receipt_error) => {
-                        self.cleanup_network(&plan)?;
+                        self.cleanup_admitted_network(&network_id)?;
                         return Err(receipt_error);
                     }
                 };
                 if let Some(container_id) = receipt {
-                    self.cleanup_acquired_container(&plan, &container_id)?;
+                    self.cleanup_acquired_container(&container_id, &network_id)?;
                     return Err(original);
                 }
-                self.cleanup_network(&plan)?;
+                self.cleanup_admitted_network(&network_id)?;
                 return Err(ApplicationServiceError::MalformedIsolationInspection {
                     operation: "container_create_receipt",
                 });
@@ -432,39 +441,48 @@ impl RootlessPodmanAdapter {
                 receipt_container_id
             }
             Ok(Some(receipt_container_id)) => {
-                self.cleanup_acquired_container(&plan, &receipt_container_id)?;
+                self.cleanup_acquired_container(&receipt_container_id, &network_id)?;
                 return Err(ApplicationServiceError::MalformedIsolationInspection {
                     operation: "container_create_receipt",
                 });
             }
             Ok(None) => stdout_container_id,
             Err(receipt_error) => {
-                self.cleanup_acquired_container(&plan, &stdout_container_id)?;
+                self.cleanup_acquired_container(&stdout_container_id, &network_id)?;
                 return Err(receipt_error);
             }
         };
 
         let start_args = ["start".to_owned(), container_id.clone()];
         if let Err(error) = self.checked_output("container_start", &start_args) {
-            self.cleanup_acquired_container(&plan, &container_id)?;
+            self.cleanup_acquired_container(&container_id, &network_id)?;
             return Err(error);
         }
 
-        let host_port =
-            match self.verify_effective_isolation(&plan, request, policy, &info, &container_id) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.cleanup_started_container(
-                        &plan,
-                        &container_id,
-                        policy.shutdown_grace_seconds,
-                    )?;
-                    return Err(error);
-                }
-            };
+        let host_port = match self.verify_effective_isolation(
+            request,
+            policy,
+            &info,
+            &container_id,
+            &network_id,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                self.cleanup_started_container(
+                    &container_id,
+                    &network_id,
+                    policy.shutdown_grace_seconds,
+                )?;
+                return Err(error);
+            }
+        };
 
         if wait_for_readiness(host_port, policy).is_err() {
-            self.cleanup_started_container(&plan, &container_id, policy.shutdown_grace_seconds)?;
+            self.cleanup_started_container(
+                &container_id,
+                &network_id,
+                policy.shutdown_grace_seconds,
+            )?;
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
 
@@ -552,14 +570,14 @@ impl RootlessPodmanAdapter {
         )
     }
 
-    /// Verify configured and live process isolation against the exact acquired container ID.
+    /// Verify configured and live process isolation against exact acquired resource identities.
     fn verify_effective_isolation(
         &self,
-        plan: &PodmanLaunchPlan,
         request: &ApplicationServiceRequest,
         policy: &IsolationPolicy,
         info: &PodmanInfo,
         container_id: &str,
+        network_id: &str,
     ) -> Result<u16, ApplicationServiceError> {
         let container_args = [
             "container".to_owned(),
@@ -576,6 +594,10 @@ impl RootlessPodmanAdapter {
                 operation: "container_inspect",
             });
         }
+        require_control(
+            "sandbox_network_binding",
+            effective_network_binding_verified(container.network_settings.as_ref(), network_id),
+        )?;
 
         let process_args = [
             "top".to_owned(),
@@ -652,7 +674,7 @@ impl RootlessPodmanAdapter {
             "inspect".to_owned(),
             "--format".to_owned(),
             "json".to_owned(),
-            plan.network_name().to_owned(),
+            network_id.to_owned(),
         ];
         let network_output = self.checked_output("network_inspect", &network_args)?;
         let network: NetworkInspection =
@@ -699,13 +721,12 @@ impl RootlessPodmanAdapter {
             .is_ok_and(|output| output.status.success())
     }
 
-    /// Remove the runtime-owned network and fail closed when removal cannot be proven.
-    fn cleanup_network(&self, plan: &PodmanLaunchPlan) -> Result<(), ApplicationServiceError> {
+    /// Remove only an admitted backend network identity without network-level force semantics.
+    fn cleanup_admitted_network(&self, network_id: &str) -> Result<(), ApplicationServiceError> {
         let args = [
             "network".to_owned(),
             "rm".to_owned(),
-            "--force".to_owned(),
-            plan.network_name().to_owned(),
+            network_id.to_owned(),
         ];
         if self.command_succeeded(&args) {
             Ok(())
@@ -714,11 +735,11 @@ impl RootlessPodmanAdapter {
         }
     }
 
-    /// Remove the exact acquired container and its runtime-owned network after partial creation.
+    /// Remove the exact acquired container and exact admitted network after partial creation.
     fn cleanup_acquired_container(
         &self,
-        plan: &PodmanLaunchPlan,
         container_id: &str,
+        network_id: &str,
     ) -> Result<(), ApplicationServiceError> {
         let remove_args = [
             "rm".to_owned(),
@@ -726,7 +747,7 @@ impl RootlessPodmanAdapter {
             container_id.to_owned(),
         ];
         let container_removed = self.command_succeeded(&remove_args);
-        let network_removed = self.cleanup_network(plan).is_ok();
+        let network_removed = self.cleanup_admitted_network(network_id).is_ok();
         if container_removed && network_removed {
             Ok(())
         } else {
@@ -734,11 +755,11 @@ impl RootlessPodmanAdapter {
         }
     }
 
-    /// Stop and remove the exact acquired container, then remove its runtime-owned network.
+    /// Stop and remove the exact acquired container, then remove the exact admitted network.
     fn cleanup_started_container(
         &self,
-        plan: &PodmanLaunchPlan,
         container_id: &str,
+        network_id: &str,
         shutdown_grace_seconds: u32,
     ) -> Result<(), ApplicationServiceError> {
         let stop_args = [
@@ -754,7 +775,7 @@ impl RootlessPodmanAdapter {
         ];
         let stopped = self.command_succeeded(&stop_args);
         let container_removed = self.command_succeeded(&remove_args);
-        let network_removed = self.cleanup_network(plan).is_ok();
+        let network_removed = self.cleanup_admitted_network(network_id).is_ok();
         if stopped && container_removed && network_removed {
             Ok(())
         } else {
@@ -934,6 +955,22 @@ fn resource_limits_match(
             .is_ok_and(|value| value <= u64::from(request.resources.maximum_processes))
 }
 
+/// Verify exactly one effective container attachment to the admitted backend network identity.
+fn effective_network_binding_verified(
+    settings: Option<&ContainerNetworkSettings>,
+    network_id: &str,
+) -> bool {
+    let Some(settings) = settings else {
+        return false;
+    };
+    settings.networks.len() == 1
+        && settings
+            .networks
+            .values()
+            .next()
+            .is_some_and(|attachment| attachment.network_id == network_id)
+}
+
 /// Convert a failed isolation predicate into the bounded control-name error taxonomy.
 fn require_control(
     control_name: &'static str,
@@ -1042,7 +1079,7 @@ fn runtime_identity_with<E>(
     fill_entropy: impl FnOnce(&mut [u8; RUNTIME_IDENTITY_ENTROPY_BYTES]) -> Result<(), E>,
 ) -> Result<String, ApplicationServiceError> {
     let mut entropy = [0_u8; RUNTIME_IDENTITY_ENTROPY_BYTES];
-    fill_entropy(&mut entropy).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;
+    fill_entropy(entropy.as_mut()).map_err(|_| ApplicationServiceError::RuntimeIdentityUnavailable)?;
 
     let mut identity = String::with_capacity(RUNTIME_IDENTITY_ENTROPY_BYTES * 2);
     for byte in entropy {
@@ -1088,7 +1125,12 @@ fn wait_for_readiness(
 
 #[cfg(test)]
 mod runtime_identity_tests {
-    use super::{RUNTIME_IDENTITY_ENTROPY_BYTES, bind_network_selector, runtime_identity_with};
+    use std::collections::BTreeMap;
+
+    use super::{
+        ContainerNetworkAttachment, ContainerNetworkSettings, RUNTIME_IDENTITY_ENTROPY_BYTES,
+        bind_network_selector, effective_network_binding_verified, runtime_identity_with,
+    };
     use crate::ApplicationServiceError;
 
     #[test]
@@ -1185,5 +1227,60 @@ mod runtime_identity_tests {
             bind_network_selector(&mut unbound, &"a".repeat(64)),
             expected
         );
+    }
+
+    #[test]
+    fn effective_network_binding_requires_one_exact_acquired_id() {
+        let network_id = "a".repeat(64);
+        assert!(!effective_network_binding_verified(None, &network_id));
+
+        let empty = ContainerNetworkSettings {
+            networks: BTreeMap::new(),
+        };
+        assert!(!effective_network_binding_verified(Some(&empty), &network_id));
+
+        let mismatch = ContainerNetworkSettings {
+            networks: BTreeMap::from([(
+                "qsr".to_owned(),
+                ContainerNetworkAttachment {
+                    network_id: "b".repeat(64),
+                },
+            )]),
+        };
+        assert!(!effective_network_binding_verified(
+            Some(&mismatch),
+            &network_id
+        ));
+
+        let exact = ContainerNetworkSettings {
+            networks: BTreeMap::from([(
+                "qsr".to_owned(),
+                ContainerNetworkAttachment {
+                    network_id: network_id.clone(),
+                },
+            )]),
+        };
+        assert!(effective_network_binding_verified(Some(&exact), &network_id));
+
+        let additional = ContainerNetworkSettings {
+            networks: BTreeMap::from([
+                (
+                    "qsr".to_owned(),
+                    ContainerNetworkAttachment {
+                        network_id: network_id.clone(),
+                    },
+                ),
+                (
+                    "foreign".to_owned(),
+                    ContainerNetworkAttachment {
+                        network_id: "b".repeat(64),
+                    },
+                ),
+            ]),
+        };
+        assert!(!effective_network_binding_verified(
+            Some(&additional),
+            &network_id
+        ));
     }
 }
