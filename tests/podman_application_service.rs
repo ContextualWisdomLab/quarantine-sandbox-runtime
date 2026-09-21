@@ -80,7 +80,7 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32}}]"#;
+    let container = r#"[{"Id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":268435456,"NanoCpus":1000000000,"PidsLimit":32},"NetworkSettings":{"Networks":{"qsr":{"NetworkID":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}}]"#;
     let network = r#"[{"id":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","internal":true,"dns_enabled":false}]"#;
     let script = format!(
         "#!/bin/sh\nset -eu\nMODE='{mode}'\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"$MODE\" = rootless_command_fail ]; then exit 20; fi\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else\n    if [ \"$MODE\" = rootless_false ]; then printf 'false\\n'; else printf 'true\\n'; fi\n  fi\n  exit 0\nfi\ncase \"$MODE:${{1:-}}:${{2:-}}\" in\n  network_create_fail:network:create) exit 21 ;;\n  container_create_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:create:*) exit 22 ;;\n  container_create_cleanup_fail:network:rm) exit 23 ;;\n  start_fail:start:*) exit 24 ;;\n  start_cleanup_fail:start:*) exit 24 ;;\n  start_cleanup_fail:rm:*) exit 28 ;;\n  start_network_cleanup_fail:start:*) exit 24 ;;\n  start_network_cleanup_fail:network:rm) exit 29 ;;\n  port_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:port:*) exit 25 ;;\n  port_stop_cleanup_fail:stop:*) exit 30 ;;\n  port_network_cleanup_fail:port:*) exit 25 ;;\n  port_network_cleanup_fail:network:rm) exit 31 ;;\n  invalid_port_host:port:*) printf '0.0.0.0:{ready_port}\\n'; exit 0 ;;\n  invalid_port_text:port:*) printf '127.0.0.1:not-a-port\\n'; exit 0 ;;\n  invalid_port_zero:port:*) printf '127.0.0.1:0\\n'; exit 0 ;;\n  readiness_cleanup_fail:rm:*) exit 26 ;;\n  termination_cleanup_fail:stop:*) exit 27 ;;\n  termination_remove_cleanup_fail:rm:*) exit 32 ;;\n  termination_network_cleanup_fail:network:rm) exit 33 ;;\nesac\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n' ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
@@ -251,7 +251,8 @@ fn creation_failures_cleanup_only_resources_that_were_created() {
         })
     );
     let calls = fs::read_to_string(&log).expect("container failure calls should be recorded");
-    assert!(calls.contains("network rm --force"));
+    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 
     let (program, log) = write_fake_podman("container_create_cleanup_fail", closed_loopback_port());
@@ -261,7 +262,8 @@ fn creation_failures_cleanup_only_resources_that_were_created() {
         Err(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&log).expect("failed cleanup call should be recorded");
-    assert!(calls.contains("network rm --force"));
+    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 }
 
@@ -281,7 +283,8 @@ fn start_and_port_failures_stop_or_remove_started_resources() {
         );
         let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
+        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(!calls.contains("network rm --force"));
         if mode == "port_fail" {
             assert!(calls.contains("stop --time 2"));
         }
@@ -301,7 +304,8 @@ fn partial_launch_cleanup_failures_override_the_original_backend_error() {
         );
         let calls = fs::read_to_string(&log).expect("partial cleanup calls should be recorded");
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
+        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
 }
@@ -319,7 +323,8 @@ fn started_container_cleanup_attempts_every_resource_after_port_failure() {
         let calls = fs::read_to_string(&log).expect("started cleanup calls should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
+        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
 }
@@ -340,7 +345,8 @@ fn malformed_port_mappings_fail_closed_after_cleanup() {
         let calls = fs::read_to_string(&log).expect("port cleanup should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
+        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
 }
@@ -359,7 +365,8 @@ fn readiness_timeout_fails_closed_and_removes_created_isolation_resources() {
     let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
     assert!(calls.contains("stop --time 2"));
     assert!(calls.contains("rm --force"));
-    assert!(calls.contains("network rm --force"));
+    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 }
 
