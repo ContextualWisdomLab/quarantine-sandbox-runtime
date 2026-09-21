@@ -83,6 +83,21 @@ fn runtime_profile_covers_gregorian_century_month_length_and_uppercase_z_edges()
 }
 
 #[test]
+fn runtime_profile_accepts_fractional_seconds_and_requires_uppercase_t() {
+    assert!(
+        request_with_submitted_at("2024-02-29T23:59:59.123456789Z")
+            .validate()
+            .is_ok(),
+        "the CWL profile admits RFC 3339 fractional seconds within the request byte bound"
+    );
+    assert_eq!(
+        request_with_submitted_at("2024-02-29t23:59:59Z").validate(),
+        Err(ContractError::InvalidSubmittedAt),
+        "the CWL request contract requires the date/time separator to be upper-case T"
+    );
+}
+
+#[test]
 fn published_profile_vectors_cover_independent_gregorian_edge_branches() {
     let vectors = published_vectors();
     assert_eq!(
@@ -113,6 +128,18 @@ fn published_profile_vectors_cover_independent_gregorian_edge_branches() {
         &vectors,
         "rfc3339_profile_lowercase_z_invalid",
         "2024-02-29T23:59:59z",
+        false,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_fractional_second_valid",
+        "2024-02-29T23:59:59.123456789Z",
+        true,
+    );
+    assert_profile_vector(
+        &vectors,
+        "rfc3339_profile_lowercase_t_invalid",
+        "2024-02-29t23:59:59Z",
         false,
     );
 }
