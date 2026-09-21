@@ -2,60 +2,72 @@
 
 ## Decision state
 
-**Proposed / RED-only.** Issue #134 owns the public-contract parity gap for `bounded_source_context.submitted_at`. Draft #102 / Issue #101 remains the prerequisite owner of the versioned CWL artifact-analysis contract dialect and its canonical publication surface. This lane must not create a second dialect or copy mutable #102 source.
+**Proposed / executable RED hardening on the canonical shared-vocabulary owner.** Issue #134 remains the public-contract parity defect. Focused #135 exact `107ce5356c477f2a5a67392b2ac4e8bb7fe6169f` executed its Gregorian-profile RED, and canonical vocabulary owner #102 ordinarily adopted that complete focused test/TRACEABILITY delta through two-parent merge `e840c7274b6725c3a35f187dbe74bc4f0c7259b8`. Vocabulary 1.0.0 has not been immutably published, so the current owner may still complete that same version before first publication.
 
-Current parent authority is artifact-analysis #18 exact `703b4b1a047321bb08d1d6cb1de78d01cb350696`.
+Repository-wide product/technical Gap truth remains #121 single-writer authority. This document owns only the `submitted_at` profile decision and executable evidence.
 
 ## Problem and executable witness
 
-The Rust request validator and the published stock Draft 2020-12 schema do not currently have the same acceptance set.
+The Rust request validator and portable public validation contract must expose the same acceptance set for `bounded_source_context.submitted_at`.
 
-`src/artifact_analysis/contracts.rs::is_valid_submitted_at` parses year, month, and day and rejects a day greater than `days_in_month(year, month)`. Its leap-year rule is Gregorian: divisible by 4, except centuries not divisible by 400.
+`src/artifact_analysis/contracts.rs::is_valid_submitted_at` parses year, month, and day, rejects a day greater than `days_in_month(year, month)`, applies the Gregorian 4/100/400 leap-year rule, rejects seconds greater than 59, and requires a final upper-case `Z`. The runtime therefore already distinguishes semantic branches that a structural day-of-month regular expression cannot express.
 
-The public `schemas/analysis-request.schema.json` instead declares the stock Draft 2020-12 meta-schema, `format: "date-time"`, and a structural pattern whose day component is `01..31` independently of month/year. It also carries `x-cwl-rfc3339Profile`, but an unknown custom keyword under the stock dialect is not an assertion. A schema-only consumer can therefore accept `2026-02-31T00:00:00Z` while `AnalysisRequest::validate()` rejects it.
+The public request schema uses the canonical CWL Draft 2020-12 dialect and required vocabulary keyword `x-cwl-rfc3339Profile`. The corresponding human-readable 1.0.0 vocabulary now normatively defines the exact profile token `utc_z_only_with_gregorian_day_validation_no_leap_second_notation`, Gregorian month lengths, the 4/100/400 leap-year rule, seconds `00..59`, and upper-case `Z` only.
 
-Test `tests/artifact_analysis_submitted_at_schema_contract_red.rs` keeps the runtime and publication concerns separate:
+The original executable witness in `tests/artifact_analysis_submitted_at_schema_contract_red.rs` proves the principal runtime/publication cases: valid `2024-02-29`, invalid `2023-02-29`, invalid `2026-02-31`, leap-second rejection, and numeric-offset rejection. Review `5263902467` found that this was still an interoperability false-GREEN. A conformer using only `year % 4 == 0`, accepting day 31 in every month, or accepting lower-case `z` case-insensitively could pass every existing machine-readable vector while violating the normative 1.0.0 text.
 
-- the existing Rust validator must reject `2026-02-31` and non-leap `2023-02-29` while accepting `2024-02-29`;
-- the published schema must bind its named CWL RFC 3339 profile to the canonical #101/#102 dialect, whose CWL contract vocabulary is required and whose meta-schema recognizes `x-cwl-rfc3339Profile`;
-- the required vocabulary must publish normative semantics for the exact profile token and conformance vectors for a Gregorian leap day, a non-leap February 29, an impossible month/day, leap-second notation, and a numeric UTC offset.
+Test-only commit `a026639258eae37729607794a4e46515061847a4` adds `tests/artifact_analysis_rfc3339_profile_edge_vectors_red.rs`. It separates runtime correctness from publication completeness and requires four independent edge branches:
 
-Review `5237628204` found the first false-GREEN: merely requiring `$schema` to differ from the stock Draft 2020-12 URI would allow an arbitrary non-stock URI to pass without proving canonical dialect/vocabulary adoption. Test-only `cd39c38a864f66bc4d51584dcf60f13cb9c574e4` therefore requires the exact canonical CWL dialect URI, the required CWL vocabulary, and recognition of the RFC3339 profile keyword.
+- `1900-02-29T00:00:00Z` is invalid because a century year not divisible by 400 is not a leap year;
+- `2000-02-29T00:00:00Z` is valid because a century year divisible by 400 remains a leap year;
+- `2026-04-31T00:00:00Z` is invalid because April has 30 days;
+- `2024-02-29T23:59:59z` is invalid because this CWL profile requires upper-case `Z`.
 
-Review `5253891162` found a second false-GREEN: a dialect may recognize `x-cwl-rfc3339Profile` only as `type: string` while publishing no semantics for `utc_z_only_with_gregorian_day_validation_no_leap_second_notation`. That would satisfy keyword recognition while leaving the profile documentation-only. Test-only `b8666577349bc7a77d10889fda810608dd62394c` reuses #102's canonical publication paths—`docs/contracts/cwl_artifact_analysis_contract_vocabulary_1_0_0.md` and `tests/fixtures/cwl_artifact_analysis_contract_vocabulary_1_0_0_vectors.json`—and requires the profile's normative clauses plus positive/negative conformance vectors. Production Rust, public schema, dialect, and vocabulary publication remain unchanged in this RED hardening.
+The runtime controls are expected to pass on current source. The publication half intentionally requires four vector IDs that do not yet exist in `tests/fixtures/cwl_artifact_analysis_contract_vocabulary_1_0_0_vectors.json`. That missing-vector failure is the intended causal RED. Do not add the vectors or change production runtime logic until this exact RED executes for that cause.
 
-On current #18 ancestry the intended first failure remains the stock `$schema` authority. The dialect and publication artifacts are read only after that exact owner assertion passes, so later assertions prevent a URI-only or keyword-declaration-only false GREEN without changing the current causal entry point.
+## Earlier false-GREEN repairs retained
+
+Review `5237628204` found that merely requiring `$schema` to differ from the stock Draft 2020-12 URI would allow an arbitrary non-stock URI to pass without proving canonical dialect/vocabulary adoption. Test-only `cd39c38a864f66bc4d51584dcf60f13cb9c574e4` therefore requires the exact canonical CWL dialect URI, the required CWL vocabulary, and recognition of the RFC3339 profile keyword.
+
+Review `5253891162` found that a dialect may recognize `x-cwl-rfc3339Profile` only as `type: string` while publishing no semantics for `utc_z_only_with_gregorian_day_validation_no_leap_second_notation`. Test-only `b8666577349bc7a77d10889fda810608dd62394c` binds the witness to the canonical vocabulary specification and conformance publication.
+
+#102 predecessor `71e63d9e24ae0f6fbe7c098c8a0a66e4eac500f7` and #135 exact `107ce535...` subsequently executed the generic and focused same-version publication REDs. #102 then added the normative profile semantics and the first five Gregorian vectors as a GREEN candidate. The new edge-vector RED does not invalidate that owner-safe succession; it tightens the machine-readable conformance surface before immutable publication.
 
 ## Standards basis
 
-JSON Schema Draft 2020-12 defines a vocabulary as a set of keywords together with their syntax **and semantics**. When a meta-schema marks a vocabulary `true` in `$vocabulary`, an implementation that does not recognize that vocabulary must refuse to process schemas using the meta-schema. Unknown keywords otherwise remain annotations. Draft 2020-12 also separates Format-Annotation from Format-Assertion; the default meta-schema requires annotation behavior rather than universal assertion behavior.
+JSON Schema Draft 2020-12 defines a vocabulary as a set of keywords together with their syntax and semantics. When a meta-schema marks a vocabulary `true` in `$vocabulary`, an implementation that does not recognize that vocabulary must refuse to process schemas using the meta-schema. Unknown keywords outside recognized required vocabularies otherwise behave as annotations. Draft 2020-12 also separates Format-Annotation from Format-Assertion, so stock `format: date-time` alone is not this repository's portable fail-closed Gregorian authority.
 
-RFC 3339 §5.7 makes `date-mday` depend on month and year: February has 28 days in a normal year and 29 in a leap year; April, June, September, and November have 30. RFC 3339 itself permits leap-second notation in defined circumstances and permits numeric offsets, so the repository's named CWL profile is intentionally narrower: uppercase UTC `Z` only, no leap-second notation, and Gregorian day validity.
+RFC 3339 §5.7 makes `date-mday` depend on month and year: February has 28 days in an ordinary year and 29 in a leap year; April, June, September, and November have 30. RFC 3339 Appendix C gives the Gregorian leap-year computation including the century/400 exception. RFC 3339 permits lower-case `t`/`z` in its base syntax and leap-second notation in defined circumstances, while explicitly allowing profiles to require upper-case letters. The CWL profile is therefore intentionally narrower: upper-case UTC `Z` only, no leap-second notation, and full Gregorian day validity.
 
-The selected architecture is therefore not “make the regex larger.” The public validation authority is a versioned required dialect/vocabulary with independently implementable semantics and conformance vectors, backed by the released Rust validator. #101/#102 owns the shared vocabulary publication mechanism; #134/#135 owns the Gregorian profile semantics that must be added through that canonical contract after the prerequisite is released.
+Concrete 1900/2000 century controls are necessary because the prose rule has two materially different century branches. A single 2023/2024 pair does not distinguish correct Gregorian arithmetic from the common but incorrect `year % 4 == 0` shortcut. Likewise, a February 31 control does not prove 30-day-month behavior, and a numeric-offset control does not prove case-sensitive `Z` behavior.
+
+## DDD and publication boundary
+
+`artifact_analysis` owns the request and vocabulary semantics. The CWL dialect/vocabulary is a versioned public contract, not runtime implementation detail. The Rust validator is executable producer authority; the machine-readable vectors are independent interoperability evidence for consumers. A mutable PR head is never consumer authority.
+
+Because 1.0.0 has no immutable publication, the smallest allowed GREEN after causal execution is to add only the four missing same-version vectors when the runtime controls remain GREEN. If any runtime edge control fails instead, repair only the corresponding validator branch and preserve the exact public profile. Do not normalize lower-case `z`, weaken Gregorian validity, create a second dialect, or change the vocabulary URI after first immutable publication.
 
 ## Rejected alternatives
 
 - **Rely on validator configuration for `format`.** Stock Draft 2020-12 does not make that a portable fail-closed contract.
-- **Encode calendar validity only with a regex.** Leap-year arithmetic would duplicate runtime logic and remain difficult to review as a public contract.
-- **Weaken the Rust validator to the structural regex.** That admits impossible calendar dates.
+- **Encode all calendar validity only with a regex.** Leap-year arithmetic would duplicate runtime logic and remain difficult to audit.
+- **Use only 2023/2024 leap-day vectors.** That permits a `% 4` false implementation to claim conformance.
+- **Use only February for month-length evidence.** That does not prove April/June/September/November limits.
+- **Treat numeric-offset rejection as proof of upper-case `Z`.** A case-insensitive `z` implementation could still pass.
+- **Weaken the Rust validator to the structural schema regex.** That admits impossible calendar dates.
 - **Create a second CWL dialect in this lane.** #101/#102 already owns the shared dialect and vocabulary publication surface.
-- **Accept any non-stock `$schema` URI as GREEN.** A documentation-only URI substitution would satisfy it.
-- **Treat keyword recognition as executable semantics.** A meta-schema declaration such as `type: string` proves syntax only; it does not define what the named profile means.
-- **Treat `x-cwl-rfc3339Profile` as documentation only.** The public schema advertises it as contract data while unsupported consumers could silently ignore it.
+- **Treat keyword recognition as executable semantics.** A meta-schema declaration such as `type: string` proves syntax only.
 
 ## GREEN and release gate
 
-After this exact RED executes for the intended missing-authority cause, the smallest owner-safe GREEN is to adopt the released #101/#102 dialect into current #18 ancestry and extend the canonical required vocabulary publication with the named profile semantics and conformance vectors. Unsupported validators must fail closed or consume the released runtime validator. The repair must not copy a mutable #102 tree, introduce a second dialect, or weaken the Rust acceptance set.
+Let the current #102 exact containing `a026639...` and this TRACEABILITY update execute unchanged. The expected RED is missing edge vectors after runtime controls remain GREEN. Only after that causal evidence may #102 add the four minimum conformance cases and reacquire repository validation, rustfmt, full locked workspace/all-target tests, Clippy/rustdoc, generic vocabulary-completeness and focused Gregorian tests, complete applicable coverage, qualifying review/thread/security gates, dependency-safe parent integration, protected verification, and applicable positive isolation evidence.
 
-Focused GREEN does not transfer predecessor CI and does not waive repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc, 100% owned production statement/function/region/branch/edge coverage, qualifying review/thread/security gates, protected integration, positive runtime-isolation evidence where applicable, or immutable dialect/schema/runtime publication with SBOM, provenance, reproducibility, and rollback evidence.
+#135 remains open until one exact #102 successor proves the complete inherited focused delta plus these hardened publication semantics. Consumer #139 may bind only an immutable released dialect/vocabulary version. Publication still requires version/package identity, immutable tag/package/GitHub Release or canonical equivalent, SBOM, provenance, reproducibility, and rollback evidence.
 
 ## References
 
-JSON Schema. (2022). *JSON Schema Draft 2020-12: Release notes*. https://json-schema.org/draft/2020-12/release-notes
-
-JSON Schema. (2022). *JSON Schema validation: A vocabulary for structural validation of JSON (Draft 2020-12)*. https://json-schema.org/draft/2020-12/json-schema-validation
-
-JSON Schema. (2022). *JSON Schema: A media type for describing JSON documents (Draft 2020-12)*. https://json-schema.org/draft/2020-12/json-schema-core
+Andrews, H., Hutton, B., Dennis, G., & Wright, A. (2022). *JSON Schema: A media type for describing JSON documents (Draft 2020-12).* JSON Schema. https://json-schema.org/draft/2020-12/json-schema-core
 
 Klyne, G., & Newman, C. (2002). *Date and Time on the Internet: Timestamps* (RFC 3339). RFC Editor. https://www.rfc-editor.org/rfc/rfc3339
+
+Wright, A., Andrews, H., Hutton, B., & Dennis, G. (2022). *JSON Schema validation: A vocabulary for structural validation of JSON (Draft 2020-12).* JSON Schema. https://json-schema.org/draft/2020-12/json-schema-validation
