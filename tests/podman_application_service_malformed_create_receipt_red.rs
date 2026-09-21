@@ -22,6 +22,7 @@ use quarantine_sandbox_runtime::{
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -75,10 +76,11 @@ fn write_fake_podman() -> (PathBuf, PathBuf, PathBuf) {
     let foreign_cleanup_marker = temporary_path("foreign-cleanup");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign_marker='{}'\nowned_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned_id\" > \"$cidfile\"; fi\n    printf 'bad identifier with spaces\\n'\n    ;;\n  rm:--force)\n    if [ \"${{3:-}}\" = \"$owned_id\" ]; then exit 0; fi\n    printf 'generated-name cleanup attempted\\n' > \"$foreign_marker\"\n    exit 93\n    ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign_marker='{}'\nowned_id='{}'\nowned_network_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '[{{\"id\":\"%s\",\"internal\":true,\"dns_enabled\":false}}]\\n' \"$owned_network_id\" ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned_id\" > \"$cidfile\"; fi\n    printf 'bad identifier with spaces\\n'\n    ;;\n  rm:--force)\n    if [ \"${{3:-}}\" = \"$owned_id\" ]; then exit 0; fi\n    printf 'generated-name cleanup attempted\\n' > \"$foreign_marker\"\n    exit 93\n    ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         foreign_cleanup_marker.display(),
         OWNED_CONTAINER_ID,
+        OWNED_NETWORK_ID,
         info,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
