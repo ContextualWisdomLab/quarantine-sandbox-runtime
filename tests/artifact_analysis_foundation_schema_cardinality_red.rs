@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 const FOUNDATION_EVIDENCE_KINDS: [&str; 3] =
     ["artifact_identity", "file_format", "policy_boundary"];
@@ -54,7 +54,9 @@ fn assert_evidence_record_items_contract(items: &Value) {
     );
     for field_name in EVIDENCE_RECORD_FIELDS {
         assert!(
-            required.iter().any(|value| value.as_str() == Some(field_name)),
+            required
+                .iter()
+                .any(|value| value.as_str() == Some(field_name)),
             "EvidenceBundle evidence records must keep required field {field_name}"
         );
     }
@@ -196,9 +198,7 @@ fn assert_narrow_foundation_occurrence_constraint(
     assert_narrow_foundation_contains_selector(evidence_kind, contains);
 }
 
-fn direct_evidence_occurrence_constraints_from(
-    schema: &Value,
-) -> BTreeMap<String, (u64, u64)> {
+fn direct_evidence_occurrence_constraints_from(schema: &Value) -> BTreeMap<String, (u64, u64)> {
     assert_eq!(
         schema.get("$schema").and_then(Value::as_str),
         Some("https://json-schema.org/draft/2020-12/schema"),
@@ -397,9 +397,8 @@ fn cardinality_witness_rejects_hidden_contains_predicates() {
         exact_foundation_constraint("policy_boundary"),
     ]);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject contains selectors with hidden predicates"
@@ -424,9 +423,8 @@ fn cardinality_witness_rejects_hidden_occurrence_predicates() {
         exact_foundation_constraint("policy_boundary"),
     ]);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject outer occurrence constraints with hidden predicates"
@@ -443,9 +441,8 @@ fn cardinality_witness_rejects_hidden_evidence_array_predicates() {
     );
     malformed_repair["properties"]["evidence"]["maxItems"] = json!(3);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject evidence-array siblings that globally cap optional evidence"
@@ -461,9 +458,8 @@ fn cardinality_witness_rejects_extra_all_of_predicates() {
     all_of.push(json!({ "maxItems": 3 }));
     let malformed_repair = baseline_evidence_schema(all_of);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject unrelated evidence-array predicates hidden in allOf"
@@ -480,9 +476,8 @@ fn cardinality_witness_rejects_weakened_evidence_array_minimum() {
     );
     malformed_repair["properties"]["evidence"]["minItems"] = json!(0);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject weakening the pre-existing evidence minItems contract"
@@ -499,9 +494,8 @@ fn cardinality_witness_rejects_weakened_evidence_record_items() {
     );
     malformed_repair["properties"]["evidence"]["items"] = json!({});
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject weakening the pre-existing evidence-record item contract"
@@ -516,12 +510,11 @@ fn cardinality_witness_rejects_weakened_evidence_record_field_semantics() {
             .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
             .collect(),
     );
-    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_id"]
-        ["maxLength"] = json!(4096);
+    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_id"]["maxLength"] =
+        json!(4096);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject weakening nested EvidenceRecord field semantics"
@@ -536,12 +529,11 @@ fn cardinality_witness_rejects_hidden_evidence_kind_predicates() {
             .map(|evidence_kind| exact_foundation_constraint(evidence_kind))
             .collect(),
     );
-    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_kind"]
-        ["const"] = json!("artifact_identity");
+    malformed_repair["properties"]["evidence"]["items"]["properties"]["evidence_kind"]["const"] =
+        json!("artifact_identity");
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject hidden evidence_kind predicates that make other required kinds impossible"
@@ -558,9 +550,8 @@ fn cardinality_witness_rejects_hidden_evidence_record_predicates() {
     );
     malformed_repair["properties"]["evidence"]["items"]["maxProperties"] = json!(0);
 
-    let result = std::panic::catch_unwind(|| {
-        direct_evidence_occurrence_constraints_from(&malformed_repair)
-    });
+    let result =
+        std::panic::catch_unwind(|| direct_evidence_occurrence_constraints_from(&malformed_repair));
     assert!(
         result.is_err(),
         "cardinality witness must reject item-level sibling predicates that invalidate ordinary evidence records"
