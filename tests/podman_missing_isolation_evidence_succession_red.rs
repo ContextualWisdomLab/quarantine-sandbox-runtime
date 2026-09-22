@@ -1,22 +1,21 @@
 //! Succession RED for required Podman isolation evidence on the current command/runtime owner.
 //!
-//! The historical #89 witness proved that a missing backend field must not be
-//! converted into secure evidence. This adaptation preserves the newer owner’s
-//! observed Podman 6.1 compatibility rule: an explicit JSON `null` capability
-//! list is accepted as an explicit empty capability set, while an absent field
-//! remains malformed. Fake-Podman fixtures are contract evidence only and do
-//! not replace real rootless/positive-LSM acceptance.
+//! The historical #89 witness proved that missing backend fields must not be
+//! converted into secure evidence. This adaptation also treats an explicit
+//! JSON `null` capability list as unavailable evidence unless an exact supported
+//! Podman version proves that representation is semantically equivalent to an
+//! observed empty capability set. Fake-Podman fixtures are contract evidence
+//! only and do not replace real rootless/positive-LSM acceptance.
 
 #![cfg(target_os = "linux")]
 
 use std::{
     fs,
-    net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::{
-        Mutex,
         atomic::{AtomicU64, Ordering},
+        Mutex,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -25,7 +24,7 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 static SUBPROCESS_FIXTURE_MUTEX: Mutex<()> = Mutex::new(());
@@ -114,7 +113,7 @@ impl Default for Fixture {
     }
 }
 
-fn write_fake_podman(fixture: &Fixture, ready_port: u16) -> (PathBuf, PathBuf) {
+fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
     let program = temporary_path("missing-isolation-evidence-succession-podman");
     let log = temporary_path("missing-isolation-evidence-succession-log");
     let info = json!({
@@ -133,7 +132,7 @@ fn write_fake_podman(fixture: &Fixture, ready_port: u16) -> (PathBuf, PathBuf) {
     let container = fixture.container.to_string();
     let network = fixture.network.to_string();
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'missing-evidence-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"${{1:-}}:${{2:-}}\" in\n  info:--format) printf '%s\\n' '{}' ;;\n  network:create) : ;;\n  create:--name) printf 'missing-evidence-container-id\\n' ;;\n  start:*) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  top:*) printf '%s' '{}' ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  port:*) printf 'not-a-loopback-mapping\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  network:rm) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         container,
@@ -149,20 +148,13 @@ fn write_fake_podman(fixture: &Fixture, ready_port: u16) -> (PathBuf, PathBuf) {
     (program, log)
 }
 
-fn closed_loopback_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port should bind");
-    listener
-        .local_addr()
-        .expect("listener address should resolve")
-        .port()
-}
-
-fn launch(fixture: Fixture) -> Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError> {
+fn launch(
+    fixture: Fixture,
+) -> Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError> {
     let _fixture_guard = SUBPROCESS_FIXTURE_MUTEX
         .lock()
         .expect("subprocess fixture mutex should not be poisoned");
-    let ready_port = closed_loopback_port();
-    let (program, log) = write_fake_podman(&fixture, ready_port);
+    let (program, log) = write_fake_podman(&fixture);
     let result = RootlessPodmanAdapter::new(program.clone()).launch_at(
         &request(),
         &policy(),
@@ -222,17 +214,23 @@ fn missing_dns_enabled_is_malformed_network_evidence() {
 }
 
 #[test]
-fn explicit_empty_and_null_capability_evidence_remain_distinct_from_absence() {
+fn explicit_empty_capability_arrays_reach_the_deterministic_port_boundary() {
     assert_eq!(
         launch(Fixture::default()),
-        Err(ApplicationServiceError::ReadinessTimeout)
+        Err(ApplicationServiceError::InvalidPortMapping)
     );
+}
 
-    let mut explicit_null = Fixture::default();
-    explicit_null.container[0]["EffectiveCaps"] = Value::Null;
-    explicit_null.container[0]["BoundingCaps"] = Value::Null;
+#[test]
+fn explicit_null_capability_arrays_are_malformed_without_version_scoped_proof() {
+    let mut fixture = Fixture::default();
+    fixture.container[0]["EffectiveCaps"] = Value::Null;
+    fixture.container[0]["BoundingCaps"] = Value::Null;
+
     assert_eq!(
-        launch(explicit_null),
-        Err(ApplicationServiceError::ReadinessTimeout)
+        launch(fixture),
+        Err(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_inspect",
+        })
     );
 }
