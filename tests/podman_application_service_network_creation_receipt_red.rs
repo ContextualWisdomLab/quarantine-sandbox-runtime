@@ -172,7 +172,8 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
     let has_until = event_query
         .split_whitespace()
         .any(|argument| argument == "--until" || argument.starts_with("--until="));
-    let has_json_format = event_query.contains("--format json") || event_query.contains("--format=json");
+    let has_json_format =
+        event_query.contains("--format json") || event_query.contains("--format=json");
     let has_network_filter =
         event_query.contains("--filter type=network") || event_query.contains("--filter=type=network");
     let has_create_filter =
