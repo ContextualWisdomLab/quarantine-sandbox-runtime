@@ -148,10 +148,46 @@ esac
 }
 
 fn bounded_creation_event_query(calls: &str) -> &str {
-    let event_query = calls
-        .lines()
-        .find(|line| line.starts_with("events "))
+    let call_lines: Vec<&str> = calls.lines().collect();
+    let network_create_index = call_lines
+        .iter()
+        .position(|line| line.starts_with("network create --internal --disable-dns qsr-net-"))
+        .expect("network creation must precede creation-history admission");
+    let mut event_queries = call_lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("events "));
+    let (event_query_index, event_query) = event_queries
+        .next()
         .expect("network identity admission must consult Podman creation history");
+    assert!(
+        event_queries.next().is_none(),
+        "network identity admission must use exactly one creation-history query; calls were:\n{calls}"
+    );
+    let event_query = *event_query;
+    assert!(
+        event_query_index > network_create_index,
+        "creation history must be queried only after the invocation-local network is created; calls were:\n{calls}"
+    );
+    if let Some(network_inspect_index) = call_lines
+        .iter()
+        .position(|line| line.starts_with("network inspect "))
+    {
+        assert!(
+            event_query_index < network_inspect_index,
+            "creation receipt must be admitted before exact-ID network inspection; calls were:\n{calls}"
+        );
+    }
+    if let Some(container_create_index) = call_lines
+        .iter()
+        .position(|line| line.starts_with("create --name "))
+    {
+        assert!(
+            event_query_index < container_create_index,
+            "creation receipt must be admitted before container creation; calls were:\n{calls}"
+        );
+    }
+
     let has_since = event_query
         .split_whitespace()
         .any(|argument| argument == "--since" || argument.starts_with("--since="));
@@ -160,10 +196,10 @@ fn bounded_creation_event_query(calls: &str) -> &str {
         .any(|argument| argument == "--until" || argument.starts_with("--until="));
     let has_json_format =
         event_query.contains("--format json") || event_query.contains("--format=json");
-    let has_network_filter =
-        event_query.contains("--filter type=network") || event_query.contains("--filter=type=network");
-    let has_create_filter =
-        event_query.contains("--filter event=create") || event_query.contains("--filter=event=create");
+    let has_network_filter = event_query.contains("--filter type=network")
+        || event_query.contains("--filter=type=network");
+    let has_create_filter = event_query.contains("--filter event=create")
+        || event_query.contains("--filter=event=create");
 
     assert!(
         event_query.contains("--stream=false")
