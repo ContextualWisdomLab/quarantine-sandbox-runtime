@@ -222,9 +222,21 @@ fn explicit_empty_capability_arrays_reach_the_deterministic_port_boundary() {
 }
 
 #[test]
-fn explicit_null_capability_arrays_are_malformed_without_version_scoped_proof() {
+fn explicit_null_effective_capabilities_is_malformed_without_version_scoped_proof() {
     let mut fixture = Fixture::default();
     fixture.container[0]["EffectiveCaps"] = Value::Null;
+
+    assert_eq!(
+        launch(fixture),
+        Err(ApplicationServiceError::MalformedIsolationInspection {
+            operation: "container_inspect",
+        })
+    );
+}
+
+#[test]
+fn explicit_null_bounding_capabilities_is_malformed_without_version_scoped_proof() {
+    let mut fixture = Fixture::default();
     fixture.container[0]["BoundingCaps"] = Value::Null;
 
     assert_eq!(
