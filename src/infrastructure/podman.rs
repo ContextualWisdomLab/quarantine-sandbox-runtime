@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
@@ -66,13 +66,9 @@ struct ContainerInspection {
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
     process_label: String,
-    #[serde(
-        default,
-        rename = "EffectiveCaps",
-        deserialize_with = "null_as_default"
-    )]
+    #[serde(rename = "EffectiveCaps")]
     effective_caps: Vec<String>,
-    #[serde(default, rename = "BoundingCaps", deserialize_with = "null_as_default")]
+    #[serde(rename = "BoundingCaps")]
     bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
@@ -94,22 +90,6 @@ struct ContainerMount {
     options: Vec<String>,
     #[serde(rename = "RW")]
     read_write: bool,
-}
-
-/// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
-///
-/// `#[serde(default)]` alone only covers a *missing* key. Podman has been
-/// observed (6.1.0, unlike the CI-pinned 5.8.4) to emit an explicit JSON
-/// `null` for `EffectiveCaps`/`BoundingCaps` once every capability is
-/// dropped, which `#[serde(default)]` alone does not tolerate for a
-/// non-`Option` field. Both representations mean the same fact -- no
-/// capabilities -- so both must deserialize to the same empty value.
-fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -158,7 +138,6 @@ struct ContainerHostConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct NetworkInspection {
     internal: bool,
-    #[serde(default)]
     dns_enabled: bool,
 }
 
