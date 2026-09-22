@@ -147,6 +147,33 @@ esac
     program
 }
 
+fn single_option_value<'a>(arguments: &'a [&'a str], option: &str) -> &'a str {
+    let assignment_prefix = format!("{option}=");
+    let mut occurrences = 0;
+    let mut value = None;
+
+    for (index, argument) in arguments.iter().enumerate() {
+        if *argument == option {
+            occurrences += 1;
+            value = arguments
+                .get(index + 1)
+                .copied()
+                .filter(|candidate| !candidate.is_empty() && !candidate.starts_with("--"));
+        } else if let Some(candidate) = argument.strip_prefix(&assignment_prefix) {
+            occurrences += 1;
+            if !candidate.is_empty() {
+                value = Some(candidate);
+            }
+        }
+    }
+
+    assert_eq!(
+        occurrences, 1,
+        "creation-history option {option} must occur exactly once"
+    );
+    value.unwrap_or_else(|| panic!("creation-history option {option} must have a concrete value"))
+}
+
 fn bounded_creation_event_query(calls: &str) -> &str {
     let call_lines: Vec<&str> = calls.lines().collect();
     let network_create_index = call_lines
@@ -188,12 +215,14 @@ fn bounded_creation_event_query(calls: &str) -> &str {
         );
     }
 
-    let has_since = event_query
-        .split_whitespace()
-        .any(|argument| argument == "--since" || argument.starts_with("--since="));
-    let has_until = event_query
-        .split_whitespace()
-        .any(|argument| argument == "--until" || argument.starts_with("--until="));
+    let arguments: Vec<&str> = event_query.split_whitespace().collect();
+    let since = single_option_value(&arguments, "--since");
+    let until = single_option_value(&arguments, "--until");
+    assert_ne!(
+        since, until,
+        "creation-history lower and upper bounds must be distinct; call was: {event_query}"
+    );
+
     let has_json_format =
         event_query.contains("--format json") || event_query.contains("--format=json");
     let has_network_filter = event_query.contains("--filter type=network")
@@ -203,8 +232,6 @@ fn bounded_creation_event_query(calls: &str) -> &str {
 
     assert!(
         event_query.contains("--stream=false")
-            && has_since
-            && has_until
             && has_json_format
             && has_network_filter
             && has_create_filter,
