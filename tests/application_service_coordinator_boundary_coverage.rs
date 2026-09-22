@@ -73,7 +73,17 @@ impl ApplicationServiceBackend for CountingBackend {
         terminated_at_epoch_seconds: u64,
     ) -> Result<CleanupReceipt, ApplicationServiceError> {
         self.terminate_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
+        serde_json::from_value(json!({
+            "schema_version": "1.2.0",
+            "sandbox_id": lease.sandbox_id(),
+            "network_id": lease.network_id(),
+            "container_removed": true,
+            "network_removed": true,
+            "terminated_at_epoch_seconds": terminated_at_epoch_seconds,
+        }))
+        .map_err(|_| ApplicationServiceError::BackendCommandFailed {
+            operation: "coordinator_boundary_cleanup_receipt_decode",
+        })
     }
 }
 
@@ -143,15 +153,15 @@ fn identical_active_replay_returns_registered_lease_without_second_launch() {
     let backend = CountingBackend::default();
     let launch_calls = Arc::clone(&backend.launch_calls);
     let coordinator = ApplicationServiceCoordinator::new(backend);
-    let owner = owner("urn:cwl:agent:coordinator-boundary");
+    let owner_identity = owner("urn:cwl:agent:coordinator-boundary");
     let request = request();
     let policy = policy();
 
     let first = coordinator
-        .launch_at(&owner, &request, &policy, 1_780_000_000)
+        .launch_at(&owner_identity, &request, &policy, 1_780_000_000)
         .expect("initial launch should register one active lease");
     let replay = coordinator
-        .launch_at(&owner, &request, &policy, 1_780_000_001)
+        .launch_at(&owner_identity, &request, &policy, 1_780_000_001)
         .expect("identical active replay should return the registered lease");
 
     assert_eq!(replay, first);
@@ -163,11 +173,11 @@ fn unknown_owner_cannot_authorize_backend_cleanup() {
     let backend = CountingBackend::default();
     let terminate_calls = Arc::clone(&backend.terminate_calls);
     let coordinator = ApplicationServiceCoordinator::new(backend);
-    let owner = owner("urn:cwl:agent:coordinator-boundary");
+    let owner_identity = owner("urn:cwl:agent:coordinator-boundary");
     let request = request();
     let policy = policy();
     let lease = coordinator
-        .launch_at(&owner, &request, &policy, 1_780_000_000)
+        .launch_at(&owner_identity, &request, &policy, 1_780_000_000)
         .expect("test lease should launch");
 
     assert_eq!(
