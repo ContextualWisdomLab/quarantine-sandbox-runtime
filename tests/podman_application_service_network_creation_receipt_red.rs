@@ -22,8 +22,7 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_004_700;
-const CREATED_NETWORK_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const CREATED_NETWORK_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const REPLACEMENT_NETWORK_ID: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -195,8 +194,7 @@ fn unix_wall_clock(value: &str, option: &str) -> SystemTime {
         "creation-history {option} must be an absolute Unix wall-clock timestamp; value was {value:?}"
     );
     assert!(
-        fraction_text.len() <= 9
-            && fraction_text.bytes().all(|byte| byte.is_ascii_digit()),
+        fraction_text.len() <= 9 && fraction_text.bytes().all(|byte| byte.is_ascii_digit()),
         "creation-history {option} fractional seconds must contain at most nine decimal digits; value was {value:?}"
     );
 
@@ -340,7 +338,10 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
         .expect("network creation must include a generated correlation name");
     let public_name_lookup = format!("network inspect --format json {created_name}");
 
-    assert!(result.is_err(), "the controlled container-create failure must surface");
+    assert!(
+        result.is_err(),
+        "the controlled container-create failure must surface"
+    );
     let event_query = bounded_creation_event_query(&calls);
     assert_invocation_local_creation_bounds(event_query, launch_started, launch_finished);
     assert!(
@@ -393,7 +394,10 @@ fn ambiguous_creation_history_must_fail_before_private_authority_is_minted() {
         .expect("network creation must include a generated correlation name");
     let public_name_lookup = format!("network inspect --format json {created_name}");
 
-    assert!(result.is_err(), "ambiguous creation history must fail closed");
+    assert!(
+        result.is_err(),
+        "ambiguous creation history must fail closed"
+    );
     let event_query = bounded_creation_event_query(&calls);
     assert_invocation_local_creation_bounds(event_query, launch_started, launch_finished);
     assert!(
