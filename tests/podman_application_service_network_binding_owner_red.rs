@@ -203,7 +203,7 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
-    let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    let calls = fs::read_to_string(&log);
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
@@ -217,6 +217,7 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
         }),
         "network-object configuration must not substitute for exact container-attachment proof"
     );
+    let calls = calls.expect("fake Podman calls must be recorded after the typed launch result");
     assert!(
         calls
             .lines()
