@@ -8,11 +8,11 @@ This document narrows the evidence contract; it does not implement production GR
 
 ## Current code evidence
 
-Canonical application-service/network successor #127 exact `ba37ca70ca1dba08c87e2bdafebbda46cdf6fa22` does not deserialize an applied image digest in `ContainerInspection`. Its `verify_effective_isolation(...)` verifies the exact acquired container ID and then capability, seccomp, namespace, resource, LSM, network and port evidence without binding that container to the requested image digest. A present applied-image mismatch is therefore not observed on this path before readiness/lease publication.
+Canonical application-service/network successor #127 exact `661b495284cedf4b499e1269ee3d42dd7a4da840` does not deserialize an applied image digest in `ContainerInspection`. Its `verify_effective_isolation(...)` verifies the exact acquired container ID and then capability, seccomp, namespace, resource, LSM, network and port evidence without binding that container to the requested image digest. A present applied-image mismatch is therefore not observed on this path before readiness/lease publication.
 
-Command/runtime #112 exact `19c450249e1779cd1d22c4837c8154fed91e1faf` has a narrower defect: it models `ImageDigest` as optional/defaulted and rejects a present mismatch, but missing/null evidence can skip `immutable_image_identity`. Focused missing-inspection owner #89 exact `8afa77c61af38121cbfcdc1051e6c45376e13a1b` remains a prerequisite for shared Podman inspection semantics.
+Command/runtime #112 exact `19c450249e1779cd1d22c4837c8154fed91e1faf` has a narrower defect: it models `ImageDigest` as optional/defaulted and rejects a present mismatch, but missing/null evidence can skip `immutable_image_identity`. Focused missing-inspection owner #89 exact `8afa77c61af38121cbfcdc1051e6c45376e13a1b` is now execution-backed predecessor evidence; owner-adapted successor #143 exact `7a688f4832f74efaaa887592c994825529dc789c` / CI `35671419336` is the current shared-inspection prerequisite because it preserves explicit-null capability compatibility while requiring absent mandatory keys to fail closed.
 
-Historical #19/#45/#46/#47 contain valid image/isolation witnesses that must be adopted ordinary/non-force onto dependency-safe current application-service ancestry. Historical network-cleanup command-shape assertions are not part of image evidence and must not be preserved as owner truth; #127/#141 own network cleanup and recovery syntax/authority.
+Historical #19/#45/#46/#47 contain valid image/isolation witnesses that must be adopted ordinary/non-force onto dependency-safe current application-service ancestry. Historical network-cleanup command-shape assertions are not part of image evidence and must not be preserved as owner truth; #127/#141/#142 own network identity, cleanup, recovery, and continuity authority.
 
 ## Evidence model and invariant
 
@@ -41,7 +41,7 @@ The current-ancestry witness must bind every case to the exact acquired containe
 | Different algorithm | OCI-valid non-SHA-256 digest | fail closed; do not transcode |
 | Name/correlation substitution | `.Image`, `.ImageName`, generated name or request text only | fail closed as insufficient applied-image evidence |
 
-The witness must not prescribe `network rm --force`, generated-name deletion, or cleanup-selector syntax. It may require lifecycle cleanup to satisfy the canonical owner contract after failure, but network destructive authority remains #127/#141.
+The witness must not prescribe `network rm --force`, generated-name deletion, or cleanup-selector syntax. It may require lifecycle cleanup to satisfy the canonical owner contract after failure, but network destructive authority remains #127/#141/#142.
 
 ## Smallest causal GREEN after executed RED
 
@@ -56,13 +56,14 @@ Real rootless-Podman acceptance must prove this equality on the exact service co
 
 ## Owner-safe sequence
 
-1. Execute #89 current exact and integrate its valid shared-inspection delta ordinary/non-force through #14/#112.
-2. Causally classify #127 current network/lifecycle exact; do not mix image GREEN into an unclassified owner head.
-3. Adopt/adapt the complete valid #19/#45/#46/#47 image/isolation evidence onto current application-service ancestry without source copying or destructive restack.
-4. Execute the full RED matrix above.
-5. Apply only the minimum image-observation/canonicalization rejection/exact-comparison GREEN.
-6. Reacquire one unchanged integrated exact head with repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc, owned-production statement/function/region/branch/edge/edge-case coverage, qualifying review/security, positive effective-LSM, and real rootless-Podman evidence.
-7. Release remains separate: protected production integration, immutable tag/package/GitHub Release, SBOM, provenance, reproducibility and rollback are still required.
+1. Execute #143 exact `7a688f4832f74efaaa887592c994825529dc789c` unchanged. Only after the intended absent-key RED executes may #112 receive the minimum owner-adapted parser/rustdoc repair and reacquire integrated exact-head evidence.
+2. Execute #127 exact `661b495284cedf4b499e1269ee3d42dd7a4da840` unchanged and causally classify its current effective-attachment/network-lifecycle repair before image work adopts that moving ancestry.
+3. After #127 is dependency-safe, ordinary/non-force adopt/adapt #84/#85 lease-evidence admission while preserving #42 private non-serializable cleanup authority and current exact-ID lifecycle semantics.
+4. Only after #143/#112, #127, and #84/#85 succession are dependency-safe, adopt/adapt the complete valid #19/#45/#46/#47 image/isolation evidence onto current application-service ancestry without source copying or destructive restack.
+5. Execute the full RED matrix above.
+6. Apply only the minimum image-observation/canonicalization rejection/exact-comparison GREEN.
+7. Reacquire one unchanged integrated exact head with repository validation, rustfmt, full locked workspace/all-target tests, Clippy, public/private rustdoc, owned-production statement/function/region/branch/edge/edge-case coverage, qualifying review/security, positive effective-LSM, and real rootless-Podman evidence.
+8. Release remains separate: protected production integration, immutable tag/package/GitHub Release, SBOM, provenance, reproducibility and rollback are still required.
 
 ## Standards and primary-source traceability
 
