@@ -2,9 +2,11 @@
 
 ## Authority
 
-This dependent RED is based on canonical command/runtime owner #112 exact `19c450249e1779cd1d22c4837c8154fed91e1faf`. It adopts the valid security contract proven by historical focused owner #89 exact `8afa77c61af38121cbfcdc1051e6c45376e13a1b` / CI `35546707858` without copying that stale whole-head ancestry.
+This succession lane is based on canonical command/runtime owner #112 exact `19c450249e1779cd1d22c4837c8154fed91e1faf`. It adopts the valid security contract proven by historical focused owner #89 exact `8afa77c61af38121cbfcdc1051e6c45376e13a1b` / CI `35546707858` without copying that stale whole-head ancestry.
 
 #89 current exact executed. Exact-head verify passed locked workspace/all-target tests, Clippy `-D warnings`, and public/private rustdoc; hosted negative rootless/AppArmor acceptance passed. Nightly branch coverage executed its focused missing-evidence cases before whole-head admission failed. Historical whole-head coverage remains below repository-wide 100% and positive SELinux never received a runner, so #89 itself is not merge/release-ready.
+
+The owner-adapted RED executed at #143 exact `0bf65d831f2130dbf414fef96cfbfa2828aabfdd` / CI `35685623657`. Current production repair candidate is exact `f65d0982c756b67c85b3e60f3649e3ca201d50ca`; it is ordinary owner-authored ancestry, not a workflow-authored source mutation. Native CI `35714950559` has materialized but is not GREEN authority.
 
 ## Problem
 
@@ -35,9 +37,13 @@ This RED deliberately does not assert network cleanup command shape. Network ide
 
 Exact `0bf65d831f2130dbf414fef96cfbfa2828aabfdd` / native CI `35685623657` received GitHub-hosted runners and executed all six focused controls under branch instrumentation. The explicit-empty capability control reached the deterministic downstream `InvalidPortMapping` boundary. Each unavailable-evidence case instead also reached `InvalidPortMapping`, where the witness required a malformed inspection: missing `EffectiveCaps`, missing `BoundingCaps`, missing `dns_enabled`, `EffectiveCaps: null`, and `BoundingCaps: null`. The shared downstream outcome proves the production parser was still converting unavailable configured isolation evidence into secure values before the ACL evaluated it.
 
-Verify on the same exact passed exact checkout, dependency lock, repository policy, and CI-contract checks before stopping at rustfmt in the new witness. Formatter-only descendant `7d2b1f7c10a7aa70d9b7e70158c5796c277574fc` changed no semantics. The later owner-path cleanup removed the rejected self-mutating source-fix workflow; it did not change production Rust. Therefore the causal RED remains unsatisfied on the current #143 production ancestry.
+Verify on the same exact passed exact checkout, dependency lock, repository policy, and CI-contract checks before stopping at rustfmt in the new witness. Formatter-only descendant `7d2b1f7c10a7aa70d9b7e70158c5796c277574fc` changed no semantics. The later owner-path cleanup removed the rejected self-mutating source-fix workflow; it did not change production Rust. Docs-only exact `fadd477029908dfa636e63730fef3ebb7125973b` then recorded the executed RED before production moved.
 
-The next production change must be authored directly on ordinary owner ancestry: remove the missing-key defaults from `EffectiveCaps`, `BoundingCaps`, and `dns_enabled`; remove generic JSON-null-to-empty capability normalization; preserve explicit empty arrays as observed configured evidence; then run the six focused controls and the full exact-head repository gates. This document does not treat the executed RED, a queued descendant CI, or a workflow-generated patch as production GREEN.
+## Owner-authored repair candidate — 2026-09-22
+
+Exact `f65d0982c756b67c85b3e60f3649e3ca201d50ca` applies the minimum causal production repair directly on ordinary owner ancestry. `EffectiveCaps` and `BoundingCaps` are required concrete `Vec<String>` fields, `dns_enabled` is a required concrete boolean, the generic `null_as_default` helper and its stale compatibility rustdoc are removed, and the now-unused `Deserializer` import is removed. Explicit empty arrays remain representable observations. Missing keys and explicit JSON `null` no longer normalize to secure empty capability evidence through this DTO.
+
+This exact is a repair candidate, not GREEN authority. Native CI `35714950559` is still pending exact-head execution, so predecessor results do not transfer and #89 is not yet completely succeeded. The next action is validation, not semantic widening: retain all five unavailable-evidence hostile witnesses and the explicit-empty control, then reacquire repository policy, rustfmt, full locked workspace/all-target tests, Clippy `-D warnings`, public/private rustdoc, 100% owned-production statement/function/region/branch/edge coverage, and applicable real runtime evidence on one unchanged exact successor. Any future explicit-null compatibility exception remains subject to the exact-version evidence rule above.
 
 ## DDD and evidence boundary
 
