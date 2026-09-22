@@ -214,7 +214,51 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "required": [
+              "evidence_kind"
+            ],
+            "properties": {
+              "evidence_kind": {
+                "const": "artifact_identity"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "required": [
+              "evidence_kind"
+            ],
+            "properties": {
+              "evidence_kind": {
+                "const": "file_format"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "required": [
+              "evidence_kind"
+            ],
+            "properties": {
+              "evidence_kind": {
+                "const": "policy_boundary"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
     },
     "limitations": {
       "type": "array",
