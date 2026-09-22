@@ -31,6 +31,14 @@ The minimum owner-safe GREEN is to require concrete arrays for `EffectiveCaps` a
 
 This RED deliberately does not assert network cleanup command shape. Network identity, recovery, and exact-ID/non-force lifecycle remain #127/#141/#142 authority.
 
+## Executed successor RED — 2026-09-22
+
+Exact `0bf65d831f2130dbf414fef96cfbfa2828aabfdd` / native CI `35685623657` received GitHub-hosted runners and executed all six focused controls under branch instrumentation. The explicit-empty capability control reached the deterministic downstream `InvalidPortMapping` boundary. Each unavailable-evidence case instead also reached `InvalidPortMapping`, where the witness required a malformed inspection: missing `EffectiveCaps`, missing `BoundingCaps`, missing `dns_enabled`, `EffectiveCaps: null`, and `BoundingCaps: null`. The shared downstream outcome proves the production parser was still converting unavailable configured isolation evidence into secure values before the ACL evaluated it.
+
+Verify on the same exact passed exact checkout, dependency lock, repository policy, and CI-contract checks before stopping at rustfmt in the new witness. Formatter-only descendant `7d2b1f7c10a7aa70d9b7e70158c5796c277574fc` changed no semantics. The later owner-path cleanup removed the rejected self-mutating source-fix workflow; it did not change production Rust. Therefore the causal RED remains unsatisfied on the current #143 production ancestry.
+
+The next production change must be authored directly on ordinary owner ancestry: remove the missing-key defaults from `EffectiveCaps`, `BoundingCaps`, and `dns_enabled`; remove generic JSON-null-to-empty capability normalization; preserve explicit empty arrays as observed configured evidence; then run the six focused controls and the full exact-head repository gates. This document does not treat the executed RED, a queued descendant CI, or a workflow-generated patch as production GREEN.
+
 ## DDD and evidence boundary
 
 `infrastructure::podman` is the Anti-Corruption Layer translating backend-specific inspection documents into application-service isolation evidence. Presence and representation admission belong at this boundary. `application_service` and `sandbox_execution` continue to consume backend-neutral failures and verified states; no Podman DTO leaks inward.
