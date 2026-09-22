@@ -1,6 +1,6 @@
 //! RED guard that foundation-cardinality work preserves the rest of the public schema.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const NON_CARDINALITY_SCHEMA_SHA256: &str =
@@ -84,7 +84,8 @@ fn witness_rejects_root_level_false_green_predicates() {
     let mut malformed_repair = schema_with_target_cardinality();
     malformed_repair["not"] = json!({});
 
-    let result = std::panic::catch_unwind(|| assert_non_cardinality_schema_unchanged(malformed_repair));
+    let result =
+        std::panic::catch_unwind(|| assert_non_cardinality_schema_unchanged(malformed_repair));
     assert!(
         result.is_err(),
         "a root-level assertion that can invalidate every bundle must not coexist with a cardinality GREEN"
@@ -96,7 +97,8 @@ fn witness_rejects_unrelated_field_contract_drift() {
     let mut malformed_repair = schema_with_target_cardinality();
     malformed_repair["properties"]["analysis_job_id"]["maxLength"] = json!(4096);
 
-    let result = std::panic::catch_unwind(|| assert_non_cardinality_schema_unchanged(malformed_repair));
+    let result =
+        std::panic::catch_unwind(|| assert_non_cardinality_schema_unchanged(malformed_repair));
     assert!(
         result.is_err(),
         "foundation-cardinality work must not weaken an unrelated public field contract"
