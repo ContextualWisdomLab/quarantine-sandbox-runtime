@@ -13,7 +13,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
@@ -188,6 +188,58 @@ fn single_option_value<'a>(arguments: &'a [&'a str], option: &str) -> &'a str {
     values[0]
 }
 
+fn unix_wall_clock(value: &str, option: &str) -> SystemTime {
+    let (seconds_text, fraction_text) = value.split_once('.').unwrap_or((value, ""));
+    assert!(
+        !seconds_text.is_empty() && seconds_text.bytes().all(|byte| byte.is_ascii_digit()),
+        "creation-history {option} must be an absolute Unix wall-clock timestamp; value was {value:?}"
+    );
+    assert!(
+        fraction_text.len() <= 9
+            && fraction_text.bytes().all(|byte| byte.is_ascii_digit()),
+        "creation-history {option} fractional seconds must contain at most nine decimal digits; value was {value:?}"
+    );
+
+    let seconds = seconds_text
+        .parse::<u64>()
+        .expect("creation-history Unix seconds must fit u64");
+    let nanoseconds = if fraction_text.is_empty() {
+        0
+    } else {
+        let fraction = fraction_text
+            .parse::<u32>()
+            .expect("creation-history fractional seconds must fit u32");
+        fraction * 10_u32.pow((9 - fraction_text.len()) as u32)
+    };
+
+    UNIX_EPOCH + Duration::new(seconds, nanoseconds)
+}
+
+fn assert_invocation_local_creation_bounds(
+    event_query: &str,
+    launch_started: SystemTime,
+    launch_finished: SystemTime,
+) {
+    let arguments: Vec<&str> = event_query.split_whitespace().collect();
+    let since_text = single_option_value(&arguments, "--since");
+    let until_text = single_option_value(&arguments, "--until");
+    let since = unix_wall_clock(since_text, "--since");
+    let until = unix_wall_clock(until_text, "--until");
+
+    assert!(
+        since >= launch_started,
+        "creation-history lower bound must be captured during this launch rather than use arbitrary historical authority; call was: {event_query}"
+    );
+    assert!(
+        until <= launch_finished,
+        "creation-history upper bound must be captured during this launch rather than use arbitrary future authority; call was: {event_query}"
+    );
+    assert!(
+        since < until,
+        "creation-history wall-clock bounds must be strictly ordered around network creation; call was: {event_query}"
+    );
+}
+
 fn bounded_creation_event_query(calls: &str) -> &str {
     let call_lines: Vec<&str> = calls.lines().collect();
     let network_create_index = call_lines
@@ -268,7 +320,9 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
     let program = write_fake_podman(&log, &network_selector_marker, false);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
+    let launch_started = SystemTime::now();
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
+    let launch_finished = SystemTime::now();
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     let selected_network = fs::read_to_string(&network_selector_marker).ok();
 
@@ -287,7 +341,8 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
     let public_name_lookup = format!("network inspect --format json {created_name}");
 
     assert!(result.is_err(), "the controlled container-create failure must surface");
-    bounded_creation_event_query(&calls);
+    let event_query = bounded_creation_event_query(&calls);
+    assert_invocation_local_creation_bounds(event_query, launch_started, launch_finished);
     assert!(
         !calls.lines().any(|line| line == public_name_lookup),
         "a post-create public-name lookup must not mint private network authority; calls were:\n{calls}"
@@ -318,7 +373,9 @@ fn ambiguous_creation_history_must_fail_before_private_authority_is_minted() {
     let program = write_fake_podman(&log, &network_selector_marker, true);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
+    let launch_started = SystemTime::now();
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
+    let launch_finished = SystemTime::now();
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     let selected_network = fs::read_to_string(&network_selector_marker).ok();
 
@@ -337,7 +394,8 @@ fn ambiguous_creation_history_must_fail_before_private_authority_is_minted() {
     let public_name_lookup = format!("network inspect --format json {created_name}");
 
     assert!(result.is_err(), "ambiguous creation history must fail closed");
-    bounded_creation_event_query(&calls);
+    let event_query = bounded_creation_event_query(&calls);
+    assert_invocation_local_creation_bounds(event_query, launch_started, launch_finished);
     assert!(
         !calls.lines().any(|line| line == public_name_lookup),
         "ambiguity must not fall back to a mutable public-name lookup; calls were:\n{calls}"
