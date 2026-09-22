@@ -20,9 +20,12 @@ The owner also documents a local observation that Podman 6.1.0 emitted explicit 
 - missing `BoundingCaps` -> the same container-inspection failure;
 - missing `dns_enabled` -> `MalformedIsolationInspection { operation: "network_inspect" }`;
 - explicit empty capability arrays remain admissible and reach a deterministic malformed-port boundary;
-- explicit JSON `null` capability arrays fail as malformed container inspection unless a separately proven, exact-version compatibility rule is introduced.
+- explicit JSON `null` for `EffectiveCaps` independently fails as malformed container inspection unless a separately proven, exact-version compatibility rule is introduced;
+- explicit JSON `null` for `BoundingCaps` independently fails under the same rule.
 
-The deterministic control deliberately returns a malformed port mapping and expects `InvalidPortMapping`. It does not reserve and release an ephemeral loopback port before readiness, so this parser/ACL witness has no ambient port-race dependency.
+The two explicit-null controls are intentionally independent. A combined fixture with both fields set to `null` can false-GREEN if parsing rejects only the first field encountered while the other field remains incorrectly normalized to secure empty evidence. Each configured capability source therefore has its own hostile representation witness.
+
+The deterministic positive control deliberately returns a malformed port mapping and expects `InvalidPortMapping`. It does not reserve and release an ephemeral loopback port before readiness, so this parser/ACL witness has no ambient port-race dependency.
 
 The minimum owner-safe GREEN is to require concrete arrays for `EffectiveCaps` and `BoundingCaps` and a concrete boolean for `dns_enabled`: remove secure missing-key defaults and do not normalize JSON `null` to an empty capability set. If a supported Podman version truly requires a `null` compatibility exception, add it only after real rootless evidence records the exact Podman version, exact P0 create configuration, raw inspect JSON, and independent live process capability sets proving effective/bounding/permitted/inheritable/ambient capabilities are empty. The exception must be version-scoped and must not convert general absence or malformed evidence into a secure value.
 
