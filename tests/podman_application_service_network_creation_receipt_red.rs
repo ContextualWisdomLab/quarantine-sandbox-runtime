@@ -147,31 +147,45 @@ esac
     program
 }
 
-fn single_option_value<'a>(arguments: &'a [&'a str], option: &str) -> &'a str {
+fn option_values<'a>(arguments: &'a [&'a str], option: &str) -> Vec<&'a str> {
     let assignment_prefix = format!("{option}=");
     let mut occurrences = 0;
-    let mut value = None;
+    let mut values = Vec::new();
 
     for (index, argument) in arguments.iter().enumerate() {
         if *argument == option {
             occurrences += 1;
-            value = arguments
+            if let Some(candidate) = arguments
                 .get(index + 1)
                 .copied()
-                .filter(|candidate| !candidate.is_empty() && !candidate.starts_with("--"));
+                .filter(|candidate| !candidate.is_empty() && !candidate.starts_with("--"))
+            {
+                values.push(candidate);
+            }
         } else if let Some(candidate) = argument.strip_prefix(&assignment_prefix) {
             occurrences += 1;
             if !candidate.is_empty() {
-                value = Some(candidate);
+                values.push(candidate);
             }
         }
     }
 
     assert_eq!(
-        occurrences, 1,
+        occurrences,
+        values.len(),
+        "every creation-history {option} occurrence must have a concrete value"
+    );
+    values
+}
+
+fn single_option_value<'a>(arguments: &'a [&'a str], option: &str) -> &'a str {
+    let values = option_values(arguments, option);
+    assert_eq!(
+        values.len(),
+        1,
         "creation-history option {option} must occur exactly once"
     );
-    value.unwrap_or_else(|| panic!("creation-history option {option} must have a concrete value"))
+    values[0]
 }
 
 fn bounded_creation_event_query(calls: &str) -> &str {
@@ -223,20 +237,27 @@ fn bounded_creation_event_query(calls: &str) -> &str {
         "creation-history lower and upper bounds must be distinct; call was: {event_query}"
     );
 
-    let has_json_format =
-        event_query.contains("--format json") || event_query.contains("--format=json");
-    let has_network_filter = event_query.contains("--filter type=network")
-        || event_query.contains("--filter=type=network");
-    let has_create_filter = event_query.contains("--filter event=create")
-        || event_query.contains("--filter=event=create");
-
-    assert!(
-        event_query.contains("--stream=false")
-            && has_json_format
-            && has_network_filter
-            && has_create_filter,
-        "creation history must be a bounded non-streaming JSON network/create query; call was: {event_query}"
+    assert_eq!(
+        single_option_value(&arguments, "--stream"),
+        "false",
+        "creation history must disable streaming exactly; call was: {event_query}"
     );
+    assert_eq!(
+        single_option_value(&arguments, "--format"),
+        "json",
+        "creation history must request JSON exactly; call was: {event_query}"
+    );
+    let filters = option_values(&arguments, "--filter");
+    assert_eq!(
+        filters.len(),
+        2,
+        "creation history must use exactly the network/create filters; call was: {event_query}"
+    );
+    assert!(
+        filters.contains(&"type=network") && filters.contains(&"event=create"),
+        "creation history must filter exactly to network/create events; call was: {event_query}"
+    );
+
     event_query
 }
 
