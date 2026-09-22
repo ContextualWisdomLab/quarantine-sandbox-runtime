@@ -94,7 +94,7 @@ case "${{1:-}}:${{2:-}}" in
     ;;
   events:*)
     created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
-    printf '{{"ID":"%s","network":"%s","Status":"create","Time":"2026-09-22T13:30:00Z","Type":"network"}}\n' "$created_network_id" "$created_name"
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Time":"2026-09-22T13:30:00Z","Type":"network"}}\n' "$created_network_id" "$created_name"
     ;;
   network:inspect)
     selector=${{5:-}}
