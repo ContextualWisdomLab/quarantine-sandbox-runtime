@@ -14,8 +14,8 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Mutex,
+        atomic::{AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,7 +24,7 @@ use quarantine_sandbox_runtime::{
     ApplicationServiceError, ApplicationServiceRequest, IsolationPolicy, ResourceRequest,
     RootlessPodmanAdapter, ServiceProtocol,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 static SUBPROCESS_FIXTURE_MUTEX: Mutex<()> = Mutex::new(());
@@ -155,11 +155,8 @@ fn launch(
         .lock()
         .expect("subprocess fixture mutex should not be poisoned");
     let (program, log) = write_fake_podman(&fixture);
-    let result = RootlessPodmanAdapter::new(program.clone()).launch_at(
-        &request(),
-        &policy(),
-        1_780_000_000,
-    );
+    let result =
+        RootlessPodmanAdapter::new(program.clone()).launch_at(&request(), &policy(), 1_780_000_000);
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
     result
