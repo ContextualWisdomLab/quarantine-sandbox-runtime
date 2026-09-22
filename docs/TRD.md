@@ -106,11 +106,13 @@ Each service creates a runtime-named internal network using:
 podman network create --internal --disable-dns <network>
 ```
 
-The current #127 candidate immediately inspects that exact generated `qsr-net-*` name after creation, requires exactly one inspection object with a canonical lowercase 64-hex Podman network `id`, and rewrites the container-create `--network` selector to that acquired ID. Missing or malformed identity fails closed; there is no generated-name fallback for container binding. The generated name remains the consumer-visible correlation and the network-object inspection key.
+On current #127 production ancestry, network creation is followed by `podman network inspect --format json <generated-qsr-net-name>`. The adapter requires one canonical lowercase 64-hex backend `id`, rewrites container-create `--network` to that ID, and later verifies the acquired container has exactly one effective `NetworkSettings.Networks` attachment whose `NetworkID` equals the acquired ID. Partial-launch cleanup also removes that admitted ID with non-force `podman network rm <id>`. Executed parent evidence established the acquired-ID and effective-attachment controls as GREEN.
 
-This first acquired-identity stage does not yet prove effective egress isolation. Current production still does not verify the exact acquired container's `NetworkSettings.Networks` membership, still derives private network cleanup authority from the public correlation value, and still removes networks with `--force`. Executed predecessor #124 exact `6c653d36f16b18af353949e0f0152c8527f48396` proved the resulting false-GREEN: different, missing, and additional effective attachments all reached lease publication instead of `IsolationVerificationFailed { control_name: "sandbox_network_binding" }`.
+That sequence still has one P0 provenance defect: the first immutable ID is learned from a public-name lookup after `network create`. A same-name replacement between creation and that lookup can therefore become private attachment and cleanup authority. The executed create→first-inspect witness exposes this TOCTOU; adding more predicates to the same public-name lookup does not make the identity creation-bound.
 
-Canonical successor #127 therefore remains a Draft candidate. The already-implemented first stage is: create the invocation-local `qsr-net-*` name → inspect that exact name before container creation → acquire the full Podman network `.ID` → bind container `--network` to the acquired ID. The remaining acceptance sequence is: inspect the exact acquired container → require exactly one effective `NetworkSettings.Networks` membership whose `NetworkID` equals the acquired identity → keep the generated name as public lease correlation → retain the acquired ID independently as private cleanup authority → remove the owned network without network-level `--force`. Foreign membership must make cleanup fail closed rather than delete another member. None of those remaining stages is GREEN until it is implemented and passes exact-head gates.
+Draft #127 has a test/decision candidate for the minimum repair, not production GREEN: bound a narrow creation interval around the existing non-`--ignore` create, query non-streaming Podman network/create history, admit private authority only from exactly one matching creation event with the exact generated name and canonical 64-lower-hex ID, then verify P0 network state by that exact ID. Missing, disabled, rotated, malformed, or ambiguous event history fails closed. No public-name identity fallback is allowed. The corrected creation-receipt witness must execute causally before this mechanism is implemented.
+
+The generated `qsr-net-*` value remains consumer-visible correlation metadata. Successful-lease cleanup authority is still incomplete on current ancestry: lease construction records the public correlation in runtime metadata, and explicit termination still uses that retained network value with network-level `--force`. The creation-bound/admitted ID must ultimately remain private through successful lease lifecycle and foreign-safe non-force termination.
 
 ### Container creation
 
@@ -148,34 +150,33 @@ The immutable image reference is appended before application argv, so applicatio
 
 ### Start, effective verification, readiness, and lease
 
-The current #127 candidate sequence is:
+The current #127 production sequence is:
 
 1. Create the internal network under the invocation-local `qsr-net-*` name.
-2. Inspect that exact network name and admit only a canonical lowercase 64-hex Podman network ID.
-3. Bind container creation to the acquired network ID, then create the container and admit only an exact 64-character ASCII hexadecimal container identifier from successful create output.
+2. Resolve that public name with `network inspect` and admit one canonical lowercase 64-hex Podman network ID. This step is the active creation-provenance defect described above.
+3. Bind container creation to the acquired network ID, then create the container and admit only an exact 64-character ASCII hexadecimal container identifier from successful create output/receipt authority.
 4. Start the container.
-5. Inspect the runtime-owned network object and exact container identity/configuration.
-6. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
+5. Inspect the exact container and require exactly one effective network attachment whose `NetworkID` equals the acquired network ID.
+6. Inspect the network object and configured/live process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
 7. Query the requested port mapping only after isolation verification succeeds.
 8. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
-9. Poll bounded TCP readiness using operator timeout/poll policy.
+9. Poll bounded readiness using operator timeout/poll policy.
 10. Return a lease only after effective-isolation checks and readiness succeed.
 
-The acquired-network-ID chronology is implemented on #127, but exact-container effective attachment verification is not. Until the candidate inspects the acquired container's effective network membership and rejects different, missing, or additional attachments before port/readiness, network-object policy plus an ID-bound create request remains configuration intent rather than positive attachment proof.
+Effective attachment is therefore already enforced on the executed parent. The remaining identity gap is earlier: the ID must become creation-bound before it can serve as attachment, P0-state, partial-cleanup, and later lifecycle authority. Dependent #142 separately requires post-admission verification to keep using the same immutable authority rather than re-resolving the public correlation after container start.
 
 P0 HTTP readiness deliberately uses TCP reachability because no consumer-supplied health path is accepted yet. A future typed HTTP health contract may refine this without accepting arbitrary URLs.
 
 ### Cleanup
 
 - Network-create failure: no resources assumed.
-- Container-create failure: remove network.
-- Start failure: remove container and network.
-- Isolation/port/readiness failure: stop/remove container and remove network.
+- Failure after network-ID admission but before successful lease: remove only the admitted network ID with non-force `podman network rm <id>`.
+- Container-create/start/isolation/port/readiness failure with an acquired container ID: clean the exact container and remove only the admitted network ID.
 - Explicit termination: require runtime-owned non-serializable cleanup authority, stop with its captured shutdown grace, remove its container target, then remove its network target.
 - Consumer-deserialized lease evidence without runtime cleanup authority: return `CleanupAuthorityUnavailable` before any destructive Podman command.
 - If cleanup cannot be proven, return `CleanupFailed` rather than the original error as though cleanup succeeded.
 
-Current production still derives private network cleanup authority from the public correlation value and uses forceful network removal. Draft #127 explicitly forbids treating that correlation as acquired destructive identity: the generated name remains public evidence, while the full inspected Podman network ID must be retained privately and used for non-force network removal. That repair is not considered implemented or GREEN until it exists in production source and passes the unchanged successor tests on one exact head.
+Current partial-launch cleanup is exact-ID and non-force. Current successful-lease/explicit-termination network authority is not yet equivalent: the runtime metadata still carries the public `qsr-net-*` correlation and the termination path uses network-level `--force`. The eventual lifecycle repair must retain the creation-bound/admitted network ID privately through lease issuance and remove only that exact ID without network-level force semantics; a foreign member must cause fail-closed cleanup rather than deletion.
 
 Current #21 ancestry still has the independent #40 exact acquired-container-ID lifecycle RED checked in; generated-name versus acquired-ID selection must be resolved there before this cleanup path is considered ownership-complete. `--timeout` expresses an intended container lifetime bound, but configuration alone is not release-grade proof that wall-time termination occurred. Durable crash/restart orphan reclamation also requires the Recovery context/reaper before GA.
 
