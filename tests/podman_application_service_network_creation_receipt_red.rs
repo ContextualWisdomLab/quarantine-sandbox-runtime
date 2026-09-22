@@ -74,7 +74,11 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(log: &Path, network_selector_marker: &Path) -> PathBuf {
+fn write_fake_podman(
+    log: &Path,
+    network_selector_marker: &Path,
+    ambiguous_history: bool,
+) -> PathBuf {
     let program = temporary_path("fake-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
@@ -84,6 +88,7 @@ printf '%s\n' "$*" >> '{log}'
 network_selector_marker='{network_selector_marker}'
 created_network_id='{created_network_id}'
 replacement_network_id='{replacement_network_id}'
+ambiguous_history='{ambiguous_history}'
 if [ "${{1:-}}" = info ]; then
   if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
   exit 0
@@ -95,6 +100,9 @@ case "${{1:-}}:${{2:-}}" in
   events:*)
     created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
     printf '{{"ID":"%s","Network":"%s","Status":"create","Time":"2026-09-22T13:30:00Z","Type":"network"}}\n' "$created_network_id" "$created_name"
+    if [ "$ambiguous_history" = true ]; then
+      printf '{{"ID":"%s","Network":"%s","Status":"create","Time":"2026-09-22T13:30:00Z","Type":"network"}}\n' "$replacement_network_id" "$created_name"
+    fi
     ;;
   network:inspect)
     selector=${{5:-}}
@@ -126,6 +134,7 @@ esac
         network_selector_marker = network_selector_marker.display(),
         created_network_id = CREATED_NETWORK_ID,
         replacement_network_id = REPLACEMENT_NETWORK_ID,
+        ambiguous_history = ambiguous_history,
         info = info,
     );
 
@@ -138,11 +147,41 @@ esac
     program
 }
 
+fn bounded_creation_event_query(calls: &str) -> &str {
+    let event_query = calls
+        .lines()
+        .find(|line| line.starts_with("events "))
+        .expect("network identity admission must consult Podman creation history");
+    let has_since = event_query
+        .split_whitespace()
+        .any(|argument| argument == "--since" || argument.starts_with("--since="));
+    let has_until = event_query
+        .split_whitespace()
+        .any(|argument| argument == "--until" || argument.starts_with("--until="));
+    let has_json_format =
+        event_query.contains("--format json") || event_query.contains("--format=json");
+    let has_network_filter =
+        event_query.contains("--filter type=network") || event_query.contains("--filter=type=network");
+    let has_create_filter =
+        event_query.contains("--filter event=create") || event_query.contains("--filter=event=create");
+
+    assert!(
+        event_query.contains("--stream=false")
+            && has_since
+            && has_until
+            && has_json_format
+            && has_network_filter
+            && has_create_filter,
+        "creation history must be a bounded non-streaming JSON network/create query; call was: {event_query}"
+    );
+    event_query
+}
+
 #[test]
 fn creation_history_id_must_win_over_later_same_name_resolution() {
     let log = temporary_path("calls");
     let network_selector_marker = temporary_path("network-selector");
-    let program = write_fake_podman(&log, &network_selector_marker);
+    let program = write_fake_podman(&log, &network_selector_marker, false);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
@@ -162,33 +201,9 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
         .last()
         .expect("network creation must include a generated correlation name");
     let public_name_lookup = format!("network inspect --format json {created_name}");
-    let event_query = calls
-        .lines()
-        .find(|line| line.starts_with("events "))
-        .expect("network identity admission must consult Podman creation history");
-    let has_since = event_query
-        .split_whitespace()
-        .any(|argument| argument == "--since" || argument.starts_with("--since="));
-    let has_until = event_query
-        .split_whitespace()
-        .any(|argument| argument == "--until" || argument.starts_with("--until="));
-    let has_json_format =
-        event_query.contains("--format json") || event_query.contains("--format=json");
-    let has_network_filter =
-        event_query.contains("--filter type=network") || event_query.contains("--filter=type=network");
-    let has_create_filter =
-        event_query.contains("--filter event=create") || event_query.contains("--filter=event=create");
 
     assert!(result.is_err(), "the controlled container-create failure must surface");
-    assert!(
-        event_query.contains("--stream=false")
-            && has_since
-            && has_until
-            && has_json_format
-            && has_network_filter
-            && has_create_filter,
-        "creation history must be a bounded non-streaming JSON network/create query; call was: {event_query}"
-    );
+    bounded_creation_event_query(&calls);
     assert!(
         !calls.lines().any(|line| line == public_name_lookup),
         "a post-create public-name lookup must not mint private network authority; calls were:\n{calls}"
@@ -209,5 +224,46 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
             .lines()
             .any(|line| line == format!("network rm {REPLACEMENT_NETWORK_ID}")),
         "a same-name replacement must never become destructive authority; calls were:\n{calls}"
+    );
+}
+
+#[test]
+fn ambiguous_creation_history_must_fail_before_private_authority_is_minted() {
+    let log = temporary_path("ambiguous-calls");
+    let network_selector_marker = temporary_path("ambiguous-network-selector");
+    let program = write_fake_podman(&log, &network_selector_marker, true);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+
+    let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
+    let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    let selected_network = fs::read_to_string(&network_selector_marker).ok();
+
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    let _ = fs::remove_file(network_selector_marker);
+
+    let network_create = calls
+        .lines()
+        .find(|line| line.starts_with("network create --internal --disable-dns qsr-net-"))
+        .expect("the witness must reach network creation");
+    let created_name = network_create
+        .split_whitespace()
+        .last()
+        .expect("network creation must include a generated correlation name");
+    let public_name_lookup = format!("network inspect --format json {created_name}");
+
+    assert!(result.is_err(), "ambiguous creation history must fail closed");
+    bounded_creation_event_query(&calls);
+    assert!(
+        !calls.lines().any(|line| line == public_name_lookup),
+        "ambiguity must not fall back to a mutable public-name lookup; calls were:\n{calls}"
+    );
+    assert!(
+        selected_network.is_none(),
+        "ambiguous matching creation events must stop before container creation"
+    );
+    assert!(
+        !calls.lines().any(|line| line.starts_with("network rm ")),
+        "ambiguous creation history does not establish safe destructive authority; calls were:\n{calls}"
     );
 }
