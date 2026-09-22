@@ -1,8 +1,9 @@
-//! RED: network identity admission must bind backend ID to expected provenance and P0 state.
+//! RED: network identity admission must bind creation authority to P0 state.
 //!
-//! A canonical 64-hex Podman network ID is necessary but not sufficient ownership evidence.
-//! The exact-name inspection used to acquire that ID must also identify the expected runtime
-//! network and preserve the deny-by-default state requested at creation before container create.
+//! A canonical Podman network ID is necessary but not sufficient ownership evidence. The ID must
+//! come from the invocation-local creation receipt, then the exact ID must identify the expected
+//! generated network and preserve the deny-by-default state requested at creation before container
+//! creation. Public `qsr-net-*` correlation is never private attachment or cleanup authority.
 
 #![cfg(target_os = "linux")]
 
@@ -110,10 +111,14 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:*)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Time":"2026-09-22T13:30:00Z","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
     selector=${{5:-}}
-    [ "$selector" = "$network_name" ] || exit 95
+    [ "$selector" = "$network_id" ] || exit 95
     {reported_name_assignment}
     internal='{internal}'
     dns_enabled='{dns_enabled}'
@@ -176,33 +181,53 @@ fn assert_identity_contradiction_stops_before_create(contradiction: IdentityCont
         .split_whitespace()
         .last()
         .expect("network creation must include the exact correlation name");
-    let expected_identity_inspect = format!("network inspect --format json {network_name}");
-    let identity_inspect_indices: Vec<usize> = lines
+    let public_name_inspect = format!("network inspect --format json {network_name}");
+    let exact_id_inspect = format!("network inspect --format json {OWNED_NETWORK_ID}");
+
+    let event_indices: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter_map(|(index, line)| (*line == expected_identity_inspect).then_some(index))
+        .filter_map(|(index, line)| line.starts_with("events ").then_some(index))
         .collect();
-
     assert_eq!(
-        identity_inspect_indices.len(),
+        event_indices.len(),
         1,
-        "the intended RED must exercise exactly one exact-name identity inspection rather than pass on an unrelated earlier failure or retry a contradictory object; calls were:\n{calls}"
+        "network identity provenance must consume exactly one creation receipt before P0 inspection; calls were:\n{calls}"
     );
     assert!(
-        network_create_index < identity_inspect_indices[0],
-        "network identity provenance must be checked only after the runtime-owned network is created; calls were:\n{calls}"
+        network_create_index < event_indices[0],
+        "creation receipt must be queried only after network creation; calls were:\n{calls}"
+    );
+
+    let exact_id_inspect_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (*line == exact_id_inspect).then_some(index))
+        .collect();
+    assert_eq!(
+        exact_id_inspect_indices.len(),
+        1,
+        "P0 provenance must inspect exactly the immutable ID admitted by the creation receipt; calls were:\n{calls}"
+    );
+    assert!(
+        event_indices[0] < exact_id_inspect_indices[0],
+        "creation receipt must establish immutable identity before exact-ID P0 inspection; calls were:\n{calls}"
+    );
+    assert!(
+        !lines.iter().any(|line| **line == public_name_inspect),
+        "public network correlation must not mint or re-resolve private authority; calls were:\n{calls}"
     );
     assert!(
         result.is_err(),
-        "contradictory network identity evidence must fail closed"
+        "contradictory network provenance/P0 evidence must fail closed"
     );
     assert!(
         !container_create_reached,
-        "a canonical ID must not become authority when name/P0 provenance contradicts the network created by this invocation; calls were:\n{calls}"
+        "a creation-bound ID must not reach container creation when name/P0 evidence contradicts the created object; calls were:\n{calls}"
     );
     assert!(
         !calls.lines().any(|line| line.starts_with("create --name ")),
-        "container creation must not be reached before network identity provenance is admitted; calls were:\n{calls}"
+        "container creation must not be reached before exact-ID network provenance is admitted; calls were:\n{calls}"
     );
 }
 
