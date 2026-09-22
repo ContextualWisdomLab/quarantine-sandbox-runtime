@@ -162,11 +162,31 @@ fn creation_history_id_must_win_over_later_same_name_resolution() {
         .last()
         .expect("network creation must include a generated correlation name");
     let public_name_lookup = format!("network inspect --format json {created_name}");
+    let event_query = calls
+        .lines()
+        .find(|line| line.starts_with("events "))
+        .expect("network identity admission must consult Podman creation history");
+    let has_since = event_query
+        .split_whitespace()
+        .any(|argument| argument == "--since" || argument.starts_with("--since="));
+    let has_until = event_query
+        .split_whitespace()
+        .any(|argument| argument == "--until" || argument.starts_with("--until="));
+    let has_json_format = event_query.contains("--format json") || event_query.contains("--format=json");
+    let has_network_filter =
+        event_query.contains("--filter type=network") || event_query.contains("--filter=type=network");
+    let has_create_filter =
+        event_query.contains("--filter event=create") || event_query.contains("--filter=event=create");
 
     assert!(result.is_err(), "the controlled container-create failure must surface");
     assert!(
-        calls.lines().any(|line| line.starts_with("events ")),
-        "network identity admission must consult bounded Podman creation history; calls were:\n{calls}"
+        event_query.contains("--stream=false")
+            && has_since
+            && has_until
+            && has_json_format
+            && has_network_filter
+            && has_create_filter,
+        "creation history must be a bounded non-streaming JSON network/create query; call was: {event_query}"
     );
     assert!(
         !calls.lines().any(|line| line == public_name_lookup),
