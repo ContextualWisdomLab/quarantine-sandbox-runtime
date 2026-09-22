@@ -251,7 +251,11 @@ fn creation_failures_cleanup_only_resources_that_were_created() {
         })
     );
     let calls = fs::read_to_string(&log).expect("container failure calls should be recorded");
-    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(
+        calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        )
+    );
     assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 
@@ -262,7 +266,11 @@ fn creation_failures_cleanup_only_resources_that_were_created() {
         Err(ApplicationServiceError::CleanupFailed)
     );
     let calls = fs::read_to_string(&log).expect("failed cleanup call should be recorded");
-    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(
+        calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        )
+    );
     assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 }
@@ -283,7 +291,9 @@ fn start_and_port_failures_stop_or_remove_started_resources() {
         );
         let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        ));
         assert!(!calls.contains("network rm --force"));
         if mode == "port_fail" {
             assert!(calls.contains("stop --time 2"));
@@ -304,7 +314,9 @@ fn partial_launch_cleanup_failures_override_the_original_backend_error() {
         );
         let calls = fs::read_to_string(&log).expect("partial cleanup calls should be recorded");
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        ));
         assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
@@ -323,7 +335,9 @@ fn started_container_cleanup_attempts_every_resource_after_port_failure() {
         let calls = fs::read_to_string(&log).expect("started cleanup calls should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        ));
         assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
@@ -345,7 +359,9 @@ fn malformed_port_mappings_fail_closed_after_cleanup() {
         let calls = fs::read_to_string(&log).expect("port cleanup should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+        assert!(calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        ));
         assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
     }
@@ -365,7 +381,11 @@ fn readiness_timeout_fails_closed_and_removes_created_isolation_resources() {
     let calls = fs::read_to_string(&log).expect("cleanup calls should be recorded");
     assert!(calls.contains("stop --time 2"));
     assert!(calls.contains("rm --force"));
-    assert!(calls.contains("network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"));
+    assert!(
+        calls.contains(
+            "network rm abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        )
+    );
     assert!(!calls.contains("network rm --force"));
     remove_fixture(program, log);
 }

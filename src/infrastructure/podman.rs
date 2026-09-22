@@ -723,11 +723,7 @@ impl RootlessPodmanAdapter {
 
     /// Remove only an admitted backend network identity without network-level force semantics.
     fn cleanup_admitted_network(&self, network_id: &str) -> Result<(), ApplicationServiceError> {
-        let args = [
-            "network".to_owned(),
-            "rm".to_owned(),
-            network_id.to_owned(),
-        ];
+        let args = ["network".to_owned(), "rm".to_owned(), network_id.to_owned()];
         if self.command_succeeded(&args) {
             Ok(())
         } else {
@@ -1237,7 +1233,10 @@ mod runtime_identity_tests {
         let empty = ContainerNetworkSettings {
             networks: BTreeMap::new(),
         };
-        assert!(!effective_network_binding_verified(Some(&empty), &network_id));
+        assert!(!effective_network_binding_verified(
+            Some(&empty),
+            &network_id
+        ));
 
         let mismatch = ContainerNetworkSettings {
             networks: BTreeMap::from([(
@@ -1260,7 +1259,10 @@ mod runtime_identity_tests {
                 },
             )]),
         };
-        assert!(effective_network_binding_verified(Some(&exact), &network_id));
+        assert!(effective_network_binding_verified(
+            Some(&exact),
+            &network_id
+        ));
 
         let additional = ContainerNetworkSettings {
             networks: BTreeMap::from([
