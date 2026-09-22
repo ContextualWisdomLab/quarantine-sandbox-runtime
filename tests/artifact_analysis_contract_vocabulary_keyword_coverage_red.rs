@@ -10,8 +10,7 @@ use std::{fs, path::Path};
 
 use serde_json::Value;
 
-const DIALECT_PATH: &str =
-    "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
+const DIALECT_PATH: &str = "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json";
 const VOCABULARY_SPEC_PATH: &str =
     "docs/contracts/cwl_artifact_analysis_contract_vocabulary_1_0_0.md";
 const CONFORMANCE_VECTORS_PATH: &str =
@@ -30,8 +29,9 @@ fn read_text(relative_path: &str) -> String {
 }
 
 fn read_json(relative_path: &str) -> Value {
-    serde_json::from_str(&read_text(relative_path))
-        .unwrap_or_else(|error| panic!("required JSON artifact {relative_path} must parse: {error}"))
+    serde_json::from_str(&read_text(relative_path)).unwrap_or_else(|error| {
+        panic!("required JSON artifact {relative_path} must parse: {error}")
+    })
 }
 
 fn normative_keyword_section<'a>(specification: &'a str, keyword: &str) -> &'a str {
@@ -45,6 +45,12 @@ fn normative_keyword_section<'a>(specification: &'a str, keyword: &str) -> &'a s
     let section_tail = &specification[section_start..];
     let section_end = section_tail.find("\n## ").unwrap_or(section_tail.len());
     &section_tail[..section_end]
+}
+
+fn contains_normative_must(section: &str) -> bool {
+    section
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|token| token == "MUST")
 }
 
 fn assert_conformance_case_shape(keyword: &str, case: &Value) {
@@ -92,7 +98,7 @@ fn required_vocabulary_declares_no_undefined_custom_keywords() {
     {
         let normative_section = normative_keyword_section(&specification, keyword);
         assert!(
-            normative_section.contains("**MUST"),
+            contains_normative_must(normative_section),
             "required vocabulary keyword {keyword} has a heading but no normative MUST requirement in the same 1.0.0 publication"
         );
 
