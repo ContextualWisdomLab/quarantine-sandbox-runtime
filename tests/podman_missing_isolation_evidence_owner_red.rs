@@ -99,6 +99,11 @@ impl Default for Fixture {
                     "Memory": 268435456,
                     "NanoCpus": 1000000000_u64,
                     "PidsLimit": 32
+                },
+                "NetworkSettings": {
+                    "Networks": {
+                        "qsr": {"NetworkID": OWNED_NETWORK_ID}
+                    }
                 }
             }]),
             network: json!([{"internal": true, "dns_enabled": false}]),
@@ -106,9 +111,10 @@ impl Default for Fixture {
     }
 }
 
-fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf) {
+fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     let program = temporary_path("missing-isolation-evidence-owner-podman");
     let log = temporary_path("missing-isolation-evidence-owner-log");
+    let network_name_marker = temporary_path("missing-isolation-evidence-owner-network-name");
     let identity_inspect_marker =
         temporary_path("missing-isolation-evidence-owner-identity-inspect");
     let info = json!({
@@ -126,8 +132,9 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf) {
     let container = fixture.container.to_string();
     let network = fixture.network.to_string();
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{log}'\nidentity_inspect_marker='{identity_inspect_marker}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{info}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect)\n    if [ ! -f \"$identity_inspect_marker\" ]; then\n      printf 'seen\\n' > \"$identity_inspect_marker\"\n      printf '[{{\"name\":\"%s\",\"id\":\"{network_id}\",\"internal\":true,\"dns_enabled\":false,\"containers\":{{}}}}]\\n' \"${{5:-}}\"\n    else\n      printf '%s\\n' '{network}'\n    fi\n    ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{container}' ;;\n  create:--name) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{good_top}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{log}'\nnetwork_name_marker='{network_name_marker}'\nidentity_inspect_marker='{identity_inspect_marker}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{info}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) printf '%s\\n' \"${{5:-}}\" > \"$network_name_marker\" ;;\n  events:--stream=false)\n    network_name=$(cat \"$network_name_marker\")\n    printf '{{\"ID\":\"{network_id}\",\"Network\":\"%s\",\"Status\":\"create\",\"Type\":\"network\"}}\\n' \"$network_name\"\n    ;;\n  network:inspect)\n    if [ ! -f \"$identity_inspect_marker\" ]; then\n      printf 'seen\\n' > \"$identity_inspect_marker\"\n      network_name=$(cat \"$network_name_marker\")\n      printf '[{{\"name\":\"%s\",\"id\":\"{network_id}\",\"internal\":true,\"dns_enabled\":false,\"containers\":{{}}}}]\\n' \"$network_name\"\n    else\n      printf '%s\\n' '{network}'\n    fi\n    ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{container}' ;;\n  create:--name) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{good_top}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log = log.display(),
+        network_name_marker = network_name_marker.display(),
         identity_inspect_marker = identity_inspect_marker.display(),
         info = info,
         network_id = OWNED_NETWORK_ID,
@@ -141,7 +148,7 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf, PathBuf) {
         .permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
-    (program, log, identity_inspect_marker)
+    (program, log, network_name_marker, identity_inspect_marker)
 }
 
 fn launch(
@@ -150,12 +157,13 @@ fn launch(
     Result<quarantine_sandbox_runtime::ApplicationServiceLease, ApplicationServiceError>,
     String,
 ) {
-    let (program, log, identity_inspect_marker) = write_fake_podman(&fixture);
+    let (program, log, network_name_marker, identity_inspect_marker) = write_fake_podman(&fixture);
     let result =
         RootlessPodmanAdapter::new(program.clone()).launch_at(&request(), &policy(), 1_780_000_000);
     let calls = fs::read_to_string(&log).unwrap_or_default();
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
+    let _ = fs::remove_file(network_name_marker);
     let _ = fs::remove_file(identity_inspect_marker);
     (result, calls)
 }
