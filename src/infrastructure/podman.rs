@@ -582,8 +582,7 @@ impl RootlessPodmanAdapter {
         }
         let event_args = [
             "events".to_owned(),
-            "--stream".to_owned(),
-            "false".to_owned(),
+            "--stream=false".to_owned(),
             "--format".to_owned(),
             "json".to_owned(),
             "--since".to_owned(),
