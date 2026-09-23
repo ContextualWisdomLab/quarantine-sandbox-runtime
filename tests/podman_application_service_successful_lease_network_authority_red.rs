@@ -185,23 +185,16 @@ fn successful_lease_keeps_exact_network_id_private_for_non_force_termination() {
         }),
         "container creation must bind to the admitted backend network ID; calls were:\n{calls}"
     );
-    assert!(
-        calls
-            .lines()
-            .any(|line| line == format!("network rm {OWNED_NETWORK_ID}")),
-        "explicit termination must use the exact admitted backend ID; calls were:\n{calls}"
-    );
-    assert!(
-        !calls
-            .lines()
-            .any(|line| line.starts_with("network rm --force ")),
-        "explicit termination must not delegate deletion through network-level force; calls were:\n{calls}"
-    );
-    assert!(
-        !calls.lines().any(|line| {
-            line.starts_with("network rm ") && line.contains(lease.network_id())
-        }),
-        "public correlation metadata must never become the termination selector; calls were:\n{calls}"
+
+    let expected_network_removal = format!("network rm {OWNED_NETWORK_ID}");
+    let network_removals = calls
+        .lines()
+        .filter(|line| line.starts_with("network rm"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        network_removals.as_slice(),
+        [expected_network_removal.as_str()],
+        "explicit termination must perform exactly one network removal, by the admitted exact ID and without force or any alternate selector; calls were:\n{calls}"
     );
 
     let _ = fs::remove_file(program);
