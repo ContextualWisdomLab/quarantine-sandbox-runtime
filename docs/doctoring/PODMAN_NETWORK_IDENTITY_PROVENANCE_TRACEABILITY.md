@@ -8,7 +8,7 @@ Exact `3a94ef6cc158bd12a47c5fb7701e2158d7276341` / native CI `35778989881` execu
 
 Review `5285402062` then found one stale positive fixture in `podman_application_service_network_creation_receipt_red`: its exact-ID P0 inspection returned a synthetic `created-object` name even though the sibling provenance/P0 contract requires that the admitted ID still identify the invocation's generated `qsr-net-*` object. Test-only `709d574107f6cb0f024a5780e6e89920292f37a9` repairs only that fixture and preserves the same-name replacement, ambiguity, bounded-events, exact-ID attachment, and cleanup assertions.
 
-Production candidate `0e44b88b7ecf72a5c641b050a7d8450d604da4e4` implements the minimum selected repair in `src/infrastructure/podman.rs`: invocation-local wall-clock bounds surround network creation; one bounded non-streaming JSON event-history query admits exactly one matching creation receipt; P0 inspection targets the admitted immutable ID; and container binding plus partial cleanup retain that ID. Public-name identity lookup is removed from the creation path. This candidate is not GREEN until its exact integrated successor executes all repository gates; no predecessor status transfers.
+Production exact `0e44b88b7ecf72a5c641b050a7d8450d604da4e4` introduced the minimum selected creation-receipt mechanism in `src/infrastructure/podman.rs`. Review `5285457161` then found one execution-fidelity defect in its boolean argv: Podman/pflag requires the explicit false form `--stream=false`; a detached `--stream`, `false` pair can set the no-value boolean form and leave `false` as a positional argument. Production successor `421b8913cd4f74a0728a138f856409de1700fcb6` changes only that argv spelling. The mechanism is not GREEN until one unchanged integrated exact executes all repository gates; no predecessor status transfers.
 
 ## Creation-bound receipt decision
 
@@ -24,16 +24,16 @@ For one launch invocation the adapter must:
 6. inspect the admitted object by that exact ID and require the same generated name plus `internal=true` and DNS disabled before container creation;
 7. bind container `--network` to the exact admitted ID and retain that same ID for partial-launch cleanup and later private lifecycle succession.
 
-Podman 6.0.0 provides the evidence needed for this choice. The CLI `network create` path receives the created network object but prints only its name. Inside the same create operation, Podman emits a network-create event carrying the concrete network `ID` and `Network` name before returning. Event history supports bounded `since`/`until` filtering; QSR uses absolute fractional Unix seconds as the adapter-local representation so the bounds are tied to the enclosing launch invocation without adding a date/time dependency.
+Podman 6.0.0 provides the evidence needed for this choice. The CLI `network create` path receives the created network object but prints only its name. Inside the same create operation, Podman emits a network-create event carrying the concrete network `ID` and `Network` name before returning. Event history supports bounded `since`/`until` filtering; QSR uses absolute fractional Unix seconds as the adapter-local representation so the bounds are tied to the enclosing launch invocation without adding a date/time dependency. Podman's own event tests and operator examples use `--stream=false` for a non-streaming boolean value, which is why `421b891...` keeps that flag in assignment form while leaving `--format`, bounds, and filters as ordinary value-bearing options.
 
 Missing creation history is an availability failure, not permission to reconstruct ownership from a later name lookup.
 
 ## Production candidate behavior
 
-`0e44b88b7ecf72a5c641b050a7d8450d604da4e4` changes only the Podman infrastructure path after the fixture prerequisite at `709d574...`:
+Current production candidate `421b8913cd4f74a0728a138f856409de1700fcb6`, building on `0e44b88...`, changes only the Podman infrastructure path after the fixture prerequisite at `709d574...`:
 
 - `SystemTime` bounds are captured immediately before and after successful `network create`;
-- the adapter calls `podman events --stream false --format json --since <lower> --until <upper> --filter type=network --filter event=create` exactly once;
+- the adapter calls `podman events --stream=false --format json --since <lower> --until <upper> --filter type=network --filter event=create` exactly once;
 - JSON Lines are parsed as Podman network-create events, unrelated network names may be ignored, and missing, malformed, non-network/non-create, invalid-ID, or multiple matching receipts fail closed;
 - the matching event ID must be canonical lower-case 64-hex;
 - P0 inspection is issued against that exact ID, and the returned object must carry the same ID, the invocation's generated name, `internal=true`, and DNS disabled;
@@ -80,7 +80,7 @@ Libpod REST create can return creation-bound object data, but switching transpor
 
 ## Next executable gate
 
-Execute the current integrated #127 successor unchanged. The first required result is that the hardened creation-receipt and provenance/P0 witnesses move from the executed predecessor RED to exact-head GREEN without public-name fallback. Any valid-path fixture exposed by the new required event-history call must be migrated to the same creation-receipt contract rather than weakening production or adding a name fallback.
+Execute the current integrated #127 successor unchanged. The first required result is that the hardened creation-receipt and provenance/P0 witnesses move from the executed predecessor RED to exact-head GREEN without public-name fallback, and that the canonical `--stream=false` invocation is accepted by real/fake Podman paths. Any valid-path fixture exposed by the new required event-history call must be migrated to the same creation-receipt contract rather than weakening production or adding a name fallback.
 
 Then rerun the unchanged same-name replacement, ambiguous-history, exact-ID provenance/P0, effective-attachment, and exact-ID/non-force partial-cleanup witnesses together with repository validation, rustfmt, locked workspace/all-target tests, Clippy and public/private rustdoc with warnings denied, complete applicable owned-production statement/function/region/branch/edge coverage, real rootless runtime evidence, positive selected-LSM evidence, qualifying review/thread/security gates, protected integration, and immutable release evidence. No mutable PR head or public correlation name is release authority.
 
