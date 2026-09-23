@@ -196,12 +196,8 @@ fn assert_unadmitted_candidate_is_not_removed(contradiction: CandidateContradict
     assert!(
         !calls
             .lines()
-            .any(|line| line == format!("network rm {CANDIDATE_NETWORK_ID}")),
-        "a receipt candidate that failed P0 corroboration is not admitted destructive authority; calls were:\n{calls}"
-    );
-    assert!(
-        !calls.lines().any(|line| line.starts_with("network rm --force ")),
-        "pre-admission cleanup must never broaden to network-level force removal; calls were:\n{calls}"
+            .any(|line| line == "network rm" || line.starts_with("network rm ")),
+        "a pre-admission rejection must not authorize network removal through any selector; calls were:\n{calls}"
     );
 }
 
