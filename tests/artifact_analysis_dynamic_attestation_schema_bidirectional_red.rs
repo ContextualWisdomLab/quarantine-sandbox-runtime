@@ -5,7 +5,7 @@
 //! dynamic execution, so the boolean alone cannot become wire-level execution
 //! evidence.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 fn object_has_only_keys(object: &Map<String, Value>, expected: &[&str]) -> bool {
     object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
