@@ -1,9 +1,9 @@
 //! RED: canonical application-service owner must acquire exact network authority before create.
 //!
-//! The per-invocation `qsr-net-*` value is correlation metadata, not destructive or
-//! attachment authority. The runtime must inspect the network created by this invocation,
-//! acquire its Podman `.ID` before container creation, bind the container to that ID, and
-//! preserve an effective-attachment mismatch as `sandbox_network_binding` before readiness.
+//! The per-invocation `qsr-net-*` value is correlation metadata, not destructive or attachment
+//! authority. The runtime must acquire the Podman network ID from this invocation's creation
+//! receipt, prove P0 state by that exact ID before container creation, bind the container to the
+//! same ID, and preserve an effective-attachment mismatch as `sandbox_network_binding`.
 
 #![cfg(target_os = "linux")]
 
@@ -94,10 +94,14 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
     selector=${{5:-}}
-    if [ "$selector" != "$network_name" ] && [ "$selector" != "$network_id" ]; then exit 95; fi
+    [ "$selector" = "$network_id" ] || exit 95
     printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$network_id"
     ;;
   create:--name)
@@ -178,22 +182,30 @@ fn acquired_network_identity_precedes_create_and_preserves_attachment_red() {
         .split_whitespace()
         .last()
         .expect("network create must include the correlation name");
+    let receipt_index = lines
+        .iter()
+        .position(|line| line.starts_with("events --stream=false "))
+        .expect("created network identity must be admitted from bounded creation history");
+    let exact_id_inspect = format!("network inspect --format json {OWNED_NETWORK_ID}");
     let identity_inspect_index = lines
         .iter()
-        .position(|line| *line == format!("network inspect --format json {created_network_name}"))
-        .expect("created network identity must be inspected by its exact correlation name");
+        .position(|line| *line == exact_id_inspect)
+        .expect("created network P0 state must be inspected by exact admitted ID");
+    let public_name_inspect = format!("network inspect --format json {created_network_name}");
     let container_create_index = lines
         .iter()
         .position(|line| line.starts_with("create --name "))
         .expect("container create must be exercised");
 
     assert!(
-        network_create_index < identity_inspect_index,
-        "network identity must be acquired from the network created by this invocation; calls were:\n{calls}"
+        network_create_index < receipt_index
+            && receipt_index < identity_inspect_index
+            && identity_inspect_index < container_create_index,
+        "network authority must flow create -> receipt -> exact-ID P0 -> container create; calls were:\n{calls}"
     );
     assert!(
-        identity_inspect_index < container_create_index,
-        "network identity must be acquired before container creation; calls were:\n{calls}"
+        !lines.iter().any(|line| **line == public_name_inspect),
+        "public network correlation must not mint private attachment authority; calls were:\n{calls}"
     );
     assert!(
         lines[container_create_index].contains(&format!(" --network {OWNED_NETWORK_ID} ")),
