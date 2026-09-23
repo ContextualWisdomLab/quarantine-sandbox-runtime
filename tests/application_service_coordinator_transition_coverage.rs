@@ -210,11 +210,13 @@ fn terminating_entry_distinguishes_replay_from_conflicting_request() {
     let entered = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
     let terminate_calls = Arc::new(AtomicUsize::new(0));
-    let coordinator = Arc::new(ApplicationServiceCoordinator::new(BlockingTerminateBackend {
-        entered: Arc::clone(&entered),
-        release: Arc::clone(&release),
-        terminate_calls: Arc::clone(&terminate_calls),
-    }));
+    let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+        BlockingTerminateBackend {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            terminate_calls: Arc::clone(&terminate_calls),
+        },
+    ));
     let owner_identity = owner();
     let request = request();
     let policy = policy();
