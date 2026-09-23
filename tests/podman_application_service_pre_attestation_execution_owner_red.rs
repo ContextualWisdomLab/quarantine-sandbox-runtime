@@ -2,10 +2,8 @@
 //!
 //! `podman start` may start a trusted runtime-owned hold process, but it must not make the
 //! untrusted image command runnable before the exact acquired sandbox has passed effective
-//! process/isolation verification. The fixture treats only the exact runtime-gate entrypoint plus
-//! its runtime-owned read-only bind and interactive release channel as a hold. Any other
-//! entrypoint still arms the hostile payload. A deliberately contradictory capability inspection
-//! must then fail closed without that side effect.
+//! process/isolation verification. Network prerequisites use creation-bound exact-ID authority so
+//! this witness reaches the pre-attestation execution boundary rather than failing earlier.
 
 #![cfg(target_os = "linux")]
 
@@ -105,10 +103,14 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
     selector=${{5:-}}
-    [ "$selector" = "$network_name" ] || [ "$selector" = "$network_id" ] || exit 95
+    [ "$selector" = "$network_id" ] || exit 95
     printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$network_id"
     ;;
   create:--name)
@@ -144,7 +146,7 @@ case "${{1:-}}:${{2:-}}" in
     fi
     ;;
   container:inspect)
-    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":["CAP_NET_RAW"],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}}}]\n' "$container_id"
+    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":["CAP_NET_RAW"],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"%s"}},"NetworkSettings":{{"Networks":{{"qsr":{{"NetworkID":"%s"}}}}}}}}]\n' "$container_id" "$network_id" "$network_id"
     ;;
   top:*)
     printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n'
@@ -298,6 +300,18 @@ fn hostile_service_payload_is_not_released_before_effective_attestation() {
             control_name: "all_capabilities_dropped",
         }),
         "the witness must reach live effective isolation rejection rather than fail at an unrelated prerequisite"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("events --stream=false ")),
+        "the witness must cross creation-bound network admission before the attestation gate; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network inspect --format json {OWNED_NETWORK_ID}")),
+        "the witness must prove P0 network state by exact admitted ID; calls were:\n{calls}"
     );
     assert!(
         calls
