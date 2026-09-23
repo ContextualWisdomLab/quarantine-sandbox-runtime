@@ -1,6 +1,6 @@
 # Artifact Dynamic Attestation Traceability
 
-Status: Proposed evidence-contract boundary; issue #52. The original dynamic-attestation RED executed on `9d0da2a50e3247fd6cd2e52301d57408d404557d` / CI `35342943374`. Candidate receipt repairs are checked in, but the current inverse-evidence RED has not executed yet and no production/schema GREEN for that inverse relation is authorized.
+Status: Proposed evidence-contract boundary; issue #52. The original dynamic-attestation RED executed on `9d0da2a50e3247fd6cd2e52301d57408d404557d` / CI `35342943374`. The hardened inverse-evidence RED then executed on `78f721afbf269a00721c82c155d9686d0309883f` / CI `35509858228` and failed for the intended missing relation. Review `5289608220` authorizes only the minimum matching Rust and Draft 2020-12 schema repair. That repair is checked in, but the repaired exact head still requires fresh CI; no GREEN, merge, or release claim is made here.
 
 ## Problem
 
@@ -18,13 +18,13 @@ Two controls remained valid in the same run: `StaticOnly + execution=true` was r
 
 Candidate commits `387406c93953e8d8efbe4e32671ec764a2805b00` and `4a9cd5919691cda805ec72131f980f2aef631915` minimally made truthful dynamic completion representable, rejected completed dynamic receipts that claim no execution, and rejected `RuntimeBehavior` whenever execution is false. Network and credential denial remain fail closed.
 
-Review `5260321336` found that this candidate is still one-directional: `RuntimeBehavior -> dynamic_execution_performed=true` is enforced, but `dynamic_execution_performed=true -> RuntimeBehavior` is not. A completed dynamic receipt can therefore claim execution while carrying no observed runtime-behavior record. A boolean alone is not execution evidence.
+Review `5260321336` then found that this candidate was still one-directional: `RuntimeBehavior -> dynamic_execution_performed=true` was enforced, but `dynamic_execution_performed=true -> RuntimeBehavior` was not. A completed dynamic receipt could therefore claim execution while carrying no observed runtime-behavior record. A boolean alone is not execution evidence.
 
-Test-only `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8` adds the Rust RED for a completed Linux/Windows dynamic bundle with `execution=true` but no `RuntimeBehavior`. Test-only `5cd2d46af8158f5d3251257b1fe9ef99831fe08e` adds the public-schema structural RED requiring the corresponding narrow `runtime_behavior` occurrence relation. Production Rust and `schemas/evidence-bundle.schema.json` are unchanged from the earlier candidate on those two commits.
+Test-only `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8` added the Rust RED for a completed Linux/Windows dynamic bundle with `execution=true` but no `RuntimeBehavior`. Test-only `5cd2d46af8158f5d3251257b1fe9ef99831fe08e` added the public-schema structural RED requiring the corresponding narrow `runtime_behavior` occurrence relation.
 
-Review `5260530224` found two false-GREEN paths in those inverse witnesses before production repair is safe. The Rust test accepted any `validate().is_err()`, so an unrelated future validator failure could satisfy the RED. The schema matcher inspected the desired `runtime` and `evidence` children but did not require their enclosing `properties` maps to contain only those children; an impossible sibling predicate such as `disposition: { const: "__never__" }` could therefore make the rule vacuous while still passing the structural matcher.
+Review `5260530224` found two false-GREEN paths in those inverse witnesses. The Rust test accepted arbitrary `validate().is_err()`, and the schema matcher allowed hidden sibling predicates that could make the rule vacuous. Test-only `1454ebb19583dfb0c178c544661b44d8ebf2c578` therefore requires the schema `if` to contain only `runtime.dynamic_execution_performed=true`, requires the `then` to contain only the direct `evidence.contains(runtime_behavior)` consequence, and includes hostile controls for hidden root/runtime sibling predicates. Test-only `402b6058a113eba42d8438482652bd39b842a46e` binds the Rust RED to exactly `ContractError::RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }`.
 
-Test-only `1454ebb19583dfb0c178c544661b44d8ebf2c578` now requires the schema `if` to contain only `runtime.dynamic_execution_performed=true`, requires the `then` to contain only the direct `evidence.contains(runtime_behavior)` consequence, and adds hostile synthetic controls for hidden root/runtime sibling predicates. Test-only `402b6058a113eba42d8438482652bd39b842a46e` binds the Rust RED to the exact `ContractError::RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }` cause instead of accepting arbitrary validation failure. Production Rust, the public schema, runtime behavior, and workflow remain unchanged by both hardenings. A fresh exact-head CI must execute these hardened REDs before any inverse GREEN.
+The hardened exact `78f721afbf269a00721c82c155d9686d0309883f` / CI `35509858228` then executed the inverse witness. The coverage lane reached the test and returned `Ok(())` where the exact `dynamic_execution_without_runtime_behavior` boundary was required, establishing the intended causal RED. Hosted rootless/AppArmor negative evidence remained GREEN in that run. The verify lane independently stopped at rustfmt before tests, and positive SELinux was cancelled, so neither is transferable evidence for the repaired head. Review `5289608220` records that execution and authorizes only the bounded inverse-relation repair.
 
 ## Contract boundaries
 
@@ -32,19 +32,19 @@ Test-only `1454ebb19583dfb0c178c544661b44d8ebf2c578` now requires the schema `if
 - An unavailable dynamic worker remains `Inconclusive + dynamic_execution_performed=false` without `RuntimeBehavior`.
 - A dynamic receipt with `dynamic_execution_performed=false` cannot validate as `Completed` or carry observed runtime behavior.
 - `RuntimeBehavior` requires `dynamic_execution_performed=true`.
-- After the current inverse RED executes causally, `dynamic_execution_performed=true` must require at least one narrowly selected `RuntimeBehavior` record as the minimum matching repair.
+- `dynamic_execution_performed=true` requires at least one narrowly selected `RuntimeBehavior` record.
 - Current deny-by-default profiles do not gain network access or credentials merely because dynamic execution becomes representable.
 - Receipt consistency does not prove worker containment. Issue #49 owns analyzer/worker capability isolation; issue #50 owns bounded worker-to-controller result ingestion.
 - Exact artifact, worker invocation, analyzer provenance, runtime identity, resource bounds, termination, cleanup, and positive effective-isolation evidence remain independent release obligations.
-- Rust validation and the public JSON Schema must describe one semantics. If immutable 1.0.0 authority exists before this semantic expansion is released, publish a new version rather than mutating an immutable meaning.
+- Rust validation and the public JSON Schema must describe one semantics. If immutable `1.0.0` authority exists before this semantic expansion is released, publish a new version rather than mutating an immutable meaning.
 
 ## Alternatives and decision
 
 Keeping `dynamic_execution_performed` permanently false was rejected because it makes the modeled dynamic profiles unable to report real execution. Allowing execution for every profile was rejected because it weakens `StaticOnly`. Leaving completeness to consumers was rejected because `EvidenceBundle::validate()` is the runtime-owned wire-integrity boundary. Treating `RuntimeBehavior` as independent descriptive evidence was rejected because observed behavior contradicts an execution=false manifest. Rust-only repair was rejected because schema-only consumers would see a different contract.
 
-The selected direction is profile-aware bidirectional consistency: static receipts do not execute; unavailable dynamic receipts remain incomplete; completed dynamic receipts require actual execution; observed runtime behavior cannot exist without execution; and, after the new RED executes, an execution=true claim cannot stand alone without observed runtime-behavior evidence.
+The selected contract is profile-aware bidirectional consistency: static receipts do not execute; unavailable dynamic receipts remain incomplete; completed dynamic receipts require actual execution; observed runtime behavior cannot exist without execution; and an execution=true claim cannot stand alone without observed runtime-behavior evidence.
 
-## RED and causal evidence
+## RED and repair evidence
 
 Initial truthful-execution authority: `4cc901d7cb40bdc833e08b0c695ba12c27fa2f68`, `tests/artifact_analysis_dynamic_attestation_red.rs`.
 
@@ -56,7 +56,7 @@ Executable schema-semantics hardening authority: `e0ddf5abf96ff50718491ec4c59bb3
 
 Observed-runtime consistency hardening authority: `2b540a0a2c24c7e53c183ff2a8ea1e85cd30daa8`.
 
-Formatter-clean executed authority: `9d0da2a50e3247fd6cd2e52301d57408d404557d`, CI `35342943374`, review `5259590778`.
+Formatter-clean original executed authority: `9d0da2a50e3247fd6cd2e52301d57408d404557d`, CI `35342943374`, review `5259590778`.
 
 Initial inverse Rust RED authority: `8b70dd9e2484ebf0a484a549d2829c3ba55fa9f8`.
 
@@ -66,18 +66,27 @@ Hardened schema inverse RED authority: `1454ebb19583dfb0c178c544661b44d8ebf2c578
 
 Hardened exact-error Rust inverse RED authority: `402b6058a113eba42d8438482652bd39b842a46e`, review `5260530224`.
 
-The current inverse RED must execute for the intended missing relation before production/schema repair. No predecessor success transfers to a moved head.
+Executed hardened inverse authority: `78f721afbf269a00721c82c155d9686d0309883f`, CI `35509858228`, review `5289608220`. The coverage lane causally observed `Ok(())` instead of `RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }`.
 
-## Smallest causal GREEN after executed inverse RED
+Minimum Rust repair: `da376ef8c8e4b900a0a42d654a99129c53a89bcd`, adding only the inverse `dynamic_execution_performed=true -> RuntimeBehavior` validation with the exact boundary name.
 
-The allowed repair is limited to the receipt contract:
+Minimum public-schema repair: `593f5610bf9bbd876e42cfaa02993d7df0cbde7f`, adding only the exact execution=true trigger and direct `evidence.contains(evidence_kind=runtime_behavior)` consequence.
+
+Formatting repairs required by the executed verify evidence: `7eaf6e4e189ae34d2d51a3f03afd3e03d6a10a1b`, `2a51056a6e6cf0edb872d4fb52628b0d9156a828`, and `adc2fedaadcc6bc60662c685dc39d9c49df64d46`. These do not widen runtime semantics.
+
+No predecessor success transfers to the repaired head. Fresh exact-head CI must re-run repository policy, rustfmt, tests, Clippy/rustdoc, owned-production coverage, hosted negative evidence, and positive effective-LSM evidence before merge or publication.
+
+## Minimum GREEN condition
+
+The bounded repair is complete only when a fresh exact head proves all of the following together:
 
 1. Rust `EvidenceBundle::validate()` rejects `dynamic_execution_performed=true` with no `RuntimeBehavior` as exactly `RuntimeBoundaryViolated { boundary_name: "dynamic_execution_without_runtime_behavior" }`.
-2. The Draft 2020-12 schema enforces the same relation with a direct narrow `contains` selector for `evidence_kind=runtime_behavior`; the trigger and consequence may not contain hidden sibling predicates that narrow the valid instance set or make the relation vacuous.
+2. The Draft 2020-12 schema enforces the same relation with a direct narrow `contains` selector for `evidence_kind=runtime_behavior`; the trigger and consequence contain no hidden sibling predicates.
 3. Existing static-only, unavailable-dynamic, completed-dynamic, network-denial, and credential-denial semantics remain unchanged.
 4. Hostile input is rejected rather than normalized or inferred.
+5. Repository formatting, lint, documentation, exact-head coverage, and applicable runtime-isolation evidence are GREEN on the same head.
 
-Do not implement worker isolation, result-channel logic, provider policy, network widening, credential widening, or verdict ownership in this lane.
+Worker isolation, result-channel logic, provider policy, network widening, credential widening, and verdict ownership remain out of scope for this lane.
 
 ## Release evidence
 
