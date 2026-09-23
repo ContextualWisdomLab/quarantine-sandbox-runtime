@@ -1,11 +1,10 @@
 //! RED: failed network-ID admission must not authorize correlation-name destruction.
 //!
-//! Once network creation has succeeded, a malformed identity inspection means the runtime
-//! cannot prove which backend network object it owns. The generated `qsr-net-*` name remains
-//! correlation data; it must not be promoted to destructive cleanup authority merely because
-//! exact identity admission failed. This witness intentionally does not freeze a future error
-//! taxonomy. It requires fail-closed launch, no container creation, and no network removal by
-//! an untrusted/re-resolvable selector.
+//! Once network creation succeeds, a malformed creation receipt means the runtime still has no
+//! immutable backend authority. The generated `qsr-net-*` value remains correlation data and must
+//! not be promoted to inspection, attachment, or destructive cleanup authority. This witness keeps
+//! the failure taxonomy open while requiring fail-closed launch with no private action after the
+//! malformed receipt.
 
 #![cfg(target_os = "linux")]
 
@@ -71,28 +70,30 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(log: &Path) -> PathBuf {
+fn write_fake_podman(log: &Path, created_network_name: &Path) -> PathBuf {
     let program = temporary_path("fake-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
         r#"#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> '{log}'
+network_name_file='{network_name_file}'
 if [ "${{1:-}}" = info ]; then
   if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
   exit 0
 fi
 case "${{1:-}}:${{2:-}}" in
   network:create)
-    printf '%s\n' "${{5:-}}"
+    network_name=${{5:-}}
+    [ -n "$network_name" ] || exit 94
+    printf '%s\n' "$network_name" > "$network_name_file"
+    printf '%s\n' "$network_name"
     ;;
-  network:inspect)
-    printf '[{{"id":"not-a-canonical-runtime-id"}}]\n'
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"not-a-canonical-runtime-id","Network":"%s","Status":"create","Type":"network"}}\n' "$network_name"
     ;;
-  network:rm)
-    :
-    ;;
-  create:--name)
+  network:inspect|network:rm|create:--name)
     exit 97
     ;;
   *)
@@ -101,6 +102,7 @@ case "${{1:-}}:${{2:-}}" in
 esac
 "#,
         log = log.display(),
+        network_name_file = created_network_name.display(),
         info = info,
     );
 
@@ -116,7 +118,8 @@ esac
 #[test]
 fn malformed_network_identity_never_authorizes_correlation_name_cleanup() {
     let log = temporary_path("calls");
-    let program = write_fake_podman(&log);
+    let created_network_name = temporary_path("network-name");
+    let program = write_fake_podman(&log, &created_network_name);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
@@ -124,10 +127,11 @@ fn malformed_network_identity_never_authorizes_correlation_name_cleanup() {
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
+    let _ = fs::remove_file(created_network_name);
 
     assert!(
         result.is_err(),
-        "malformed network identity must fail closed rather than publish a lease"
+        "malformed creation-bound identity must fail closed rather than publish a lease"
     );
     assert!(
         calls
@@ -138,8 +142,14 @@ fn malformed_network_identity_never_authorizes_correlation_name_cleanup() {
     assert!(
         calls
             .lines()
-            .any(|line| line.starts_with("network inspect --format json qsr-net-")),
-        "the witness must reach exact-name identity inspection; calls were:\n{calls}"
+            .any(|line| line.starts_with("events --stream=false ")),
+        "the witness must reach creation-receipt admission; calls were:\n{calls}"
+    );
+    assert!(
+        !calls
+            .lines()
+            .any(|line| line.starts_with("network inspect ")),
+        "malformed receipt identity must stop before any network inspection; calls were:\n{calls}"
     );
     assert!(
         !calls.lines().any(|line| line.starts_with("create --name ")),
@@ -147,6 +157,6 @@ fn malformed_network_identity_never_authorizes_correlation_name_cleanup() {
     );
     assert!(
         !calls.lines().any(|line| line.starts_with("network rm ")),
-        "a generated correlation must not become destructive network authority when exact ID admission fails; calls were:\n{calls}"
+        "public correlation must not become destructive authority when no canonical ID is admitted; calls were:\n{calls}"
     );
 }
