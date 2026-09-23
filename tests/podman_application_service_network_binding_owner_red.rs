@@ -1,9 +1,9 @@
 //! RED: canonical application-service owner must prove the effective network attachment set.
 //!
-//! This fixture runs on the random-identity/exact-container-ID owner lineage. It records the
-//! generated correlation name, exposes a stable Podman network ID, accepts either the current
-//! correlation-name binding or the future acquired-ID binding, and varies only effective
-//! attachment evidence so this RED stays focused on container attachment proof.
+//! This fixture runs on the creation-bound network-ID/exact-container-ID owner lineage. It records
+//! the generated correlation name, emits one matching creation receipt, admits P0 state only by
+//! the exact Podman network ID, and varies only effective attachment evidence so this RED stays
+//! focused on container attachment proof.
 
 #![cfg(target_os = "linux")]
 
@@ -118,10 +118,14 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
     selector=${{5:-}}
-    if [ "$selector" != "$network_name" ] && [ "$selector" != "$network_id" ]; then exit 95; fi
+    [ "$selector" = "$network_id" ] || exit 95
     printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$network_id"
     ;;
   create:--name)
@@ -135,8 +139,7 @@ case "${{1:-}}:${{2:-}}" in
       if [ "$previous" = '--network' ]; then network="$argument"; fi
       previous="$argument"
     done
-    network_name=$(cat "$network_name_file")
-    if [ "$network" != "$network_name" ] && [ "$network" != "$network_id" ]; then exit 92; fi
+    [ "$network" = "$network_id" ] || exit 92
     [ -n "$cidfile" ] || exit 93
     printf '%s\n' "$container_id" > "$cidfile"
     printf '%s\n' "$container_id"
@@ -218,32 +221,53 @@ fn assert_network_binding_rejected(case: AttachmentCase) {
         "network-object configuration must not substitute for exact container-attachment proof"
     );
     let calls = calls.expect("fake Podman calls must be recorded after the typed launch result");
+    let lines: Vec<&str> = calls.lines().collect();
+    let network_create_index = lines
+        .iter()
+        .position(|line| line.starts_with("network create --internal --disable-dns qsr-net-"))
+        .expect("the runtime-owned network must be created");
+    let created_name = lines[network_create_index]
+        .split_whitespace()
+        .last()
+        .expect("network creation must retain the public correlation");
+    let receipt_index = lines
+        .iter()
+        .position(|line| line.starts_with("events --stream=false "))
+        .expect("creation receipt must establish private network authority");
+    let exact_id_inspect = format!("network inspect --format json {OWNED_NETWORK_ID}");
+    let exact_id_inspect_index = lines
+        .iter()
+        .position(|line| *line == exact_id_inspect)
+        .expect("P0 network evidence must inspect the exact admitted ID");
+    let public_name_inspect = format!("network inspect --format json {created_name}");
+    let container_create_index = lines
+        .iter()
+        .position(|line| line.starts_with("create --name "))
+        .expect("container creation must be exercised");
+
     assert!(
-        calls
-            .lines()
-            .any(|line| line.starts_with("network create --internal --disable-dns qsr-net-")),
-        "the runtime-owned network must be created; calls were:\n{calls}"
+        network_create_index < receipt_index
+            && receipt_index < exact_id_inspect_index
+            && exact_id_inspect_index < container_create_index,
+        "network authority must flow create -> receipt -> exact-ID P0 -> container create; calls were:\n{calls}"
     );
     assert!(
-        calls
-            .lines()
-            .any(|line| { line.starts_with("network inspect --format json qsr-net-") }),
-        "network isolation evidence must still inspect the runtime-owned network; calls were:\n{calls}"
+        !lines.iter().any(|line| **line == public_name_inspect),
+        "public network correlation must not mint attachment authority; calls were:\n{calls}"
     );
     assert!(
-        calls
-            .lines()
-            .any(|line| line.starts_with("create --name ") && line.contains(" --network ")),
-        "container creation must select the runtime-owned network before attachment evidence is checked; calls were:\n{calls}"
+        lines[container_create_index].contains(&format!(" --network {OWNED_NETWORK_ID} ")),
+        "container creation must select exact admitted network authority before attachment proof; call was: {}",
+        lines[container_create_index]
     );
     assert!(
-        calls
-            .lines()
-            .any(|line| line == format!("container inspect --format json {OWNED_CONTAINER_ID}")),
+        lines
+            .iter()
+            .any(|line| **line == format!("container inspect --format json {OWNED_CONTAINER_ID}")),
         "effective isolation must remain bound to the exact acquired container ID; calls were:\n{calls}"
     );
     assert!(
-        !calls.lines().any(|line| line.starts_with("port ")),
+        !lines.iter().any(|line| line.starts_with("port ")),
         "readiness must not be queried after an effective attachment mismatch; calls were:\n{calls}"
     );
 }
