@@ -386,7 +386,8 @@ impl RuntimeManifest {
             MAX_IDENTIFIER_BYTES,
         )?;
 
-        if self.requested_profile == AnalysisProfile::StaticOnly && self.dynamic_execution_performed {
+        if self.requested_profile == AnalysisProfile::StaticOnly && self.dynamic_execution_performed
+        {
             return Err(ContractError::RuntimeBoundaryViolated {
                 boundary_name: "dynamic_execution_performed",
             });
