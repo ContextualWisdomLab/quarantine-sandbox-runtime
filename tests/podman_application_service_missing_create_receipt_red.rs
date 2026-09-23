@@ -3,6 +3,7 @@
 //! The generated `qsr-app-*` name is correlation metadata, not destructive authority. If create
 //! succeeds but neither stdout nor a runtime-owned receipt yields an admitted exact container ID,
 //! the runtime must report the unreconciled receipt condition without attempting name-based rm.
+//! Network prerequisites use creation-bound exact-ID authority.
 
 #![cfg(target_os = "linux")]
 
@@ -74,11 +75,39 @@ fn write_fake_podman() -> (PathBuf, PathBuf, PathBuf) {
     let destructive_marker = temporary_path("destructive-container-action");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\ndestructive_marker='{}'\nowned_network_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '[{{\"id\":\"%s\",\"internal\":true,\"dns_enabled\":false}}]\\n' \"$owned_network_id\" ;;\n  network:rm) : ;;\n  create:--name) printf 'bad identifier with spaces\\n' ;;\n  rm:--force) printf 'unexpected destructive container action\\n' > \"$destructive_marker\"; exit 93 ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        destructive_marker.display(),
-        OWNED_NETWORK_ID,
-        info,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> '{log}'
+destructive_marker='{destructive_marker}'
+owned_network_id='{network_id}'
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$owned_network_id" "$created_name"
+    ;;
+  network:inspect)
+    [ "${{5:-}}" = "$owned_network_id" ] || exit 95
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$owned_network_id"
+    ;;
+  network:rm) : ;;
+  create:--name) printf 'bad identifier with spaces\n' ;;
+  rm:--force) printf 'unexpected destructive container action\n' > "$destructive_marker"; exit 93 ;;
+  start:*|container:inspect|top:*|port:*) exit 94 ;;
+  *) exit 91 ;;
+esac
+"#,
+        log = log.display(),
+        destructive_marker = destructive_marker.display(),
+        network_id = OWNED_NETWORK_ID,
+        info = info,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -104,6 +133,18 @@ fn malformed_successful_create_without_receipt_never_uses_generated_name_for_cle
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("events --stream=false ")),
+        "the missing container receipt witness must cross creation-bound network admission; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network inspect --format json {OWNED_NETWORK_ID}")),
+        "network P0 evidence must use exact admitted identity before container creation; calls were:\n{calls}"
+    );
     let create_call = calls
         .lines()
         .find(|line| line.starts_with("create --name "))
