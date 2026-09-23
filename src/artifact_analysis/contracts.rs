@@ -386,11 +386,14 @@ impl RuntimeManifest {
             MAX_IDENTIFIER_BYTES,
         )?;
 
+        if self.requested_profile == AnalysisProfile::StaticOnly && self.dynamic_execution_performed
+        {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "dynamic_execution_performed",
+            });
+        }
+
         for (boundary_name, violated) in [
-            (
-                "dynamic_execution_performed",
-                self.dynamic_execution_performed,
-            ),
             ("network_access_performed", self.network_access_performed),
             ("credentials_available", self.credentials_available),
         ] {
@@ -443,6 +446,39 @@ impl EvidenceBundle {
         validate_text("request_id", &self.request_id, MAX_IDENTIFIER_BYTES)?;
         self.artifact.validate()?;
         self.runtime.validate()?;
+
+        if matches!(
+            self.runtime.requested_profile,
+            AnalysisProfile::LinuxDynamic | AnalysisProfile::WindowsDynamic
+        ) && self.disposition == RuntimeDisposition::Completed
+            && !self.runtime.dynamic_execution_performed
+        {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "dynamic_execution_performed",
+            });
+        }
+
+        if !self.runtime.dynamic_execution_performed
+            && self
+                .evidence
+                .iter()
+                .any(|record| record.evidence_kind == EvidenceKind::RuntimeBehavior)
+        {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "runtime_behavior_without_dynamic_execution",
+            });
+        }
+
+        if self.runtime.dynamic_execution_performed
+            && !self
+                .evidence
+                .iter()
+                .any(|record| record.evidence_kind == EvidenceKind::RuntimeBehavior)
+        {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "dynamic_execution_without_runtime_behavior",
+            });
+        }
 
         if !self.consumer_verdict_required {
             return Err(ContractError::ConsumerVerdictMustBeRequired);

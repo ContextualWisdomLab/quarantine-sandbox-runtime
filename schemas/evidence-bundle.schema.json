@@ -125,7 +125,7 @@
           ]
         },
         "dynamic_execution_performed": {
-          "const": false
+          "type": "boolean"
         },
         "network_access_performed": {
           "const": false
@@ -227,5 +227,129 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "requested_profile": {
+                "const": "static_only"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "dynamic_execution_performed": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "allOf": [
+          {
+            "properties": {
+              "runtime": {
+                "properties": {
+                  "requested_profile": {
+                    "enum": [
+                      "linux_dynamic",
+                      "windows_dynamic"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "disposition": {
+                "const": "completed"
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "dynamic_execution_performed": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "dynamic_execution_performed": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "not": {
+              "contains": {
+                "required": [
+                  "evidence_kind"
+                ],
+                "properties": {
+                  "evidence_kind": {
+                    "const": "runtime_behavior"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "dynamic_execution_performed": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "contains": {
+              "required": [
+                "evidence_kind"
+              ],
+              "properties": {
+                "evidence_kind": {
+                  "const": "runtime_behavior"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
