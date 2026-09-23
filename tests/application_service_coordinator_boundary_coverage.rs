@@ -326,12 +326,7 @@ fn failed_launch_releases_launching_slot_for_retry() {
 
     for started_at_epoch_seconds in [1_780_000_000, 1_780_000_001] {
         assert!(matches!(
-            coordinator.launch_at(
-                &owner_identity,
-                &request,
-                &policy,
-                started_at_epoch_seconds,
-            ),
+            coordinator.launch_at(&owner_identity, &request, &policy, started_at_epoch_seconds,),
             Err(ApplicationServiceCoordinatorError::Backend(
                 ApplicationServiceError::BackendCommandFailed { .. }
             ))
@@ -461,11 +456,7 @@ fn failed_termination_restores_active_entry_for_retry() {
 
     for terminated_at_epoch_seconds in [1_780_000_010, 1_780_000_011] {
         assert_eq!(
-            coordinator.terminate_at(
-                &owner_identity,
-                &lease,
-                terminated_at_epoch_seconds,
-            ),
+            coordinator.terminate_at(&owner_identity, &lease, terminated_at_epoch_seconds,),
             Err(ApplicationServiceCoordinatorError::Backend(
                 ApplicationServiceError::CleanupFailed
             ))
@@ -479,11 +470,13 @@ fn synchronized_duplicate_termination_reports_termination_in_progress() {
     let entered = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
     let terminate_calls = Arc::new(AtomicUsize::new(0));
-    let coordinator = Arc::new(ApplicationServiceCoordinator::new(BlockingTerminateBackend {
-        entered: Arc::clone(&entered),
-        release: Arc::clone(&release),
-        terminate_calls: Arc::clone(&terminate_calls),
-    }));
+    let coordinator = Arc::new(ApplicationServiceCoordinator::new(
+        BlockingTerminateBackend {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            terminate_calls: Arc::clone(&terminate_calls),
+        },
+    ));
     let owner_identity = owner("urn:cwl:agent:coordinator-boundary");
     let request = request();
     let policy = policy();
@@ -495,9 +488,7 @@ fn synchronized_duplicate_termination_reports_termination_in_progress() {
         let coordinator = Arc::clone(&coordinator);
         let owner_identity = owner_identity.clone();
         let lease = lease.clone();
-        std::thread::spawn(move || {
-            coordinator.terminate_at(&owner_identity, &lease, 1_780_000_010)
-        })
+        std::thread::spawn(move || coordinator.terminate_at(&owner_identity, &lease, 1_780_000_010))
     };
 
     entered.wait();
