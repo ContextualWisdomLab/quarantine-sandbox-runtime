@@ -1,9 +1,9 @@
 //! RED: explicit application-service termination must not delete foreign network members.
 //!
-//! This fixture is compatible with both the current correlation-name binding and the intended
-//! acquired-network-ID binding so the failure cause stays on destructive cleanup authority.
-//! Podman container inspection reports `NetworkSettings.Networks` as a map keyed by network name,
-//! while `NetworkID` carries the stable network identity; the fixture preserves that distinction.
+//! Launch prerequisites use the creation-bound network-ID contract so the failure cause stays on
+//! successful-lease destructive cleanup authority. Podman container inspection reports
+//! `NetworkSettings.Networks` as a map keyed by network name while `NetworkID` carries the stable
+//! backend identity; the fixture preserves that distinction.
 
 #![cfg(target_os = "linux")]
 
@@ -104,10 +104,14 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
     selector=${{5:-}}
-    if [ "$selector" != "$network_name" ] && [ "$selector" != "$network_id" ]; then exit 95; fi
+    [ "$selector" = "$network_id" ] || exit 95
     printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$network_id"
     ;;
   create:--name)
@@ -121,8 +125,7 @@ case "${{1:-}}:${{2:-}}" in
       if [ "$previous" = '--network' ]; then network="$argument"; fi
       previous="$argument"
     done
-    network_name=$(cat "$network_name_file")
-    if [ "$network" != "$network_name" ] && [ "$network" != "$network_id" ]; then exit 92; fi
+    [ "$network" = "$network_id" ] || exit 92
     [ -n "$cidfile" ] || exit 93
     printf '%s\n' "$network" > "$selected_network_file"
     printf '%s\n' "$container_id" > "$cidfile"
