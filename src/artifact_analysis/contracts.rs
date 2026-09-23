@@ -468,6 +468,17 @@ impl EvidenceBundle {
             });
         }
 
+        if self.runtime.dynamic_execution_performed
+            && !self
+                .evidence
+                .iter()
+                .any(|record| record.evidence_kind == EvidenceKind::RuntimeBehavior)
+        {
+            return Err(ContractError::RuntimeBoundaryViolated {
+                boundary_name: "dynamic_execution_without_runtime_behavior",
+            });
+        }
+
         if !self.consumer_verdict_required {
             return Err(ContractError::ConsumerVerdictMustBeRequired);
         }
