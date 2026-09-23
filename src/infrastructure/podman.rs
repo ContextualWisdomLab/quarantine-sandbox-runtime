@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Output,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Deserialize;
@@ -116,8 +116,23 @@ struct NetworkInspection {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-struct NetworkIdentityInspection {
+struct NetworkCreationEvent {
+    #[serde(rename = "ID")]
     id: String,
+    #[serde(rename = "Network")]
+    network: String,
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "Type")]
+    event_type: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+struct NetworkIdentityInspection {
+    name: String,
+    id: String,
+    internal: bool,
+    dns_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -391,8 +406,11 @@ impl RootlessPodmanAdapter {
         let mut create_args = plan.container_create_args().to_vec();
         create_args.insert(3, format!("--cidfile={create_receipt_path_text}"));
 
+        let network_create_started = SystemTime::now();
         self.checked_output("network_create", plan.network_create_args())?;
-        let network_id = self.acquire_network_id(&plan)?;
+        let network_create_finished = SystemTime::now();
+        let network_id =
+            self.acquire_network_id(&plan, network_create_started, network_create_finished)?;
         bind_network_selector(&mut create_args, &network_id)?;
 
         let create_output = match self.checked_output("container_create", &create_args) {
@@ -548,26 +566,83 @@ impl RootlessPodmanAdapter {
         Ok(CleanupReceipt::complete(lease, terminated_at_epoch_seconds))
     }
 
-    /// Acquire the backend network identity by exact generated correlation name.
+    /// Acquire creation-bound network authority and prove P0 state by the exact backend ID.
     fn acquire_network_id(
         &self,
         plan: &PodmanLaunchPlan,
+        network_create_started: SystemTime,
+        network_create_finished: SystemTime,
     ) -> Result<String, ApplicationServiceError> {
+        let since = podman_event_wall_clock(network_create_started)?;
+        let until = podman_event_wall_clock(network_create_finished)?;
+        if network_create_started >= network_create_finished {
+            return Err(ApplicationServiceError::BackendInvocationFailed {
+                operation: "network_creation_receipt_clock",
+            });
+        }
+        let event_args = [
+            "events".to_owned(),
+            "--stream".to_owned(),
+            "false".to_owned(),
+            "--format".to_owned(),
+            "json".to_owned(),
+            "--since".to_owned(),
+            since,
+            "--until".to_owned(),
+            until,
+            "--filter".to_owned(),
+            "type=network".to_owned(),
+            "--filter".to_owned(),
+            "event=create".to_owned(),
+        ];
+        let event_output = self.checked_output("network_creation_receipt", &event_args)?;
+        let network_id =
+            parse_network_creation_receipt(&event_output.stdout, plan.network_name())?;
+
         let network_args = [
             "network".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
             "json".to_owned(),
-            plan.network_name().to_owned(),
+            network_id.clone(),
         ];
-        let network_output = self.checked_output("network_identity_inspect", &network_args)?;
-        let network: NetworkIdentityInspection =
-            parse_single_inspection("network_identity_inspect", &network_output.stdout)?;
-        parse_backend_identifier(network.id.as_bytes()).ok_or(
-            ApplicationServiceError::MalformedIsolationInspection {
+        let network_output = match self.checked_output("network_identity_inspect", &network_args) {
+            Ok(output) => output,
+            Err(error) => {
+                self.cleanup_admitted_network(&network_id)?;
+                return Err(error);
+            }
+        };
+        let network: NetworkIdentityInspection = match parse_single_inspection(
+            "network_identity_inspect",
+            &network_output.stdout,
+        ) {
+            Ok(network) => network,
+            Err(error) => {
+                self.cleanup_admitted_network(&network_id)?;
+                return Err(error);
+            }
+        };
+        let inspected_id = match parse_backend_identifier(network.id.as_bytes()) {
+            Some(identifier) => identifier,
+            None => {
+                self.cleanup_admitted_network(&network_id)?;
+                return Err(ApplicationServiceError::MalformedIsolationInspection {
+                    operation: "network_identity_inspect",
+                });
+            }
+        };
+        if inspected_id != network_id
+            || network.name != plan.network_name()
+            || !network.internal
+            || network.dns_enabled
+        {
+            self.cleanup_admitted_network(&network_id)?;
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
                 operation: "network_identity_inspect",
-            },
-        )
+            });
+        }
+        Ok(network_id)
     }
 
     /// Verify configured and live process isolation against exact acquired resource identities.
@@ -1003,6 +1078,62 @@ where
     values
         .pop()
         .ok_or(ApplicationServiceError::MalformedIsolationInspection { operation })
+}
+
+/// Parse exactly one invocation-owned network creation event from bounded JSON Lines history.
+fn parse_network_creation_receipt(
+    bytes: &[u8],
+    expected_network_name: &str,
+) -> Result<String, ApplicationServiceError> {
+    const OPERATION: &str = "network_creation_receipt";
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        ApplicationServiceError::MalformedIsolationInspection {
+            operation: OPERATION,
+        }
+    })?;
+    let mut matched_id = None;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let event: NetworkCreationEvent = serde_json::from_str(line).map_err(|_| {
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: OPERATION,
+            }
+        })?;
+        if event.event_type != "network" || event.status != "create" {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: OPERATION,
+            });
+        }
+        if event.network != expected_network_name {
+            continue;
+        }
+        let event_id = parse_backend_identifier(event.id.as_bytes()).ok_or(
+            ApplicationServiceError::MalformedIsolationInspection {
+                operation: OPERATION,
+            },
+        )?;
+        if matched_id.replace(event_id).is_some() {
+            return Err(ApplicationServiceError::MalformedIsolationInspection {
+                operation: OPERATION,
+            });
+        }
+    }
+    matched_id.ok_or(ApplicationServiceError::MalformedIsolationInspection {
+        operation: OPERATION,
+    })
+}
+
+/// Render one absolute wall-clock instant in Podman's fractional Unix timestamp grammar.
+fn podman_event_wall_clock(time: SystemTime) -> Result<String, ApplicationServiceError> {
+    let elapsed = time.duration_since(UNIX_EPOCH).map_err(|_| {
+        ApplicationServiceError::BackendInvocationFailed {
+            operation: "network_creation_receipt_clock",
+        }
+    })?;
+    Ok(format!(
+        "{}.{:09}",
+        elapsed.as_secs(),
+        elapsed.subsec_nanos()
+    ))
 }
 
 /// Bind container creation to the exact backend network identity acquired by inspection.
