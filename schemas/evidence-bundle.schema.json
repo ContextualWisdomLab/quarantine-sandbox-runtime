@@ -321,6 +321,35 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "properties": {
+              "dynamic_execution_performed": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "contains": {
+              "required": [
+                "evidence_kind"
+              ],
+              "properties": {
+                "evidence_kind": {
+                  "const": "runtime_behavior"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }
