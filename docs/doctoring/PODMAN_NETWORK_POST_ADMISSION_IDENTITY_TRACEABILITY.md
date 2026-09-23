@@ -1,79 +1,77 @@
 # Podman post-admission network identity traceability
 
-## Finding
+## Current authority
 
-Draft #127 exact `e9ad58ceaec006b11da63772c22447b3a424da23` already separates the generated `qsr-net-*` correlation from a canonical-format backend network ID used for container creation. That current parent does **not** yet prove that the ID is provenance-admitted immutable authority: `NetworkIdentityInspection` carries only `id`, and `acquire_network_id()` validates only canonical backend-identifier grammar. The same parent separately carries `tests/podman_application_service_network_identity_provenance_owner_red.rs`, whose expected-name / `internal=true` / DNS-disabled admission contract is still RED.
+Draft #142 remains the focused dependent witness for continuity of immutable network authority after admission. The branch is still based on historical #127 exact `e9ad58ceaec006b11da63772c22447b3a424da23`; it must not be treated as dependency-safe merely because GitHub can compute a merge.
 
-This child therefore models the next boundary **after** creation-bound identity and provenance/P0-state admission are repaired on the canonical parent. Even with those parent obligations satisfied, a later boundary can still lose the admitted authority.
+Live canonical parent #127 has advanced to exact `5db1275d51790188ab41726b7117f45b283eb5d8`, native CI `35830350461`. Current #127 is Draft/open/mergeable and remains the sole implementation owner for application-service network identity/lifecycle. No parent result transfers to this child.
 
-`RootlessPodmanAdapter::launch_at()` obtains `network_id` from `acquire_network_id()` and replaces the container `--network` selector with that value. After the exact acquired container starts, `verify_effective_isolation()` receives the launch plan and container ID, but not the network ID. Its P0 network-state check therefore executes `podman network inspect --format json <plan.network_name()>` again.
+## Historical RED and what changed upstream
 
-That second name resolution is not equivalent to verification of the admitted object. Between identity admission and effective isolation verification, another object can occupy the public correlation while preserving `internal=true` and DNS-disabled state. The later check can then describe the replacement rather than the network selected by immutable ID for the exact container.
+This child was created for a real defect on the historical parent. After a canonical backend network ID had been selected and used for container creation, `verify_effective_isolation()` did not receive that ID. Its later P0 network-state check re-resolved the public `qsr-net-*` correlation. A same-name replacement could therefore supply `internal=true` / DNS-disabled evidence for a different object.
 
-This is distinct from both parent #127 identity REDs. The create→first-inspect witness asks whether the first inspected ID belongs to the object created by this invocation. The provenance witness asks whether the admitted object also proves expected generated name and required P0 state before container creation. Fixing both does not by itself prevent a later security check from falling back to mutable correlation.
+Test-only commit `de78cac3add817e4d2bd24316d8f52676128638f` adds `tests/podman_application_service_network_post_admission_rebind_red.rs`. The fake backend lets the historical flow select `OWNED_NETWORK_ID`, then rebinds the public correlation after container start while exact-ID inspection of the owned network remains available. The witness requires later P0 verification to stay bound to the immutable authority used for container creation.
 
-## Exact code and RED
+Live #127 production ancestry has since implemented this invariant. Executed parent evidence exposed the effective-attachment defect, and production repair `6629fd30fa7c011f5aaff1b19ec1b116db2696bd`:
 
-Parent code authority: `src/infrastructure/podman.rs@e9ad58ceaec006b11da63772c22447b3a424da23`.
+- carries the admitted network ID into `verify_effective_isolation()`;
+- deserializes effective `NetworkSettings.Networks` and requires exactly one attachment whose `NetworkID` equals that admitted ID;
+- performs the later network-state inspection by the same exact ID instead of `plan.network_name()`;
+- uses exact-ID, non-force network removal on partial-launch cleanup after network-ID admission.
 
-The current parent flow is:
+The historical statement that live parent production still drops the network ID at the verification boundary is therefore obsolete. The #142 invariant is present in current #127 production code, but #142 is not yet succeeded: its executable witness and branch ancestry still describe the pre-repair call shape and current #127 has not reached one unchanged dependency-safe exact-head GREEN.
 
-1. `acquire_network_id(&plan)` returns an ID that satisfies canonical backend-identifier grammar;
-2. current parent production does not yet prove expected-name / `internal=true` / DNS-disabled provenance at that admission boundary; the dedicated provenance owner test remains RED;
-3. `bind_network_selector(&mut create_args, &network_id)` binds container creation to the canonical-format ID;
-4. the exact acquired container is started;
-5. `verify_effective_isolation(&plan, ..., &container_id)` runs without `network_id`;
-6. the network P0 check resolves `plan.network_name()` again.
+## Current #127 creation-bound identity gate
 
-Test-only commit `de78cac3add817e4d2bd24316d8f52676128638f` adds `tests/podman_application_service_network_post_admission_rebind_red.rs` on Draft #142. The fake backend returns `OWNED_NETWORK_ID` for the first name lookup and requires container creation to use it. After container start, the same public name resolves to a different canonical ID with otherwise-valid P0 state, while exact-ID inspection of `OWNED_NETWORK_ID` remains available.
+The current parent has moved beyond the old name-inspect acquisition model. Production `0e44b88b7ecf72a5c641b050a7d8450d604da4e4`, corrected by `421b8913cd4f74a0728a138f856409de1700fcb6`, captures bounds around non-`--ignore` `podman network create`, queries bounded non-streaming `podman events` for the creation event, admits exactly one generated correlation plus canonical 64-lower-hex backend ID, verifies P0 state by that exact ID, binds container creation to it, and preserves exact-ID/non-force partial cleanup. Missing, malformed, ambiguous, disabled, or lost receipt history remains fail closed; the public correlation is not a destructive fallback.
 
-The witness requires post-start P0 network inspection to use the same immutable network ID selected for container creation and forbids public-name re-resolution at that security boundary. On the current parent this is a dependent future-state invariant, not evidence that the preceding creation/provenance admission gates are already GREEN. It intentionally does not change production Rust/API/schema.
+Exact `2f053b37a3ae52dcd4d102cd99e67736e5f28dd9`, CI `35817422499`, acquired hosted runners. The broad process-boundary fixture failed first: 8 of 9 `tests/podman_application_service.rs` cases stopped at `network_creation_receipt` because that fake backend had not been migrated to create → receipt → exact-ID P0 sequencing. That execution did not prove the dedicated Podman-v6 JSON-key mismatch.
 
-## Security invariant
+Current test-only parent `5db1275d51790188ab41726b7117f45b283eb5d8` migrates only that broad fixture. It intentionally emits uppercase `Network` so production can cross the prerequisite without pre-applying the next repair. Production Rust/API/schema are unchanged by this current head movement.
 
-After creation-bound identity and provenance/P0-state admission establish one immutable backend network authority, all later network security or destructive authority must be carried by that ID or an equivalent private capability derived from it. The public correlation may remain in consumer-visible lease/audit data, but it must not be promoted back into:
+The next transport contract remains explicit: Podman v6 `--format json` emits `{ID, network, Status, Type}` with lowercase `network`, while current QSR production still maps uppercase `Network`. The dedicated witness must become causal before the serde mapping changes.
 
-- effective `internal` / DNS state verification;
-- effective attachment proof;
+After that gate, current #127 still has independent obligations for missing `EffectiveCaps`, missing `BoundingCaps`, missing post-start `dns_enabled`, no-admitted-ID recovery (#141), successful-lease private exact network cleanup authority, foreign-safe non-force explicit termination, and remote Podman/Podman-machine/Colima clock-domain parity.
+
+## Security invariant retained by #142
+
+Once one creation-bound, provenance-admitted immutable network authority exists, every later security or destructive operation must continue to use that same ID or an equivalent private capability derived from it. Public `qsr-net-*` may remain consumer-visible correlation/audit metadata, but it must not regain authority for:
+
+- effective attachment verification;
+- post-start P0 `internal` / DNS state verification;
 - partial-launch cleanup;
+- successful-lease private cleanup;
 - explicit termination;
-- recovery deletion authority.
+- recovery deletion.
 
-A later inspection may corroborate current state, but its selector must be the admitted object identity rather than a public name that can resolve to a different object.
+A later network inspection may corroborate current state only when it addresses the admitted immutable object. Matching configuration reached through a mutable name is not ownership evidence.
 
-## Minimum GREEN direction
+## Required ordinary/non-force succession
 
-Do not repair this by adding another expected-name predicate. First repair #127 so the creation operation is bound to immutable identity and the same object is provenance-admitted with expected generated name, canonical ID, `internal=true`, and DNS disabled. One atomic creation receipt/API may satisfy both parent obligations if its exact contract is independently verified; otherwise both parent REDs remain separate gates.
+Do not merge the historical #142 branch merely because current #127 production appears to satisfy the invariant. Complete succession requires the child evidence to be adapted and executed on the dependency-safe parent.
 
-Then carry that admitted immutable network authority through the private launch lifecycle and into effective isolation verification. If post-start network state is inspected, address the admitted full ID. Effective container attachment must also match that same ID before readiness. Cleanup/termination remain exact-ID and non-force under their existing owner REDs.
+After #127 becomes dependency-safe:
 
-If parent #127 replaces CLI name-based acquisition with a creation-bound backend API, adapt this RED to the new private capability without preserving obsolete call shape. The invariant is continuity of one creation-bound, provenance-admitted immutable authority through effective verification and lifecycle cleanup.
+1. ordinary/non-force adopt the exact verified parent while preserving every #142 delta, fixture, contract, test, and traceability item;
+2. adapt the witness from historical name-based acquisition to the current create → event receipt → exact-ID P0 path;
+3. retain the hostile same-name replacement after admission and require that it cannot influence effective attachment, post-start P0 state, or partial cleanup;
+4. preserve public correlation/private authority separation even if the exact backend call shape changes;
+5. execute the adapted child exact independently;
+6. only when that exact is GREEN and all valid #142 evidence is demonstrably inherited may the PR be considered succeeded, merged, or closed under the PR-zero rule.
 
-## Sequencing
-
-#142 is dependent on #127 and must remain Draft while parent exact `e9ad58c... / 35598340133` is unexecuted. Parent classification/repair order is:
-
-1. execute and classify the create→first-inspect creation-bound identity RED;
-2. execute and classify the existing identity-provenance RED requiring expected name, canonical ID, `internal=true`, and DNS disabled before container creation;
-3. apply the minimum parent mechanism that satisfies both obligations, or one atomic mechanism demonstrably covering both;
-4. ordinary/non-force adapt #142 if the backend mechanism changed, preserving this post-admission continuity invariant;
-5. execute #142 on that dependency-safe parent before any post-admission GREEN is claimed.
-
-A GREEN or causal classification of only the create→first-inspect witness is insufficient if provenance admission remains RED. No predecessor result is promoted to the child exact.
-
-#141 remains later no-admitted-ID orphan recovery and does not authorize name-based launch-time cleanup. Public correlation/private authority separation in successful leases remains unchanged.
+No source copy, force push, destructive rebase, obsolete-call-shape preservation, predecessor-GREEN transfer, or public-name fallback is authorized.
 
 ## Decision record
 
-**Problem.** The adapter currently obtains a canonical-format network ID, while parent provenance admission remains unresolved; even after that prerequisite is repaired, the effective-verification function boundary drops the network ID and re-resolves a public correlation for P0 state.
+**Problem.** Historical parent code could select an immutable network ID for container creation and later discard that authority by re-resolving a public correlation for security evidence.
 
-**Constraint.** Preserve the public lease correlation, current DDD ownership, fail-closed P0 isolation, exact-container identity, non-force cleanup, and parent #127 causal ordering without promoting a syntactically valid ID to stronger ownership evidence than the parent has actually proved.
+**Constraint.** Preserve the consumer-visible correlation, exact-container identity, fail-closed isolation, DDD ownership, exact-ID partial cleanup, and foreign-safe lifecycle semantics while allowing the implementation mechanism to evolve.
 
-**Rejected alternative.** Rechecking the generated name is not sufficient: a same-name replacement can present valid `internal=true` / DNS-disabled evidence. Randomer names reduce collision probability but do not establish object continuity. Requiring matching state without matching immutable identity proves configuration, not ownership. Treating canonical ID syntax alone as provenance admission also collapses two independent parent REDs.
+**Rejected alternatives.** Rechecking the generated name, increasing name entropy, or requiring only `internal=true` / DNS-disabled state do not establish object continuity. Canonical ID syntax alone is also insufficient unless the ID is creation-bound and provenance-admitted.
 
-**Selected direction.** First establish creation-bound and provenance-admitted immutable network authority on #127; then preserve that same private authority through effective isolation verification and later lifecycle operations.
+**Selected direction.** Establish one creation-bound network authority at #127, then retain that same private authority through effective verification and all later lifecycle operations. Adapt #142 to current parent mechanics rather than preserving obsolete CLI sequencing.
 
-**Effect.** A network object that merely wins the public name after admission cannot supply evidence for the exact container's isolation boundary, and #142 cannot false-GREEN on a parent that never established the ownership/provenance premise it depends on.
+**Effect.** A same-name replacement cannot become an evidence source or cleanup target after immutable admission, while the child remains a reproducible hostile witness instead of a stale implementation snapshot.
 
 ## References
 
