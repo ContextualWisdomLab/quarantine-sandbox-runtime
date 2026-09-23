@@ -1,9 +1,9 @@
 //! RED: partial application-service launch cleanup must retain acquired network authority.
 //!
-//! Once the runtime has acquired the Podman network `.ID`, later failure cleanup must not
-//! fall back to the generated `qsr-net-*` correlation name. A name can be rebound between
-//! inspection and cleanup; destructive cleanup must target the acquired ID without network-level
-//! `--force`, preserving an unrelated network that later owns the correlation name.
+//! Once the runtime has admitted the Podman network ID from this invocation's creation receipt,
+//! later failure cleanup must not fall back to the generated `qsr-net-*` correlation name. A name
+//! can be rebound after admission; destructive cleanup must target the admitted ID without
+//! network-level `--force`, preserving an unrelated network that later owns the correlation name.
 
 #![cfg(target_os = "linux")]
 
@@ -93,9 +93,13 @@ case "${{1:-}}:${{2:-}}" in
     printf '%s\n' "$network_name" > "$network_name_file"
     printf '%s\n' "$network_name"
     ;;
+  events:--stream=false)
+    network_name=$(cat "$network_name_file")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$network_name"
+    ;;
   network:inspect)
     network_name=$(cat "$network_name_file")
-    [ "${{5:-}}" = "$network_name" ] || exit 95
+    [ "${{5:-}}" = "$network_id" ] || exit 95
     printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$network_id"
     ;;
   create:--name)
@@ -174,39 +178,54 @@ fn failed_container_create_cleans_network_by_acquired_id_without_force() {
         .iter()
         .position(|line| line.starts_with("network create --internal --disable-dns qsr-net-"))
         .expect("runtime-owned network must be created");
-    let created_network_name = lines[network_create_index]
+    let created_name = lines[network_create_index]
         .split_whitespace()
         .last()
         .expect("network create must include the generated correlation name");
+    let receipt_index = lines
+        .iter()
+        .position(|line| line.starts_with("events --stream=false "))
+        .expect("partial-cleanup witness must admit creation-bound network authority");
+    let exact_id_inspect = format!("network inspect --format json {OWNED_NETWORK_ID}");
     let identity_inspect_index = lines
         .iter()
-        .position(|line| *line == format!("network inspect --format json {created_network_name}"))
-        .expect("created network must be inspected by exact generated name");
+        .position(|line| *line == exact_id_inspect)
+        .expect("P0 state must be inspected by exact admitted network ID");
+    let public_name_inspect = format!("network inspect --format json {created_name}");
     let container_create_index = lines
         .iter()
         .position(|line| line.starts_with("create --name "))
         .expect("container create must be attempted");
 
     assert!(
-        network_create_index < identity_inspect_index
+        network_create_index < receipt_index
+            && receipt_index < identity_inspect_index
             && identity_inspect_index < container_create_index,
-        "acquired network identity must precede the failing container create; calls were:\n{calls}"
+        "admitted network authority must precede the failing container create; calls were:\n{calls}"
+    );
+    assert!(
+        !lines.iter().any(|line| **line == public_name_inspect),
+        "partial cleanup must not depend on mutable public-name identity; calls were:\n{calls}"
     );
     assert!(
         lines[container_create_index].contains(&format!(" --network {OWNED_NETWORK_ID} ")),
-        "the failing container create must already be bound to acquired network identity; call was: {}",
+        "the failing container create must already be bound to admitted network identity; call was: {}",
         lines[container_create_index]
     );
     assert!(
-        calls
-            .lines()
-            .any(|line| line == format!("network rm {OWNED_NETWORK_ID}")),
-        "partial-launch cleanup must target the exact acquired network ID without force; calls were:\n{calls}"
+        lines
+            .iter()
+            .any(|line| **line == format!("network rm {OWNED_NETWORK_ID}")),
+        "partial-launch cleanup must target the exact admitted network ID without force; calls were:\n{calls}"
     );
     assert!(
-        !calls
-            .lines()
+        !lines
+            .iter()
             .any(|line| line.starts_with("network rm --force ")),
-        "partial-launch cleanup must never fall back to force-removing a generated network name; calls were:\n{calls}"
+        "partial-launch cleanup must never force-remove a generated network name; calls were:\n{calls}"
+    );
+    assert!(
+        !lines.iter().any(|line| **line == format!("network rm {created_name}")),
+        "public correlation must never become destructive cleanup authority; calls were:\n{calls}"
     );
 }
