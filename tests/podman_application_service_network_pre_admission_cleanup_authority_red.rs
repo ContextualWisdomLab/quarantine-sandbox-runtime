@@ -21,8 +21,7 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_006_000;
-const CANDIDATE_NETWORK_ID: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const CANDIDATE_NETWORK_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
