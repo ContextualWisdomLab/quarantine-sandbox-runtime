@@ -4,7 +4,8 @@
 //! Podman resource identifier. Two independent runtime instances can legitimately
 //! receive the same immutable request in the same second. Their sandbox/network
 //! identities must remain distinct so cleanup from one invocation cannot target
-//! resources owned by the other invocation.
+//! resources owned by the other invocation. Network authority is admitted from each
+//! invocation's creation receipt rather than reconstructed from the public name.
 
 #![cfg(target_os = "linux")]
 
@@ -76,12 +77,53 @@ fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16},"NetworkSettings":{"Networks":{"qsr":{"NetworkID":"%s"}}}}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) target=\"${{5:-}}\"; identity=\"${{target#qsr-net-}}\"; owned=\"${{identity}}${{identity}}\"; printf '[{{\"id\":\"%s\",\"internal\":true,\"dns_enabled\":false}}]\\n' \"$owned\" ;;\n  network:rm) : ;;\n  create:--name) identity=\"${{3#qsr-app-}}\"; printf '%s%s\\n' \"$identity\" \"$identity\" ;;\n  container:inspect) target=\"${{5:-}}\"; case \"$target\" in qsr-app-*) identity=\"${{target#qsr-app-}}\"; owned=\"${{identity}}${{identity}}\" ;; *) owned=\"$target\" ;; esac; printf '{}\\n' \"$owned\" \"$owned\" ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        info,
-        container,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> '{log}'
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    awk '$1 == "network" && $2 == "create" {{ print $5 }}' '{log}' | while IFS= read -r network_name; do
+      identity=${{network_name#qsr-net-}}
+      owned="${{identity}}${{identity}}"
+      printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$owned" "$network_name"
+    done
+    ;;
+  network:inspect)
+    selector=${{5:-}}
+    network_name=$(awk -v selector="$selector" '$1 == "network" && $2 == "create" {{ identity=$5; sub(/^qsr-net-/, "", identity); owned=identity identity; if (owned == selector) {{ print $5; exit }} }}' '{log}')
+    [ -n "$network_name" ] || exit 95
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$selector"
+    ;;
+  network:rm) : ;;
+  create:--name)
+    identity="${{3#qsr-app-}}"
+    printf '%s%s\n' "$identity" "$identity"
+    ;;
+  container:inspect)
+    target=${{5:-}}
+    network_id=$(awk -v selector="$target" '$1 == "create" && $2 == "--name" {{ identity=$3; sub(/^qsr-app-/, "", identity); owned=identity identity; if (owned == selector) {{ for (i=1; i<=NF; i++) if ($i == "--network") {{ print $(i+1); exit }} }} }}' '{log}')
+    [ -n "$network_id" ] || exit 96
+    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"%s"}},"NetworkSettings":{{"Networks":{{"qsr":{{"NetworkID":"%s"}}}}}}}}]\n' "$target" "$network_id" "$network_id"
+    ;;
+  start:*) : ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n' ;;
+  port:*) printf '127.0.0.1:{ready_port}\n' ;;
+  stop:*) : ;;
+  rm:*) : ;;
+  *) exit 91 ;;
+esac
+"#,
+        log = log.display(),
+        info = info,
+        ready_port = ready_port,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
