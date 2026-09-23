@@ -1,10 +1,10 @@
-//! RED: network authority must be bound to the object created by this invocation.
+//! Succession regression for the executed create-to-public-name-inspect TOCTOU RED.
 //!
-//! `podman network create` reports a correlation name, while the current owner acquires the
-//! backend ID through a later name-based inspection. A same-name replacement between those
-//! operations can therefore present a different canonical ID with otherwise-valid P0 state.
-//! This witness requires that such later name resolution never become private attachment or
-//! destructive authority merely because its fields are internally consistent.
+//! The historical RED proved that a later lookup of the generated `qsr-net-*` name could
+//! promote a same-name replacement into private attachment and cleanup authority. The owner
+//! now acquires the immutable ID from bounded creation history and performs P0 inspection by
+//! that exact ID. This fixture preserves the original replacement threat while exercising the
+//! repaired call shape so the old witness cannot mask later owner-path evidence checks.
 
 #![cfg(target_os = "linux")]
 
@@ -22,6 +22,8 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_004_500;
+const CREATED_NETWORK_ID: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const REPLACEMENT_NETWORK_ID: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -72,14 +74,15 @@ fn request() -> ApplicationServiceRequest {
     }
 }
 
-fn write_fake_podman(log: &Path, container_create_marker: &Path) -> PathBuf {
+fn write_fake_podman(log: &Path, network_selector_marker: &Path) -> PathBuf {
     let program = temporary_path("fake-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
         r#"#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> '{log}'
-container_create_marker='{container_create_marker}'
+network_selector_marker='{network_selector_marker}'
+created_network_id='{created_network_id}'
 replacement_network_id='{replacement_network_id}'
 if [ "${{1:-}}" = info ]; then
   if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
@@ -87,16 +90,29 @@ if [ "${{1:-}}" = info ]; then
 fi
 case "${{1:-}}:${{2:-}}" in
   network:create)
-    # Podman's CLI creation result is the generated name. The originally created object is
-    # treated as gone before the first inspect; a replacement now owns the same name.
     printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$created_network_id" "$created_name"
     ;;
   network:inspect)
     selector=${{5:-}}
-    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$selector" "$replacement_network_id"
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    if [ "$selector" = "$created_network_id" ]; then
+      printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$created_network_id"
+    else
+      printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$selector" "$replacement_network_id"
+    fi
     ;;
   create:--name)
-    printf 'foreign-network-promoted\n' > "$container_create_marker"
+    previous=''
+    selected=''
+    for argument in "$@"; do
+      if [ "$previous" = '--network' ]; then selected=$argument; break; fi
+      previous=$argument
+    done
+    printf '%s\n' "$selected" > "$network_selector_marker"
     exit 97
     ;;
   network:rm)
@@ -108,7 +124,8 @@ case "${{1:-}}:${{2:-}}" in
 esac
 "#,
         log = log.display(),
-        container_create_marker = container_create_marker.display(),
+        network_selector_marker = network_selector_marker.display(),
+        created_network_id = CREATED_NETWORK_ID,
         replacement_network_id = REPLACEMENT_NETWORK_ID,
         info = info,
     );
@@ -123,19 +140,19 @@ esac
 }
 
 #[test]
-fn first_name_inspect_cannot_promote_a_same_name_replacement_network() {
+fn creation_bound_id_prevents_same_name_replacement_promotion() {
     let log = temporary_path("calls");
-    let container_create_marker = temporary_path("container-create-marker");
-    let program = write_fake_podman(&log, &container_create_marker);
+    let network_selector_marker = temporary_path("network-selector");
+    let program = write_fake_podman(&log, &network_selector_marker);
     let adapter = RootlessPodmanAdapter::new(program.clone());
 
     let result = adapter.launch_at(&request(), &policy(), STARTED_AT_EPOCH_SECONDS);
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
-    let container_create_reached = container_create_marker.exists();
+    let selected_network = fs::read_to_string(&network_selector_marker).ok();
 
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
-    let _ = fs::remove_file(container_create_marker);
+    let _ = fs::remove_file(network_selector_marker);
 
     let lines: Vec<&str> = calls.lines().collect();
     let network_create_index = lines
@@ -146,32 +163,47 @@ fn first_name_inspect_cannot_promote_a_same_name_replacement_network() {
         .split_whitespace()
         .last()
         .expect("network creation must include a generated correlation name");
-    let expected_inspect = format!("network inspect --format json {created_name}");
-    let inspect_indices: Vec<usize> = lines
+    let event_index = lines
         .iter()
-        .enumerate()
-        .filter_map(|(index, line)| (*line == expected_inspect).then_some(index))
-        .collect();
+        .position(|line| line.starts_with("events --stream=false "))
+        .expect("creation-bound authority must be acquired from bounded event history");
+    let exact_id_inspect = format!("network inspect --format json {CREATED_NETWORK_ID}");
+    let exact_id_inspect_index = lines
+        .iter()
+        .position(|line| *line == exact_id_inspect)
+        .expect("P0 network state must be inspected through the creation-bound ID");
+    let public_name_lookup = format!("network inspect --format json {created_name}");
 
+    assert!(
+        network_create_index < event_index && event_index < exact_id_inspect_index,
+        "authority must flow create -> creation receipt -> exact-ID P0 inspection; calls were:\n{calls}"
+    );
+    assert!(
+        !lines.iter().any(|line| *line == public_name_lookup),
+        "the mutable public correlation must not be re-resolved into private authority; calls were:\n{calls}"
+    );
+    assert!(result.is_err(), "the controlled container-create failure must surface");
     assert_eq!(
-        inspect_indices.len(),
-        1,
-        "the causal witness must perform exactly one first name-based identity lookup; calls were:\n{calls}"
+        selected_network.as_deref().map(str::trim),
+        Some(CREATED_NETWORK_ID),
+        "container creation must bind the creation-bound network ID"
     );
     assert!(
-        network_create_index < inspect_indices[0],
-        "identity lookup must happen after network creation; calls were:\n{calls}"
+        lines
+            .iter()
+            .any(|line| *line == format!("network rm {CREATED_NETWORK_ID}")),
+        "partial cleanup must retain creation-bound exact-ID authority; calls were:\n{calls}"
     );
     assert!(
-        result.is_err(),
-        "a same-name replacement must never yield a successful application-service lease"
+        !lines
+            .iter()
+            .any(|line| *line == format!("network rm {REPLACEMENT_NETWORK_ID}")),
+        "a same-name replacement must never become destructive authority; calls were:\n{calls}"
     );
     assert!(
-        !container_create_reached,
-        "a canonical ID learned only from the first post-create name lookup is not creation-bound authority"
-    );
-    assert!(
-        !calls.lines().any(|line| line.starts_with("create --name ")),
-        "container creation must not consume a replacement network ID learned only through later name resolution; calls were:\n{calls}"
+        !lines
+            .iter()
+            .any(|line| *line == format!("network rm {created_name}")),
+        "public correlation must never become destructive authority; calls were:\n{calls}"
     );
 }
