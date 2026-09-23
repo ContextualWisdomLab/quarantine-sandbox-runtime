@@ -45,8 +45,7 @@ fn completed_dynamic_bundle_without_runtime_behavior(profile: AnalysisProfile) -
             summary: "Artifact identity established.".to_owned(),
             attributes: BTreeMap::from([(
                 "artifact_sha256".to_owned(),
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-                    .to_owned(),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned(),
             )]),
         }],
         limitations: vec!["runtime_does_not_determine_maliciousness".to_owned()],
