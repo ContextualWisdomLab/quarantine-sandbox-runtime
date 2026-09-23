@@ -106,7 +106,8 @@ case "${{1:-}}:${{2:-}}" in
   network:inspect)
     selector=${{5:-}}
     if [ "$selector" = "$created_network_id" ]; then
-      printf '[{{"name":"created-object","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_network_id"
+      created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+      printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$created_network_id"
     else
       printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$selector" "$replacement_network_id"
     fi
