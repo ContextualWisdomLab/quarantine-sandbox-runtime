@@ -34,9 +34,11 @@ This is downstream of pre-admission authority #144: #144 prevents a merely nomin
 5. container creation must bind `--network OWNED_NETWORK_ID`;
 6. effective attachment and post-start network inspection stay bound to the same exact ID;
 7. the published lease continues exposing generated correlation metadata;
-8. explicit termination must execute exactly `network rm OWNED_NETWORK_ID` and must execute no `network rm --force ...` or public-correlation removal.
+8. explicit termination must execute exactly one network-removal command, `network rm OWNED_NETWORK_ID`, with no force flag and no second public, label-derived, name-derived, or other selector.
 
-Current production is expected to fail the final lifecycle assertions because successful-lease cleanup authority is derived from the public network correlation and explicit termination adds `--force`.
+Review `5296792842` found that the first RED shape could false-GREEN if a repair emitted the required exact-ID removal plus a second unauthorized non-force `network rm <other-selector>`. Test-only commit `9421973f6ed168044e6b784a2c3041942b8cb504` therefore compares the complete set of `network rm` invocations against the singleton expected exact-ID command. Production Rust/API/schema/network behavior remains unchanged.
+
+Current production is expected to fail the final lifecycle assertion because successful-lease cleanup authority is derived from the public network correlation and explicit termination adds `--force`.
 
 ## Minimum GREEN direction
 
