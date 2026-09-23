@@ -17,8 +17,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
-const OWNED_NETWORK_ID: &str =
-    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn digest_image() -> String {
     format!("localhost/cwl/tool@sha256:{}", "b".repeat(64))
