@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use super::bounded_command::{BoundedCommandError, BoundedCommandRunner, BoundedCompletion};
@@ -66,13 +66,9 @@ struct ContainerInspection {
     apparmor_profile: String,
     #[serde(default, rename = "ProcessLabel")]
     process_label: String,
-    #[serde(
-        default,
-        rename = "EffectiveCaps",
-        deserialize_with = "null_as_default"
-    )]
+    #[serde(rename = "EffectiveCaps")]
     effective_caps: Vec<String>,
-    #[serde(default, rename = "BoundingCaps", deserialize_with = "null_as_default")]
+    #[serde(rename = "BoundingCaps")]
     bounding_caps: Vec<String>,
     #[serde(rename = "Config")]
     config: ContainerConfig,
@@ -94,22 +90,6 @@ struct ContainerMount {
     options: Vec<String>,
     #[serde(rename = "RW")]
     read_write: bool,
-}
-
-/// Treat an explicit JSON `null` the same as a missing key: fall back to `T::default()`.
-///
-/// `#[serde(default)]` alone only covers a *missing* key. Podman has been
-/// observed (6.1.0, unlike the CI-pinned 5.8.4) to emit an explicit JSON
-/// `null` for `EffectiveCaps`/`BoundingCaps` once every capability is
-/// dropped, which `#[serde(default)]` alone does not tolerate for a
-/// non-`Option` field. Both representations mean the same fact -- no
-/// capabilities -- so both must deserialize to the same empty value.
-fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
-{
-    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -158,7 +138,6 @@ struct ContainerHostConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct NetworkInspection {
     internal: bool,
-    #[serde(default)]
     dns_enabled: bool,
 }
 
@@ -1867,6 +1846,21 @@ fn parse_wait_exit_code(
         ))
 }
 
+/// Return the bounded delay after one failed readiness probe.
+///
+/// This keeps the post-probe deadline decision deterministic in tests without
+/// weakening the production monotonic-clock boundary or introducing real sleeps.
+fn readiness_post_probe_delay(
+    deadline: Instant,
+    after_probe: Instant,
+    poll: Duration,
+) -> Result<Duration, ApplicationServiceError> {
+    if after_probe >= deadline {
+        return Err(ApplicationServiceError::ReadinessTimeout);
+    }
+    Ok(poll.min(deadline.saturating_duration_since(after_probe)))
+}
+
 fn wait_for_readiness(
     host_port: u16,
     policy: &IsolationPolicy,
@@ -1884,10 +1878,7 @@ fn wait_for_readiness(
             return Ok(());
         }
         let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
-        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+        thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);
     }
 }
 
@@ -1895,12 +1886,12 @@ fn wait_for_readiness(
 mod tests {
     use std::{
         io::ErrorKind,
-        time::{Duration, UNIX_EPOCH},
+        time::{Duration, Instant, UNIX_EPOCH},
     };
 
     use super::{
         BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
-        map_bounded_command_error, validate_command_chronology,
+        map_bounded_command_error, readiness_post_probe_delay, validate_command_chronology,
     };
     use crate::{ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError};
 
@@ -1970,6 +1961,25 @@ mod tests {
                 "command_finish_clock",
             ),
             Ok(2)
+        );
+    }
+
+    #[test]
+    fn readiness_post_probe_deadline_fails_closed_without_sleep() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),
+            Err(ApplicationServiceError::ReadinessTimeout)
+        );
+    }
+
+    #[test]
+    fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {
+        let after_probe = Instant::now();
+        let deadline = after_probe + Duration::from_millis(25);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),
+            Ok(Duration::from_millis(25))
         );
     }
 

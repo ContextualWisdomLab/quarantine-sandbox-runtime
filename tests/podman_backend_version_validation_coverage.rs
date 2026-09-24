@@ -124,7 +124,7 @@ fn container_inspect_json(id: &str) -> String {
 fn container_inspect_lsm_json(id: &str, apparmor_profile: &str, process_label: &str) -> String {
     format!(
         "[{{\"Id\":\"{id}\",\"AppArmorProfile\":\"{apparmor_profile}\",\"ProcessLabel\":\"{process_label}\",\
-         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
+         \"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\

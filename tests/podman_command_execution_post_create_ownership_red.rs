@@ -82,7 +82,7 @@ fn request() -> CommandExecutionRequest {
 fn container_inspect_json_for(container_id: &str) -> String {
     format!(
         "[{{\"Id\":\"{container_id}\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\
-         \"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
+         \"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{{\"User\":\"65532:65532\",\"Timeout\":20}},\
          \"HostConfig\":{{\"ReadonlyRootfs\":true,\"Privileged\":false,\
          \"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"\",\
          \"Annotations\":{{\"io.podman.annotations.userns\":\"auto\"}},\

@@ -14,7 +14,7 @@ use quarantine_sandbox_runtime::{
 };
 
 const BACKEND_INFO: &str = "{\"host\":{\"security\":{\"rootless\":true,\"seccompEnabled\":true,\"seccompProfilePath\":\"/usr/share/containers/seccomp.json\",\"apparmorEnabled\":true,\"selinuxEnabled\":false}},\"version\":{\"Version\":\"6.1.0\"}}";
-const CONTAINER_INSPECTION: &str = "[{\"Id\":\"fake-command-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":null,\"BoundingCaps\":null,\"Config\":{\"User\":\"65532:65532\",\"Timeout\":20},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"Annotations\":{},\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}},\"Mounts\":[]}]";
+const CONTAINER_INSPECTION: &str = "[{\"Id\":\"fake-command-container-id\",\"AppArmorProfile\":\"containers-default\",\"ProcessLabel\":\"\",\"EffectiveCaps\":[],\"BoundingCaps\":[],\"Config\":{\"User\":\"65532:65532\",\"Timeout\":20},\"HostConfig\":{\"ReadonlyRootfs\":true,\"Privileged\":false,\"SecurityOpt\":[\"no-new-privileges\"],\"UsernsMode\":\"auto\",\"Annotations\":{},\"PidMode\":\"private\",\"IpcMode\":\"none\",\"NetworkMode\":\"none\",\"UTSMode\":\"private\",\"CgroupMode\":\"private\",\"Memory\":268435456,\"NanoCpus\":1000000000,\"PidsLimit\":16,\"Tmpfs\":{\"/tmp\":\"rw,noexec,nosuid,nodev,size=16777216\"}},\"Mounts\":[]}]";
 
 fn policy() -> IsolationPolicy {
     IsolationPolicy {
@@ -158,7 +158,7 @@ fn container_inspection_must_match_the_acquired_runtime_identity() {
 #[test]
 fn configured_effective_capabilities_fail_closed() {
     let nonempty_effective = CONTAINER_INSPECTION.replace(
-        "\"EffectiveCaps\":null",
+        "\"EffectiveCaps\":[]",
         "\"EffectiveCaps\":[\"CAP_NET_ADMIN\"]",
     );
     let process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
@@ -172,7 +172,7 @@ fn configured_effective_capabilities_fail_closed() {
 #[test]
 fn configured_bounding_capabilities_fail_closed() {
     let nonempty_bounding = CONTAINER_INSPECTION.replace(
-        "\"BoundingCaps\":null",
+        "\"BoundingCaps\":[]",
         "\"BoundingCaps\":[\"CAP_NET_ADMIN\"]",
     );
     let process_top = "PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)";
