@@ -21,7 +21,8 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_006_000;
-const CANDIDATE_NETWORK_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const CANDIDATE_NETWORK_ID: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -88,9 +89,12 @@ fn write_fake_podman(
     let program = temporary_path("fake-podman");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let (inspect_exit, reported_name_assignment, internal, dns_enabled) = match contradiction {
-        CandidateContradiction::InspectFailure => {
-            ("exit 95", "reported_name=\"$network_name\"", "true", "false")
-        }
+        CandidateContradiction::InspectFailure => (
+            "exit 95",
+            "reported_name=\"$network_name\"",
+            "true",
+            "false",
+        ),
         CandidateContradiction::WrongName => {
             (":", "reported_name='qsr-net-foreign'", "true", "false")
         }

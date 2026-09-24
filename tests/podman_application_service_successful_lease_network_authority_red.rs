@@ -21,10 +21,8 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_007_200;
-const OWNED_NETWORK_ID: &str =
-    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
-const CONTAINER_ID: &str =
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -173,9 +171,9 @@ fn successful_lease_keeps_exact_network_id_private_for_non_force_termination() {
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
     assert!(
-        calls.lines().any(|line| {
-            line == format!("network inspect --format json {OWNED_NETWORK_ID}")
-        }),
+        calls
+            .lines()
+            .any(|line| { line == format!("network inspect --format json {OWNED_NETWORK_ID}") }),
         "launch must admit and later verify the exact backend network ID; calls were:\n{calls}"
     );
     assert!(

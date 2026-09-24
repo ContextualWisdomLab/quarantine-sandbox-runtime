@@ -607,7 +607,6 @@ impl RootlessPodmanAdapter {
         let network_output = match self.checked_output("network_identity_inspect", &network_args) {
             Ok(output) => output,
             Err(error) => {
-                self.cleanup_admitted_network(&network_id)?;
                 return Err(error);
             }
         };
@@ -615,14 +614,12 @@ impl RootlessPodmanAdapter {
             match parse_single_inspection("network_identity_inspect", &network_output.stdout) {
                 Ok(network) => network,
                 Err(error) => {
-                    self.cleanup_admitted_network(&network_id)?;
                     return Err(error);
                 }
             };
         let inspected_id = match parse_backend_identifier(network.id.as_bytes()) {
             Some(identifier) => identifier,
             None => {
-                self.cleanup_admitted_network(&network_id)?;
                 return Err(ApplicationServiceError::MalformedIsolationInspection {
                     operation: "network_identity_inspect",
                 });
@@ -633,7 +630,6 @@ impl RootlessPodmanAdapter {
             || !network.internal
             || network.dns_enabled
         {
-            self.cleanup_admitted_network(&network_id)?;
             return Err(ApplicationServiceError::MalformedIsolationInspection {
                 operation: "network_identity_inspect",
             });
