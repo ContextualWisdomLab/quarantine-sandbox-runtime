@@ -38,7 +38,7 @@ The byte ceiling therefore applies to the CWL-normalized, JCS-canonical JSON rep
 
 The keyword applies to a JSON string instance. Vocabulary version 1.0.0 defines one assertion value: `utc_z_only_with_gregorian_day_validation_no_leap_second_notation`. A validator that recognizes this required vocabulary but does not implement that profile value MUST refuse the schema rather than silently treating the keyword as annotation-only data.
 
-For the defined profile, an implementation MUST require a four-digit year, Gregorian month `01` through `12`, a valid Gregorian calendar day for that year and month, the uppercase `T` date/time separator, time-of-day hour `00` through `23`, minute `00` through `59`, and second `00` through `59`. Fractional seconds may be present. The timestamp MUST end with the uppercase UTC designator `Z`; lower-case `t`, lower-case `z`, and numeric UTC offsets are not accepted by this profile.
+For the defined profile, an implementation MUST require a four-digit year, Gregorian month `01` through `12`, a valid Gregorian calendar day for that year and month, time-of-day hour `00` through `23`, minute `00` through `59`, and second `00` through `59`. Fractional seconds may be present. The timestamp MUST end with the uppercase UTC designator `Z`; numeric UTC offsets and lower-case `z` are not accepted by this profile.
 
 MUST reject a calendar date whose day exceeds the Gregorian month length. February therefore has 28 days in an ordinary year and 29 days in a Gregorian leap year; April, June, September, and November have 30 days.
 
@@ -58,11 +58,9 @@ The companion machine-readable vectors are published at `tests/fixtures/cwl_arti
 - an inclusive serialized boundary after missing-null materialization;
 - an overflow caused by that same materialization;
 - an escaping/non-ASCII JCS boundary that pins the exact canonical JSON representation instead of trusting fixture metadata;
-- Gregorian leap-day controls including the 1900/2000 century split;
-- 30-day-month rejection;
-- leap-second and numeric-offset rejection;
-- lower-case `z` and lower-case `t` rejection;
-- a valid fractional-seconds control.
+- a valid Gregorian leap-day control for `x-cwl-rfc3339Profile`;
+- invalid non-leap February 29 and impossible month/day controls;
+- invalid leap-second notation and numeric-offset substitution controls for the uppercase-`Z` profile.
 
 Implementations claiming this vocabulary version must produce the same validity result for those vectors. The vectors are conformance evidence for the exact versioned vocabulary identity; later keywords or semantic changes require a new released contract version rather than mutation of this publication.
 
