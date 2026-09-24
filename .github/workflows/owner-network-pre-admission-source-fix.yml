@@ -76,6 +76,7 @@ jobs:
           cargo test --locked --test podman_application_service_network_binding_owner_red
           cargo test --locked --test podman_application_service_network_partial_cleanup_owner_red
           cargo test --locked --test podman_application_service_network_termination_owner_red
+          cargo test --locked --test podman_application_service_successful_lease_network_authority_red
           cargo test --locked --test podman_application_service_forged_lease_ownership_red
           cargo test --locked --test podman_application_service
           cargo check --locked --workspace --all-targets
