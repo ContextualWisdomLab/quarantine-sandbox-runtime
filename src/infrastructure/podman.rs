@@ -1846,6 +1846,21 @@ fn parse_wait_exit_code(
         ))
 }
 
+/// Return the bounded delay after one failed readiness probe.
+///
+/// This keeps the post-probe deadline decision deterministic in tests without
+/// weakening the production monotonic-clock boundary or introducing real sleeps.
+fn readiness_post_probe_delay(
+    deadline: Instant,
+    after_probe: Instant,
+    poll: Duration,
+) -> Result<Duration, ApplicationServiceError> {
+    if after_probe >= deadline {
+        return Err(ApplicationServiceError::ReadinessTimeout);
+    }
+    Ok(poll.min(deadline.saturating_duration_since(after_probe)))
+}
+
 fn wait_for_readiness(
     host_port: u16,
     policy: &IsolationPolicy,
@@ -1863,10 +1878,7 @@ fn wait_for_readiness(
             return Ok(());
         }
         let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
-        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+        thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);
     }
 }
 
@@ -1874,12 +1886,12 @@ fn wait_for_readiness(
 mod tests {
     use std::{
         io::ErrorKind,
-        time::{Duration, UNIX_EPOCH},
+        time::{Duration, Instant, UNIX_EPOCH},
     };
 
     use super::{
         BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
-        map_bounded_command_error, validate_command_chronology,
+        map_bounded_command_error, readiness_post_probe_delay, validate_command_chronology,
     };
     use crate::{ApplicationServiceError, BackendInvocationFailureKind, CommandExecutionError};
 
@@ -1949,6 +1961,25 @@ mod tests {
                 "command_finish_clock",
             ),
             Ok(2)
+        );
+    }
+
+    #[test]
+    fn readiness_post_probe_deadline_fails_closed_without_sleep() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),
+            Err(ApplicationServiceError::ReadinessTimeout)
+        );
+    }
+
+    #[test]
+    fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {
+        let after_probe = Instant::now();
+        let deadline = after_probe + Duration::from_millis(25);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),
+            Ok(Duration::from_millis(25))
         );
     }
 
