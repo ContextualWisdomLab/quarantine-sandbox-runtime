@@ -42,33 +42,35 @@ jobs:
           function_marker = 'fn wait_for_readiness(\n'
           if text.count(function_marker) != 1:
               raise SystemExit('expected exactly one readiness loop at current owner shape')
-          helper = '''/// Return the bounded delay after one failed readiness probe.
-///
-/// This keeps the post-probe deadline decision deterministic in tests without
-/// weakening the production monotonic-clock boundary or introducing real sleeps.
-fn readiness_post_probe_delay(
-    deadline: Instant,
-    after_probe: Instant,
-    poll: Duration,
-) -> Result<Duration, ApplicationServiceError> {
-    if after_probe >= deadline {
-        return Err(ApplicationServiceError::ReadinessTimeout);
-    }
-    Ok(poll.min(deadline.saturating_duration_since(after_probe)))
-}
-
-'''
+          helper = (
+              '/// Return the bounded delay after one failed readiness probe.\n'
+              '///\n'
+              '/// This keeps the post-probe deadline decision deterministic in tests without\n'
+              '/// weakening the production monotonic-clock boundary or introducing real sleeps.\n'
+              'fn readiness_post_probe_delay(\n'
+              '    deadline: Instant,\n'
+              '    after_probe: Instant,\n'
+              '    poll: Duration,\n'
+              ') -> Result<Duration, ApplicationServiceError> {\n'
+              '    if after_probe >= deadline {\n'
+              '        return Err(ApplicationServiceError::ReadinessTimeout);\n'
+              '    }\n'
+              '    Ok(poll.min(deadline.saturating_duration_since(after_probe)))\n'
+              '}\n\n'
+          )
           text = text.replace(function_marker, helper + function_marker, 1)
 
-          old_post_probe = '''        let after_probe = Instant::now();
-        if after_probe >= deadline {
-            return Err(ApplicationServiceError::ReadinessTimeout);
-        }
-        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
-'''
-          new_post_probe = '''        let after_probe = Instant::now();
-        thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);
-'''
+          old_post_probe = (
+              '        let after_probe = Instant::now();\n'
+              '        if after_probe >= deadline {\n'
+              '            return Err(ApplicationServiceError::ReadinessTimeout);\n'
+              '        }\n'
+              '        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));\n'
+          )
+          new_post_probe = (
+              '        let after_probe = Instant::now();\n'
+              '        thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);\n'
+          )
           if text.count(old_post_probe) != 1:
               raise SystemExit('expected exactly one post-probe deadline block')
           text = text.replace(old_post_probe, new_post_probe, 1)
@@ -87,32 +89,32 @@ fn readiness_post_probe_delay(
               1,
           )
 
-          marker = '''    #[test]
-    fn bounded_command_errors_keep_public_failure_classes() {
-'''
-          tests = '''    #[test]
-    fn readiness_post_probe_deadline_fails_closed_without_sleep() {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        assert_eq!(
-            readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),
-            Err(ApplicationServiceError::ReadinessTimeout)
-        );
-    }
-
-    #[test]
-    fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {
-        let after_probe = Instant::now();
-        let deadline = after_probe + Duration::from_millis(25);
-        assert_eq!(
-            readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),
-            Ok(Duration::from_millis(25))
-        );
-    }
-
-''' + marker
+          marker = (
+              '    #[test]\n'
+              '    fn bounded_command_errors_keep_public_failure_classes() {\n'
+          )
+          tests = (
+              '    #[test]\n'
+              '    fn readiness_post_probe_deadline_fails_closed_without_sleep() {\n'
+              '        let deadline = Instant::now() + Duration::from_secs(1);\n'
+              '        assert_eq!(\n'
+              '            readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),\n'
+              '            Err(ApplicationServiceError::ReadinessTimeout)\n'
+              '        );\n'
+              '    }\n\n'
+              '    #[test]\n'
+              '    fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {\n'
+              '        let after_probe = Instant::now();\n'
+              '        let deadline = after_probe + Duration::from_millis(25);\n'
+              '        assert_eq!(\n'
+              '            readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),\n'
+              '            Ok(Duration::from_millis(25))\n'
+              '        );\n'
+              '    }\n\n'
+          )
           if text.count(marker) != 1:
               raise SystemExit('expected one bounded-command unit-test marker')
-          path.write_text(text.replace(marker, tests, 1))
+          path.write_text(text.replace(marker, tests + marker, 1))
           PY
 
           cargo fmt --all
