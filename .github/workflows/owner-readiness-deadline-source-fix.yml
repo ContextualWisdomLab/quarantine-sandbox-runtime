@@ -38,108 +38,78 @@ jobs:
 
           path = Path('src/infrastructure/podman.rs')
           text = path.read_text()
-          old = '''fn wait_for_readiness(
-              host_port: u16,
-              policy: &IsolationPolicy,
-          ) -> Result<(), ApplicationServiceError> {
-              let deadline = Instant::now() + Duration::from_millis(policy.readiness_timeout_millis);
-              let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, host_port);
-              let poll = Duration::from_millis(policy.readiness_poll_interval_millis);
-              loop {
-                  let now = Instant::now();
-                  if now >= deadline {
-                      return Err(ApplicationServiceError::ReadinessTimeout);
-                  }
-                  let remaining = deadline.saturating_duration_since(now);
-                  if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
-                      return Ok(());
-                  }
-                  let after_probe = Instant::now();
-                  if after_probe >= deadline {
-                      return Err(ApplicationServiceError::ReadinessTimeout);
-                  }
-                  thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
-              }
-          }
-          '''
-          new = '''/// Return the bounded delay after one failed readiness probe.
-          ///
-          /// This keeps the post-probe deadline decision deterministic in tests without
-          /// weakening the production monotonic-clock boundary or introducing real sleeps.
-          fn readiness_post_probe_delay(
-              deadline: Instant,
-              after_probe: Instant,
-              poll: Duration,
-          ) -> Result<Duration, ApplicationServiceError> {
-              if after_probe >= deadline {
-                  return Err(ApplicationServiceError::ReadinessTimeout);
-              }
-              Ok(poll.min(deadline.saturating_duration_since(after_probe)))
-          }
 
-          fn wait_for_readiness(
-              host_port: u16,
-              policy: &IsolationPolicy,
-          ) -> Result<(), ApplicationServiceError> {
-              let deadline = Instant::now() + Duration::from_millis(policy.readiness_timeout_millis);
-              let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, host_port);
-              let poll = Duration::from_millis(policy.readiness_poll_interval_millis);
-              loop {
-                  let now = Instant::now();
-                  if now >= deadline {
-                      return Err(ApplicationServiceError::ReadinessTimeout);
-                  }
-                  let remaining = deadline.saturating_duration_since(now);
-                  if TcpStream::connect_timeout(&address.into(), poll.min(remaining)).is_ok() {
-                      return Ok(());
-                  }
-                  let after_probe = Instant::now();
-                  thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);
-              }
-          }
-          '''
-          if text.count(old) != 1:
+          function_marker = 'fn wait_for_readiness(\n'
+          if text.count(function_marker) != 1:
               raise SystemExit('expected exactly one readiness loop at current owner shape')
-          text = text.replace(old, new, 1)
+          helper = '''/// Return the bounded delay after one failed readiness probe.
+///
+/// This keeps the post-probe deadline decision deterministic in tests without
+/// weakening the production monotonic-clock boundary or introducing real sleeps.
+fn readiness_post_probe_delay(
+    deadline: Instant,
+    after_probe: Instant,
+    poll: Duration,
+) -> Result<Duration, ApplicationServiceError> {
+    if after_probe >= deadline {
+        return Err(ApplicationServiceError::ReadinessTimeout);
+    }
+    Ok(poll.min(deadline.saturating_duration_since(after_probe)))
+}
+
+'''
+          text = text.replace(function_marker, helper + function_marker, 1)
+
+          old_post_probe = '''        let after_probe = Instant::now();
+        if after_probe >= deadline {
+            return Err(ApplicationServiceError::ReadinessTimeout);
+        }
+        thread::sleep(poll.min(deadline.saturating_duration_since(after_probe)));
+'''
+          new_post_probe = '''        let after_probe = Instant::now();
+        thread::sleep(readiness_post_probe_delay(deadline, after_probe, poll)?);
+'''
+          if text.count(old_post_probe) != 1:
+              raise SystemExit('expected exactly one post-probe deadline block')
+          text = text.replace(old_post_probe, new_post_probe, 1)
 
           old_import = '        time::{Duration, UNIX_EPOCH},'
           if text.count(old_import) != 1:
               raise SystemExit('expected one unit-test time import')
           text = text.replace(old_import, '        time::{Duration, Instant, UNIX_EPOCH},', 1)
 
-          old_super = '''        BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
-                  map_bounded_command_error, validate_command_chronology,
-          '''
-          new_super = '''        BoundedCommandError, classify_spawn_failure, epoch_seconds_from_system_time,
-                  map_bounded_command_error, readiness_post_probe_delay, validate_command_chronology,
-          '''
+          old_super = 'map_bounded_command_error, validate_command_chronology,'
           if text.count(old_super) != 1:
-              raise SystemExit('expected one unit-test super import block')
-          text = text.replace(old_super, new_super, 1)
+              raise SystemExit('expected one unit-test super import tail')
+          text = text.replace(
+              old_super,
+              'map_bounded_command_error, readiness_post_probe_delay, validate_command_chronology,',
+              1,
+          )
 
           marker = '''    #[test]
-              fn bounded_command_errors_keep_public_failure_classes() {
-          '''
+    fn bounded_command_errors_keep_public_failure_classes() {
+'''
           tests = '''    #[test]
-              fn readiness_post_probe_deadline_fails_closed_without_sleep() {
-                  let deadline = Instant::now() + Duration::from_secs(1);
-                  assert_eq!(
-                      readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),
-                      Err(ApplicationServiceError::ReadinessTimeout)
-                  );
-              }
+    fn readiness_post_probe_deadline_fails_closed_without_sleep() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, deadline, Duration::from_millis(100)),
+            Err(ApplicationServiceError::ReadinessTimeout)
+        );
+    }
 
-              #[test]
-              fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {
-                  let after_probe = Instant::now();
-                  let deadline = after_probe + Duration::from_millis(25);
-                  assert_eq!(
-                      readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),
-                      Ok(Duration::from_millis(25))
-                  );
-              }
+    #[test]
+    fn readiness_post_probe_delay_is_bounded_by_remaining_deadline() {
+        let after_probe = Instant::now();
+        let deadline = after_probe + Duration::from_millis(25);
+        assert_eq!(
+            readiness_post_probe_delay(deadline, after_probe, Duration::from_millis(100)),
+            Ok(Duration::from_millis(25))
+        );
+    }
 
-          ''' + marker
+''' + marker
           if text.count(marker) != 1:
               raise SystemExit('expected one bounded-command unit-test marker')
           path.write_text(text.replace(marker, tests, 1))
