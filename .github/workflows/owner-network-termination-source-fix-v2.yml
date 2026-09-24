@@ -1,0 +1,113 @@
+name: Bounded network termination owner repair v2
+
+on:
+  push:
+    branches: [integration/application-service-network-owner-repair]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: qsr-owner-network-termination-source-fix-v2
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact trigger head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Execute causal network owner repair
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt
+          rustup default 1.97.1
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/infrastructure/podman.rs')
+          text = path.read_text()
+          old = '            "--force".to_owned(),\n            authority.network_id().to_owned(),'
+          new = '            authority.network_id().to_owned(),'
+          if text.count(old) != 1:
+              raise SystemExit('expected one explicit-termination network --force selector')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          cargo fmt --all
+          set +e
+          cargo test --locked --test podman_application_service_network_termination_owner_red -- --nocapture > /tmp/force-only-red.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/force-only-red.log
+          test "$status" -ne 0
+          grep -F 'network cleanup must target exact acquired network authority without force' /tmp/force-only-red.log
+          if grep -F 'an in-use owned network must fail closed instead of deleting a foreign member' /tmp/force-only-red.log; then
+            echo 'force-removal repair did not advance the RED to the private-selector boundary' >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+          service = Path('src/application_service/mod.rs')
+          text = service.read_text()
+          if text.count('new_with_cleanup_sandbox_id') != 1:
+              raise SystemExit('expected one cleanup-authority constructor declaration')
+          text = text.replace('new_with_cleanup_sandbox_id', 'new_with_cleanup_resource_ids', 1)
+          parameter = '        cleanup_sandbox_id: String,\n        endpoint: ServiceEndpoint,'
+          replacement = '        cleanup_sandbox_id: String,\n        cleanup_network_id: String,\n        endpoint: ServiceEndpoint,'
+          if text.count(parameter) != 1:
+              raise SystemExit('expected one cleanup sandbox parameter boundary')
+          text = text.replace(parameter, replacement, 1)
+          field = '            network_id: metadata.network_id.clone(),'
+          if text.count(field) != 1:
+              raise SystemExit('expected one cleanup network metadata copy')
+          text = text.replace(field, '            network_id: cleanup_network_id,', 1)
+          text = text.replace(
+              '/// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.',
+              '/// Construct runtime-issued lease evidence with explicit runtime-owned cleanup selectors.',
+              1,
+          )
+          service.write_text(text)
+
+          podman = Path('src/infrastructure/podman.rs')
+          text = podman.read_text()
+          call = 'ApplicationServiceLease::new_with_cleanup_sandbox_id('
+          if text.count(call) != 1:
+              raise SystemExit('expected one lease constructor call')
+          text = text.replace(call, 'ApplicationServiceLease::new_with_cleanup_resource_ids(', 1)
+          tail = '            },\n            container_id,\n            ServiceEndpoint::loopback(host_port, request.protocol),'
+          new_tail = '            },\n            container_id,\n            network_id,\n            ServiceEndpoint::loopback(host_port, request.protocol),'
+          if text.count(tail) != 1:
+              raise SystemExit('expected one lease constructor tail')
+          podman.write_text(text.replace(tail, new_tail, 1))
+          PY
+
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo test --locked --test podman_application_service_network_termination_owner_red
+          cargo test --locked --test podman_application_service_forged_lease_ownership_red
+          cargo test --locked --test podman_application_service
+          cargo check --locked --workspace --all-targets
+          git diff --check
+
+          rm .github/workflows/owner-network-termination-source-fix-v2.yml
+          git config user.name 'ContextualWisdomLab automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(network): preserve exact termination authority'
+
+          git fetch origin integration/application-service-network-owner-repair
+          test "$(git rev-parse origin/integration/application-service-network-owner-repair)" = "$GITHUB_SHA"
+          auth=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:integration/application-service-network-owner-repair
