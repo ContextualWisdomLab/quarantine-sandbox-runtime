@@ -1,0 +1,185 @@
+name: Bounded network termination source fix
+
+on:
+  push:
+    branches:
+      - integration/application-service-network-owner-repair
+    paths:
+      - .github/workflows/owner-network-termination-source-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: qsr-owner-network-termination-source-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.head_commit.message == 'chore: stage bounded network termination source-fix'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact trigger head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+
+      - name: Advance the executed foreign-member RED to exact-selector RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/infrastructure/podman.rs')
+          text = path.read_text()
+          old = '''        let network_args = [
+              "network".to_owned(),
+              "rm".to_owned(),
+              "--force".to_owned(),
+              authority.network_id().to_owned(),
+          ];
+          let stop_ok = self.command_succeeded(&stop_args);
+          let remove_ok = self.command_succeeded(&remove_args);
+          let network_ok = self.command_succeeded(&network_args);
+          '''
+          new = '''        let stop_ok = self.command_succeeded(&stop_args);
+          let remove_ok = self.command_succeeded(&remove_args);
+          let network_ok = self.cleanup_admitted_network(authority.network_id()).is_ok();
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one explicit-termination force-removal block')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          set +e
+          cargo test --locked --test podman_application_service_network_termination_owner_red -- --nocapture > /tmp/force-only-red.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/force-only-red.log
+          test "$status" -ne 0
+          grep -F 'network cleanup must target exact acquired network authority without force' /tmp/force-only-red.log
+          if grep -F 'an in-use owned network must fail closed instead of deleting a foreign member' /tmp/force-only-red.log; then
+            echo 'force-removal RED did not advance' >&2
+            exit 1
+          fi
+
+      - name: Preserve admitted network ID as private cleanup authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('src/application_service/mod.rs')
+          text = service.read_text()
+          old = '''    pub(crate) fn new_with_cleanup_sandbox_id(
+              request: &ApplicationServiceRequest,
+              metadata: RuntimeLeaseMetadata,
+              cleanup_sandbox_id: String,
+              endpoint: ServiceEndpoint,
+          ) -> Self {
+              let cleanup_authority = ApplicationServiceCleanupAuthority {
+                  sandbox_id: cleanup_sandbox_id,
+                  network_id: metadata.network_id.clone(),
+                  shutdown_grace_seconds: metadata.shutdown_grace_seconds,
+              };
+          '''
+          new = '''    pub(crate) fn new_with_cleanup_resource_ids(
+              request: &ApplicationServiceRequest,
+              metadata: RuntimeLeaseMetadata,
+              cleanup_sandbox_id: String,
+              cleanup_network_id: String,
+              endpoint: ServiceEndpoint,
+          ) -> Self {
+              let cleanup_authority = ApplicationServiceCleanupAuthority {
+                  sandbox_id: cleanup_sandbox_id,
+                  network_id: cleanup_network_id,
+                  shutdown_grace_seconds: metadata.shutdown_grace_seconds,
+              };
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('expected exactly one cleanup-authority constructor block')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              '/// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.',
+              '/// Construct runtime-issued lease evidence with explicit runtime-owned cleanup selectors.',
+              1,
+          )
+          service.write_text(text)
+
+          podman = Path('src/infrastructure/podman.rs')
+          text = podman.read_text()
+          old_call = '''        Ok(ApplicationServiceLease::new_with_cleanup_sandbox_id(
+          '''
+          if text.count(old_call) != 1:
+              raise SystemExit('expected exactly one application-service lease constructor call')
+          text = text.replace(
+              old_call,
+              '        Ok(ApplicationServiceLease::new_with_cleanup_resource_ids(\n',
+              1,
+          )
+          old_tail = '''            },
+              container_id,
+              ServiceEndpoint::loopback(host_port, request.protocol),
+          ))
+          '''
+          new_tail = '''            },
+              container_id,
+              network_id,
+              ServiceEndpoint::loopback(host_port, request.protocol),
+          ))
+          '''
+          if text.count(old_tail) != 1:
+              raise SystemExit('expected exactly one lease constructor tail')
+          podman.write_text(text.replace(old_tail, new_tail, 1))
+          PY
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo test --locked --test podman_application_service_network_termination_owner_red
+          cargo test --locked --test podman_application_service_forged_lease_ownership_red
+          cargo test --locked --test podman_application_service
+          cargo check --locked --workspace --all-targets
+
+      - name: Record code-current traceability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/doctoring/APPLICATION_SERVICE_LIFECYCLE_OWNERSHIP_TRACEABILITY.md')
+          text = path.read_text()
+          marker = '## Remaining gates\n'
+          addition = '''## Network termination authority progression\n\nOn 2026-09-24, hosted coverage for descendant exact `2eea75b4f40faf3c95e7d3e8484525e51a845f25` executed `podman_application_service_network_termination_owner_red::explicit_termination_preserves_foreign_network_member`. Current production returned a successful cleanup receipt while the fake backend modeled an in-use owned network with a foreign member. That RED is causal for removing network-level `--force`: Podman documents that `podman network rm --force` removes every container using the named network, while ordinary removal returns exit status 2 when the network remains in use.\n\nThe minimum repair therefore keeps public `qsr-net-*` lease correlation unchanged, retains the admitted canonical backend network ID only in crate-private non-serializable cleanup authority, and uses non-force network removal during explicit termination. The same focused witness is deliberately run once after removing `--force` but before the private-ID split; it must advance from the foreign-member assertion to the exact-selector assertion. Only then is the constructor widened from one private container cleanup selector to explicit private container and network cleanup selectors. This preserves RED → causal fix → next RED → causal fix provenance instead of pre-applying an unexecuted identity change.\n\nThis repair does not introduce retry `--ignore` semantics. Partial-cleanup retry convergence remains a separate RED because `--ignore` may only satisfy already-absent owned resources and must never weaken in-use or ownership failures.\n\n### Additional reference\n\nPodman Authors. (2026). *podman-network-rm — Remove one or more networks*. https://docs.podman.io/en/latest/markdown/podman-network-rm.1.html\n\n'''
+          if addition in text:
+              raise SystemExit('traceability addition already present unexpectedly')
+          if marker not in text:
+              raise SystemExit('remaining-gates marker not found')
+          path.write_text(text.replace(marker, addition + marker, 1))
+          PY
+
+      - name: Remove completed source-fix workflow and commit the bounded repair
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/owner-network-termination-source-fix.yml
+          git diff --check
+          git status --short
+          git config user.name 'ContextualWisdomLab automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/application_service/mod.rs src/infrastructure/podman.rs tests docs/doctoring/APPLICATION_SERVICE_LIFECYCLE_OWNERSHIP_TRACEABILITY.md .github/workflows/owner-network-termination-source-fix.yml
+          git commit -m 'fix(network): preserve exact termination authority'
+          auth=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:integration/application-service-network-owner-repair
