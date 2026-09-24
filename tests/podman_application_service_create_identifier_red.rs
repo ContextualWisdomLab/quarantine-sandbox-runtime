@@ -1,9 +1,9 @@
 //! Regression: `podman create` output used as lifecycle authority must be a full long ID.
 //!
 //! Podman names and short IDs are valid human-facing selectors, but they are mutable or
-//! ambiguous compared with the full container ID returned by a successful create. The
-//! application-service adapter must reject name-like, short, non-hex, uppercase-hex, and padded
-//! create output before any post-create lifecycle operation can treat it as destructive authority.
+//! ambiguous compared with the full container ID returned by a successful create. Network
+//! prerequisites use the creation-bound exact-ID contract so invalid container-create output is
+//! rejected at its own receipt boundary before any post-create lifecycle action.
 
 #![cfg(target_os = "linux")]
 
@@ -21,6 +21,7 @@ use quarantine_sandbox_runtime::{
 };
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -73,11 +74,41 @@ fn write_fake_podman(create_identifier: &str, lifecycle_marker: &Path) -> (PathB
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nmarker='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name) printf '%s\\n' '{}' ;;\n  start:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 93 ;;\n  container:inspect|top:*|port:*) printf 'post-create lifecycle reached\\n' > \"$marker\"; exit 94 ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        lifecycle_marker.display(),
-        info,
-        create_identifier,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> '{log}'
+marker='{marker}'
+network_id='{network_id}'
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$network_id" "$created_name"
+    ;;
+  network:inspect)
+    [ "${{5:-}}" = "$network_id" ] || exit 95
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$network_id"
+    ;;
+  network:rm) : ;;
+  create:--name) printf '%s\n' '{create_identifier}' ;;
+  start:*) printf 'post-create lifecycle reached\n' > "$marker"; exit 93 ;;
+  container:inspect|top:*|port:*) printf 'post-create lifecycle reached\n' > "$marker"; exit 94 ;;
+  rm:*) : ;;
+  *) exit 91 ;;
+esac
+"#,
+        log = log.display(),
+        marker = lifecycle_marker.display(),
+        network_id = OWNED_NETWORK_ID,
+        info = info,
+        create_identifier = create_identifier,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -112,6 +143,18 @@ fn assert_create_identifier_rejected(case_name: &str, create_identifier: &str) {
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("events --stream=false ")),
+        "the container receipt witness must first cross creation-bound network admission; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network inspect --format json {OWNED_NETWORK_ID}")),
+        "the container receipt witness must first prove network P0 state by exact ID; calls were:\n{calls}"
+    );
     assert!(
         !calls.lines().any(|line| line.starts_with("start ")
             || line.starts_with("container inspect ")

@@ -2,7 +2,8 @@
 //!
 //! A backend-produced container identifier may authorize destructive cleanup only after exact
 //! admission. These cases exercise reconciliation, cleanup precedence, and receipt I/O failures
-//! without ever falling back to the generated `qsr-app-*` correlation name.
+//! without ever falling back to the generated `qsr-app-*` correlation name. Network prerequisites
+//! use the independent creation-bound exact-ID contract.
 
 #![cfg(target_os = "linux")]
 
@@ -23,6 +24,7 @@ static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 
 const STDOUT_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const RECEIPT_ID: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -88,10 +90,74 @@ fn write_fake_podman(
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let allowed_remove_id = expected_remove_id.unwrap_or("");
     let script = format!(
-        "#!/bin/sh\nset -eu\nSCENARIO='{scenario}'\nLOG='{}'\nUNEXPECTED='{}'\nSTDOUT_ID='{STDOUT_ID}'\nRECEIPT_ID='{RECEIPT_ID}'\nALLOWED_REMOVE_ID='{allowed_remove_id}'\nINFO='{}'\nprintf '%s\\n' \"$*\" >> \"$LOG\"\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' \"$INFO\"; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    [ -n \"$cidfile\" ] || exit 95\n    case \"$SCENARIO\" in\n      create_fail_with_receipt) printf '%s\\n' \"$RECEIPT_ID\" > \"$cidfile\"; exit 22 ;;\n      matching_receipt_then_start_fail) printf '%s\\n' \"$STDOUT_ID\" > \"$cidfile\"; printf '%s\\n' \"$STDOUT_ID\" ;;\n      mismatched_receipt) printf '%s\\n' \"$RECEIPT_ID\" > \"$cidfile\"; printf '%s\\n' \"$STDOUT_ID\" ;;\n      malformed_stdout_receipt_read_error) mkdir \"$cidfile\"; printf 'bad identifier with spaces\\n' ;;\n      valid_stdout_receipt_read_error) mkdir \"$cidfile\"; printf '%s\\n' \"$STDOUT_ID\" ;;\n      invalid_receipt_length) printf 'abc\\n' > \"$cidfile\"; printf 'bad identifier with spaces\\n' ;;\n      invalid_receipt_character) printf '%064d\\n' 0 | tr '0' 'G' > \"$cidfile\"; printf 'bad identifier with spaces\\n' ;;\n      invalid_receipt_utf8) printf '\\377' > \"$cidfile\"; printf 'bad identifier with spaces\\n' ;;\n      *) exit 96 ;;\n    esac\n    ;;\n  start:*)\n    if [ \"$SCENARIO\" = matching_receipt_then_start_fail ] && [ \"${{2:-}}\" = \"$STDOUT_ID\" ]; then exit 24; fi\n    printf 'unexpected start target: %s\\n' \"${{2:-}}\" > \"$UNEXPECTED\"\n    exit 97\n    ;;\n  rm:--force)\n    if [ -n \"$ALLOWED_REMOVE_ID\" ] && [ \"${{3:-}}\" = \"$ALLOWED_REMOVE_ID\" ]; then exit 0; fi\n    printf 'unexpected rm target: %s\\n' \"${{3:-}}\" > \"$UNEXPECTED\"\n    exit 98\n    ;;\n  container:inspect|top:*|port:*) printf 'unexpected post-create lifecycle\\n' > \"$UNEXPECTED\"; exit 99 ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        unexpected_destructive.display(),
-        info,
+        r#"#!/bin/sh
+set -eu
+SCENARIO='{scenario}'
+LOG='{log}'
+UNEXPECTED='{unexpected}'
+STDOUT_ID='{stdout_id}'
+RECEIPT_ID='{receipt_id}'
+ALLOWED_REMOVE_ID='{allowed_remove_id}'
+NETWORK_ID='{network_id}'
+printf '%s\n' "$*" >> "$LOG"
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' "$LOG")
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$NETWORK_ID" "$created_name"
+    ;;
+  network:inspect)
+    [ "${{5:-}}" = "$NETWORK_ID" ] || exit 94
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' "$LOG")
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$NETWORK_ID"
+    ;;
+  network:rm) : ;;
+  create:--name)
+    cidfile=''
+    for argument in "$@"; do
+      case "$argument" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac
+    done
+    [ -n "$cidfile" ] || exit 95
+    case "$SCENARIO" in
+      create_fail_with_receipt) printf '%s\n' "$RECEIPT_ID" > "$cidfile"; exit 22 ;;
+      matching_receipt_then_start_fail) printf '%s\n' "$STDOUT_ID" > "$cidfile"; printf '%s\n' "$STDOUT_ID" ;;
+      mismatched_receipt) printf '%s\n' "$RECEIPT_ID" > "$cidfile"; printf '%s\n' "$STDOUT_ID" ;;
+      malformed_stdout_receipt_read_error) mkdir "$cidfile"; printf 'bad identifier with spaces\n' ;;
+      valid_stdout_receipt_read_error) mkdir "$cidfile"; printf '%s\n' "$STDOUT_ID" ;;
+      invalid_receipt_length) printf 'abc\n' > "$cidfile"; printf 'bad identifier with spaces\n' ;;
+      invalid_receipt_character) printf '%064d\n' 0 | tr '0' 'G' > "$cidfile"; printf 'bad identifier with spaces\n' ;;
+      invalid_receipt_utf8) printf '\377' > "$cidfile"; printf 'bad identifier with spaces\n' ;;
+      *) exit 96 ;;
+    esac
+    ;;
+  start:*)
+    if [ "$SCENARIO" = matching_receipt_then_start_fail ] && [ "${{2:-}}" = "$STDOUT_ID" ]; then exit 24; fi
+    printf 'unexpected start target: %s\n' "${{2:-}}" > "$UNEXPECTED"
+    exit 97
+    ;;
+  rm:--force)
+    if [ -n "$ALLOWED_REMOVE_ID" ] && [ "${{3:-}}" = "$ALLOWED_REMOVE_ID" ]; then exit 0; fi
+    printf 'unexpected rm target: %s\n' "${{3:-}}" > "$UNEXPECTED"
+    exit 98
+    ;;
+  container:inspect|top:*|port:*) printf 'unexpected post-create lifecycle\n' > "$UNEXPECTED"; exit 99 ;;
+  *) exit 91 ;;
+esac
+"#,
+        scenario = scenario,
+        log = log.display(),
+        unexpected = unexpected_destructive.display(),
+        stdout_id = STDOUT_ID,
+        receipt_id = RECEIPT_ID,
+        allowed_remove_id = allowed_remove_id,
+        network_id = OWNED_NETWORK_ID,
+        info = info,
     );
     symlink(immutable_fixture_executable(), &program)
         .expect("fake Podman immutable symlink should be creatable");
@@ -111,6 +177,21 @@ fn write_fake_podman(
 
 fn calls(log: &Path) -> String {
     fs::read_to_string(log).expect("fake Podman calls must be recorded")
+}
+
+fn assert_network_prerequisite_current(calls: &str) {
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("events --stream=false ")),
+        "container-receipt edge must cross creation-bound network admission; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network inspect --format json {OWNED_NETWORK_ID}")),
+        "container-receipt edge must prove P0 network state by exact ID; calls were:\n{calls}"
+    );
 }
 
 fn assert_no_generated_name_cleanup(calls: &str) {
@@ -148,6 +229,7 @@ fn failed_create_with_valid_receipt_cleans_only_the_receipt_id() {
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(
         calls
             .lines()
@@ -176,6 +258,7 @@ fn matching_stdout_and_receipt_select_the_exact_id_before_start_cleanup() {
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(
         calls
             .lines()
@@ -204,6 +287,7 @@ fn mismatched_stdout_and_receipt_fail_closed_and_cleanup_the_receipt_id() {
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(
         calls
             .lines()
@@ -233,6 +317,7 @@ fn malformed_stdout_with_unreadable_receipt_reports_receipt_io_failure_without_c
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());
@@ -257,6 +342,7 @@ fn valid_stdout_with_unreadable_receipt_cleans_the_admitted_stdout_id() {
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(
         calls
             .lines()
@@ -279,6 +365,7 @@ fn assert_invalid_receipt_fails_without_container_cleanup(scenario: &str, starte
         })
     );
     let calls = calls(&log);
+    assert_network_prerequisite_current(&calls);
     assert!(!calls.lines().any(|line| line.starts_with("rm --force ")));
     assert_no_generated_name_cleanup(&calls);
     assert!(!unexpected.exists());

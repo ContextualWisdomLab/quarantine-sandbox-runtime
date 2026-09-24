@@ -259,16 +259,17 @@ pub struct ApplicationServiceLease {
 }
 
 impl ApplicationServiceLease {
-    /// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.
-    pub(crate) fn new_with_cleanup_sandbox_id(
+    /// Construct runtime-issued lease evidence with explicit runtime-owned cleanup selectors.
+    pub(crate) fn new_with_cleanup_resource_ids(
         request: &ApplicationServiceRequest,
         metadata: RuntimeLeaseMetadata,
         cleanup_sandbox_id: String,
+        cleanup_network_id: String,
         endpoint: ServiceEndpoint,
     ) -> Self {
         let cleanup_authority = ApplicationServiceCleanupAuthority {
             sandbox_id: cleanup_sandbox_id,
-            network_id: metadata.network_id.clone(),
+            network_id: cleanup_network_id,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
         };
         Self {
@@ -430,6 +431,19 @@ impl CleanupReceipt {
     }
 }
 
+/// Stable consumer-visible class for an OS process-spawn failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendInvocationFailureKind {
+    /// The configured backend executable does not exist at invocation time.
+    NotFound,
+    /// The operating system denied permission to execute the backend.
+    PermissionDenied,
+    /// Local process or memory pressure prevented process creation.
+    ResourceExhausted,
+    /// Another current or future OS spawn error occurred.
+    Other,
+}
+
 /// Fail-closed application-service validation or runtime error.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ApplicationServiceError {
@@ -478,8 +492,16 @@ pub enum ApplicationServiceError {
     /// The runtime could not obtain operating-system entropy for an invocation identity.
     #[error("application service runtime identity entropy is unavailable")]
     RuntimeIdentityUnavailable,
-    /// The configured Podman executable could not be invoked.
-    #[error("Podman invocation failed during {operation}")]
+    /// The backend process could not be spawned; the stable OS failure class is preserved.
+    #[error("backend process spawn failed during {operation}: {failure_kind:?}")]
+    BackendSpawnFailed {
+        /// Stable operation code.
+        operation: &'static str,
+        /// Bounded failure class; raw errno values and host paths are not exposed.
+        failure_kind: BackendInvocationFailureKind,
+    },
+    /// The configured backend could not complete an invocation after process creation.
+    #[error("backend invocation failed during {operation}")]
     BackendInvocationFailed {
         /// Stable operation code.
         operation: &'static str,

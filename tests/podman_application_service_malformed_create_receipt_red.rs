@@ -3,7 +3,8 @@
 //! A successful `podman create` may already have materialized a container even when stdout cannot
 //! be admitted as lifecycle authority. The application-service adapter must therefore provision a
 //! runtime-owned create receipt and use only the exact acquired container ID for destructive
-//! cleanup; the generated `qsr-app-*` correlation name is never a cleanup fallback.
+//! cleanup; the generated `qsr-app-*` correlation name is never a cleanup fallback. Network
+//! prerequisites use the separate creation-bound exact-ID contract.
 
 #![cfg(target_os = "linux")]
 
@@ -22,6 +23,7 @@ use quarantine_sandbox_runtime::{
 
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
 const OWNED_CONTAINER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OWNED_NETWORK_ID: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn temporary_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -75,11 +77,52 @@ fn write_fake_podman() -> (PathBuf, PathBuf, PathBuf) {
     let foreign_cleanup_marker = temporary_path("foreign-cleanup");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nforeign_marker='{}'\nowned_id='{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:rm) : ;;\n  create:--name)\n    cidfile=''\n    for argument in \"$@\"; do\n      case \"$argument\" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac\n    done\n    if [ -n \"$cidfile\" ]; then printf '%s\\n' \"$owned_id\" > \"$cidfile\"; fi\n    printf 'bad identifier with spaces\\n'\n    ;;\n  rm:--force)\n    if [ \"${{3:-}}\" = \"$owned_id\" ]; then exit 0; fi\n    printf 'generated-name cleanup attempted\\n' > \"$foreign_marker\"\n    exit 93\n    ;;\n  start:*|container:inspect|top:*|port:*) exit 94 ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        foreign_cleanup_marker.display(),
-        OWNED_CONTAINER_ID,
-        info,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> '{log}'
+foreign_marker='{foreign_marker}'
+owned_id='{container_id}'
+owned_network_id='{network_id}'
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$owned_network_id" "$created_name"
+    ;;
+  network:inspect)
+    [ "${{5:-}}" = "$owned_network_id" ] || exit 95
+    created_name=$(awk '$1 == "network" && $2 == "create" {{ name=$NF }} END {{ print name }}' '{log}')
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$created_name" "$owned_network_id"
+    ;;
+  network:rm) : ;;
+  create:--name)
+    cidfile=''
+    for argument in "$@"; do
+      case "$argument" in --cidfile=*) cidfile=${{argument#--cidfile=}} ;; esac
+    done
+    if [ -n "$cidfile" ]; then printf '%s\n' "$owned_id" > "$cidfile"; fi
+    printf 'bad identifier with spaces\n'
+    ;;
+  rm:--force)
+    if [ "${{3:-}}" = "$owned_id" ]; then exit 0; fi
+    printf 'generated-name cleanup attempted\n' > "$foreign_marker"
+    exit 93
+    ;;
+  start:*|container:inspect|top:*|port:*) exit 94 ;;
+  *) exit 91 ;;
+esac
+"#,
+        log = log.display(),
+        foreign_marker = foreign_cleanup_marker.display(),
+        container_id = OWNED_CONTAINER_ID,
+        network_id = OWNED_NETWORK_ID,
+        info = info,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -105,6 +148,18 @@ fn malformed_successful_service_create_uses_runtime_receipt_for_exact_id_cleanup
     );
 
     let calls = fs::read_to_string(&log).expect("fake Podman calls must be recorded");
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("events --stream=false ")),
+        "the malformed container receipt witness must cross creation-bound network admission; calls were:\n{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("network inspect --format json {OWNED_NETWORK_ID}")),
+        "network P0 evidence must use the exact admitted ID; calls were:\n{calls}"
+    );
     let create_call = calls
         .lines()
         .find(|line| line.starts_with("create --name "))

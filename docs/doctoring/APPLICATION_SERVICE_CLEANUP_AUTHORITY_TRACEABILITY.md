@@ -1,51 +1,76 @@
 # Application-service cleanup authority traceability
 
-## Problem and boundary
+## Problem and bounded-context boundary
 
-At the executed RED state, `ApplicationServiceLease` was a public serializable/deserializable evidence contract and `RootlessPodmanAdapter::terminate_at` used `sandbox_id` and `network_id` from that value directly as Podman destruction targets. That conflated consumer-visible evidence with runtime-owned lifecycle authority.
+`ApplicationServiceLease` is consumer-visible evidence. It may be serialized, persisted, copied, or reconstructed from untrusted input. It is therefore not a capability for Podman destruction.
 
-The runtime owns cleanup of resources it created. It does not gain authority to stop or remove an arbitrary same-principal container or network merely because a caller can present a lease-shaped JSON object naming that resource. Upstream consumers retain application authorization; the infrastructure adapter must still enforce its own resource-ownership boundary.
+At the original #42 RED, `RootlessPodmanAdapter::terminate_at` selected container and network cleanup targets directly from lease-visible identifiers. A caller that supplied lease-shaped JSON could consequently name same-principal resources that the runtime had never admitted. The application-service runtime must instead destroy only identities it acquired and retained while creating the resources.
 
-Issue #42 owns this defect. It is distinct from:
+This boundary is separate from, but composes with:
 
-- #20: collision resistance of generated application-service runtime names;
-- #40: binding post-create lifecycle operations to the exact long ID returned by successful `podman create`;
-- #41: avoiding network-level `--force` because that delegates deletion of foreign network members to Podman.
+- #20: collision resistance of generated runtime correlation names;
+- #40: lifecycle operations bound to the exact long container ID admitted from Podman;
+- #41: retry convergence after partial cleanup without weakening foreign-member safety;
+- #144: a network creation-event candidate is inspection authority only until P0 admission succeeds;
+- #145: successful-lease termination must use the admitted exact network ID and must not use network-level `--force`;
+- #146: public cleanup-receipt identifiers remain consumer-neutral correlations/evidence rather than backend selectors.
 
 ## Authority
 
-- Joint Task Force. (2020, updated 2026). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53 Rev. 5). National Institute of Standards and Technology. AC-3 requires access enforcement and AC-6 requires least privilege for users and processes acting on their behalf. https://doi.org/10.6028/NIST.SP.800-53r5
-- Joint Task Force. (2022, Release 5.2.0 updated 2025). *Assessing security and privacy controls in information systems and organizations* (NIST Special Publication 800-53A Rev. 5). National Institute of Standards and Technology. The AC-6 assessment procedures include testing mechanisms that implement least-privilege restrictions. https://doi.org/10.6028/NIST.SP.800-53Ar5
+- Joint Task Force. (2020, updated 2026). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53 Rev. 5). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-53r5
+- Joint Task Force. (2022, Release 5.2.0 updated 2025). *Assessing security and privacy controls in information systems and organizations* (NIST Special Publication 800-53A Rev. 5). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-53Ar5
 - Souppaya, M., Morello, J., & Scarfone, K. (2017). *Application container security guide* (NIST Special Publication 800-190). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-190
-- Serde Project. (n.d.). *Using derive*. Deriving `Deserialize` implements construction of the Rust data structure from serialized input. https://serde.rs/derive.html
+- Serde Project. (n.d.). *Using derive*. https://serde.rs/derive.html
 
-## Code and test chain
+## Executed evidence chain
 
 | Evidence | Exact responsibility |
 | --- | --- |
-| `src/application_service/mod.rs::ApplicationServiceLease` at RED head `1d0cf2f47a8bd9df6594c734806a6c9c912fe0ed` | Consumer-visible lease/evidence contract whose deserialized identifiers could recreate cleanup selection. |
-| `tests/podman_application_service_forged_lease_ownership_red.rs` | Hostile RED proving that a lease created only from caller JSON must not select Podman stop/remove/network-remove targets. |
-| Native CI `34299565806`, verify `102303404021` | Causal execution showing forged `foreign-container` / `foreign-network` values reached destructive cleanup. |
-| `b0bcbe90ef034115ec266ffed5937aed1ee75150` | Captures crate-private, non-serializable `ApplicationServiceCleanupAuthority` only during runtime construction. |
-| `e15980b820becd13c7e5756a3adca1f6504cd92c` | Makes `terminate_at` require `lease.cleanup_authority()` and fail closed as `CleanupAuthorityUnavailable` before destructive Podman commands when authority is absent. |
-| Exact later ancestry `368e20eeeb0ac3d573a913af981dcb5dd4104b1a` | Regression-verified the forged-lease authority boundary before execution advanced to the independent #20 collision RED. |
-| Issue #42 / Draft #21 | Decision, integration, and completion authority for separating evidence from cleanup capability. |
+| #42 RED / `1d0cf2f47a8bd9df6594c734806a6c9c912fe0ed` | Proved that deserialized lease identifiers could recreate destructive cleanup selection. |
+| Native CI `34299565806`, verify `102303404021` | Executed the forged `foreign-container` / `foreign-network` cleanup path. |
+| `b0bcbe90ef034115ec266ffed5937aed1ee75150` | Introduced crate-private, non-serializable `ApplicationServiceCleanupAuthority`. |
+| `e15980b820becd13c7e5756a3adca1f6504cd92c` | Required private authority in `terminate_at`; evidence-only leases fail closed as `CleanupAuthorityUnavailable`. |
+| #145 / `2eea75b4f40faf3c95e7d3e8484525e51a845f25`, CI `35920385591` | Executed the successful-lease foreign-member RED: network-level `podman network rm --force` could delete a foreign member and still report successful cleanup. |
+| #127 helper v1 `35948531229` | Removed network-level force and advanced the RED to the private-network-selector boundary; the run then stopped on stale broad fixture assertions. |
+| #127 helper v2 `35967668419`, job `107529836056` | Completed the bounded repair on trigger exact `c08086f8fa72644a30fc9f062624a2a233bcb6d3`; focused termination, forged-lease, broad application-service tests and workspace check passed before the helper deleted itself and pushed the source commit. |
+| #127 source `64956199a66164e31d58aaba436eda0d74349afe` | Carries exact container and admitted-network selectors in private cleanup authority, removes network-level force from explicit termination, updates broad fixtures, and contains no temporary source-fix workflow. |
 
-The RED scenario is intentionally small: no launch occurs, no runtime-owned resource authority exists, and fake Podman reports successful destruction if the forged identifiers are used. The RED head failed because deserialized evidence was sufficient to select those resources. Current #21 production no longer behaves that way: runtime construction captures private cleanup authority, while a deserialized lease has none and `terminate_at` returns `CleanupAuthorityUnavailable` before issuing Podman destruction.
+The helper-generated source commit is a code delta, not repository-wide GREEN. Its automatically synchronized PR CI `35986337451` contains zero jobs and ended `action_required`; it therefore provides no test, coverage, lint, rustdoc, runtime, or security evidence for `64956199...`.
 
-## Selected causal repair
+## Current selected contract
 
-`ApplicationServiceLease` remains consumer-visible evidence/correlation, but destructive lifecycle selection is now gated by crate-private runtime-owned provenance that Serde does not reconstruct. This is deliberately stronger than identifier-shape validation: `request_id`, `sandbox_id`, `network_id`, policy metadata, endpoint fields, and attestation booleans remain replayable evidence once serialized and cannot independently authorize backend destruction.
+Successful launch now deliberately maintains two identity layers:
 
-The private cleanup authority currently retains the runtime-selected container/network targets and shutdown grace. #40 remains an independent prerequisite because the application-service Podman adapter still must replace the generated post-create container selector with the exact admitted long ID returned by successful `podman create`; that acquired ID must then flow into private cleanup authority without changing the public generated-name correlation field.
+1. `RuntimeLeaseMetadata.sandbox_id` and `.network_id` remain generated `qsr-app-*` / `qsr-net-*` correlation values suitable for consumer evidence and audit joins.
+2. `ApplicationServiceCleanupAuthority` retains the exact admitted Podman container ID and exact admitted Podman network ID. The type is crate-private and not reconstructed by Serde.
 
-Rejected alternatives remain:
+`ApplicationServiceLease::new_with_cleanup_resource_ids(...)` receives those backend selectors separately from public metadata. `terminate_at()` stops and force-removes only the exact container selector and removes the exact network selector with non-force `podman network rm <id>`. A deserialized lease has no private cleanup authority and cannot nominate either target.
 
-- accepting any schema-valid or well-shaped lease identifiers as ownership proof;
-- reconstructing private authority during deserialization;
-- restoring generated-name destructive fallback when private authority is absent;
-- weakening #40 by treating collision-resistant generated names as equivalent to acquired backend identity.
+Network-level `--force` is intentionally forbidden. Container-level `rm --force <exact-container-id>` remains a different primitive: it acts on the one admitted container rather than delegating deletion of foreign network members.
 
-## Evidence levels
+## Remaining authority gaps
 
-The executed RED plus later regression establishes that public/deserialized lease evidence is no longer accepted as destructive authority on this Draft lineage. It is not protected-integrated or release GREEN. Release acceptance still requires a legitimate launch → readiness → termination path using exact runtime-acquired identity, #40 lifecycle selector repair after its own causal RED, failure-path cleanup precedence, no foreign-resource effects, real rootless Podman execution, positive effective LSM evidence, full owned coverage/rustdoc/security/review, and exact protected integration evidence.
+This repair does not complete the network lifecycle.
+
+First, current `acquire_network_id()` still treats the creation-event candidate as destructive authority before admission. If exact-ID inspection fails, parsing fails, the ID is malformed, or P0 state contradicts the expected name/internal/DNS policy, current code calls `cleanup_admitted_network(candidate)` before the candidate has actually been admitted. #144 already has execution-backed hostile evidence for this authority inversion. The minimum owner repair is candidate → exact inspection → full P0 corroboration → admitted ID; pre-admission orphan reconciliation belongs to #141 rather than immediate deletion.
+
+Second, #41 remains required after exact successful-lease authority exists. A first termination may remove the admitted container and then fail non-force network removal because a foreign member is still attached. A retry must converge after that foreign member disappears even though the container is already absent. Any use of Podman `--ignore` must be limited to the exact admitted selector and already-absent state; it must not turn an in-use network or another backend failure into success.
+
+Third, the Podman-v6 event transport witness remains separate. Upstream event JSON uses lowercase `network`; the dedicated checked-in witness must execute on canonical ancestry before changing the current `NetworkCreationEvent` serde mapping or broad fixture casing.
+
+Finally, #146 owns public `CleanupReceipt` semantics. Receipt identifiers attest the logical correlation whose cleanup completed; they do not expose or recreate private backend selectors.
+
+## Rejected alternatives
+
+- accepting any schema-valid or well-shaped lease identifier as ownership proof;
+- reconstructing private cleanup authority during deserialization;
+- deriving destructive selectors from `qsr-app-*` or `qsr-net-*` correlations;
+- restoring network-level `--force` to make foreign-member cleanup appear successful;
+- deleting a creation-event candidate before the P0 admission contract succeeds;
+- masking partial-cleanup retry failures by treating every Podman error as already absent.
+
+## Evidence level and release gate
+
+The forged-lease boundary and the bounded #145 repair have causal execution evidence, and helper v2 produced source exact `64956199...`. That exact is not integration or release GREEN because its normal PR CI did not execute any jobs, #144 remains unfixed on current source, #41 retry convergence is still open, positive effective-LSM evidence is absent, and immutable publication has not occurred.
+
+Release acceptance still requires one unchanged dependency-safe protected integrated exact with repository policy, rustfmt, full locked workspace/all-target tests, Clippy and public/private rustdoc with warnings denied, complete owned-production statement/function/region/branch/edge coverage, qualifying review/security/thread gates, real rootless enforcement plus positive effective-LSM evidence, version/CHANGELOG, immutable package/tag/Release authority, SBOM/provenance/reproducibility, and rollback evidence.

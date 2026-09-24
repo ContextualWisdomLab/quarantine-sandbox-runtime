@@ -4,7 +4,8 @@
 //! Podman resource identifier. Two independent runtime instances can legitimately
 //! receive the same immutable request in the same second. Their sandbox/network
 //! identities must remain distinct so cleanup from one invocation cannot target
-//! resources owned by the other invocation.
+//! resources owned by the other invocation. Network authority is admitted from each
+//! invocation's creation receipt rather than reconstructed from the public name.
 
 #![cfg(target_os = "linux")]
 
@@ -76,14 +77,53 @@ fn write_fake_podman(ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("calls");
     let info = r#"{"host":{"security":{"rootless":true,"seccompEnabled":true,"seccompProfilePath":"/usr/share/containers/seccomp.json","apparmorEnabled":true,"selinuxEnabled":false}}}"#;
-    let container = r#"[{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{"User":"65532:65532"},"HostConfig":{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16}}]"#;
-    let network = r#"[{"internal":true,"dns_enabled":false}]"#;
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  create:--name) identity=\"${{3#qsr-app-}}\"; printf '%s%s\\n' \"$identity\" \"$identity\" ;;\n  container:inspect) target=\"${{5:-}}\"; case \"$target\" in qsr-app-*) identity=\"${{target#qsr-app-}}\"; owned=\"${{identity}}${{identity}}\" ;; *) owned=\"$target\" ;; esac; printf '{}\\n' \"$owned\" ;;\n  start:*) : ;;\n  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\\n1 filter - - - - - containers-default (enforce)\\n' ;;\n  port:*) printf '127.0.0.1:{ready_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
-        log.display(),
-        info,
-        network,
-        container,
+        r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> '{log}'
+if [ "${{1:-}}" = info ]; then
+  if [ "${{3:-}}" = json ]; then printf '%s\n' '{info}'; else printf 'true\n'; fi
+  exit 0
+fi
+case "${{1:-}}:${{2:-}}" in
+  network:create)
+    printf '%s\n' "${{5:-}}"
+    ;;
+  events:--stream=false)
+    awk '$1 == "network" && $2 == "create" {{ print $5 }}' '{log}' | while IFS= read -r network_name; do
+      identity=${{network_name#qsr-net-}}
+      owned="${{identity}}${{identity}}"
+      printf '{{"ID":"%s","Network":"%s","Status":"create","Type":"network"}}\n' "$owned" "$network_name"
+    done
+    ;;
+  network:inspect)
+    selector=${{5:-}}
+    network_name=$(awk -v selector="$selector" '$1 == "network" && $2 == "create" {{ identity=$5; sub(/^qsr-net-/, "", identity); owned=identity identity; if (owned == selector) {{ print $5; exit }} }}' '{log}')
+    [ -n "$network_name" ] || exit 95
+    printf '[{{"name":"%s","id":"%s","internal":true,"dns_enabled":false,"containers":{{}}}}]\n' "$network_name" "$selector"
+    ;;
+  network:rm) : ;;
+  create:--name)
+    identity="${{3#qsr-app-}}"
+    printf '%s%s\n' "$identity" "$identity"
+    ;;
+  container:inspect)
+    target=${{5:-}}
+    network_id=$(awk -v selector="$target" '$1 == "create" && $2 == "--name" {{ identity=$3; sub(/^qsr-app-/, "", identity); owned=identity identity; if (owned == selector) {{ for (i=1; i<=NF; i++) if ($i == "--network") {{ print $(i+1); exit }} }} }}' '{log}')
+    [ -n "$network_id" ] || exit 96
+    printf '[{{"Id":"%s","AppArmorProfile":"containers-default","ProcessLabel":"","EffectiveCaps":[],"BoundingCaps":[],"Config":{{"User":"65532:65532"}},"HostConfig":{{"ReadonlyRootfs":true,"Privileged":false,"SecurityOpt":["no-new-privileges"],"UsernsMode":"auto","PidMode":"private","IpcMode":"none","Memory":134217728,"NanoCpus":250000000,"PidsLimit":16,"NetworkMode":"%s"}},"NetworkSettings":{{"Networks":{{"qsr":{{"NetworkID":"%s"}}}}}}}}]\n' "$target" "$network_id" "$network_id"
+    ;;
+  start:*) : ;;
+  top:*) printf 'PID SECCOMP CAPEFF CAPBND CAPINH CAPPRM CAPAMB LABEL\n1 filter - - - - - containers-default (enforce)\n' ;;
+  port:*) printf '127.0.0.1:{ready_port}\n' ;;
+  stop:*) : ;;
+  rm:*) : ;;
+  *) exit 91 ;;
+esac
+"#,
+        log = log.display(),
+        info = info,
+        ready_port = ready_port,
     );
     fs::write(&program, script).expect("fake Podman must be writable");
     let mut permissions = fs::metadata(&program)
@@ -99,6 +139,22 @@ fn command_targets<'a>(calls: &'a str, prefix: &str, target_index: usize) -> Vec
         .lines()
         .filter(|line| line.starts_with(prefix))
         .filter_map(|line| line.split_whitespace().nth(target_index))
+        .collect()
+}
+
+fn container_network_selectors(calls: &str) -> Vec<&str> {
+    calls
+        .lines()
+        .filter(|line| line.starts_with("create --name "))
+        .filter_map(|line| {
+            let mut arguments = line.split_whitespace();
+            while let Some(argument) = arguments.next() {
+                if argument == "--network" {
+                    return arguments.next();
+                }
+            }
+            None
+        })
         .collect()
 }
 
@@ -208,8 +264,41 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     assert_eq!(
         network_names.iter().copied().collect::<HashSet<_>>(),
         lease_network_ids,
-        "lease network identities must name the exact created networks"
+        "public lease network identities must retain the generated network correlations"
     );
+
+    let selected_network_ids = container_network_selectors(&calls);
+    assert_eq!(
+        selected_network_ids.len(),
+        2,
+        "both container creates must bind an admitted backend network identity"
+    );
+    assert_eq!(
+        selected_network_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len(),
+        2,
+        "independent launches must bind distinct acquired backend network identities"
+    );
+    for network_id in &selected_network_ids {
+        assert_eq!(
+            network_id.len(),
+            64,
+            "acquired backend network identity must retain canonical full-length form"
+        );
+        assert!(
+            network_id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "acquired backend network identity must remain canonical lower-hex"
+        );
+        assert!(
+            !lease_network_ids.contains(network_id),
+            "private acquired network identity must stay distinct from public qsr-net correlation"
+        );
+    }
 
     let identity_labels = runtime_identity_labels(&calls);
     assert_eq!(
@@ -246,9 +335,6 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     let removed_sandboxes = command_targets(&calls, "rm --force ", 2)
         .into_iter()
         .collect::<HashSet<_>>();
-    let removed_networks = command_targets(&calls, "network rm --force ", 3)
-        .into_iter()
-        .collect::<HashSet<_>>();
     assert_eq!(
         stopped_sandboxes.len(),
         2,
@@ -257,10 +343,6 @@ fn independent_same_request_launches_use_distinct_runtime_owned_resource_identit
     assert_eq!(
         removed_sandboxes, stopped_sandboxes,
         "stop and remove must select the same two invocation-owned containers"
-    );
-    assert_eq!(
-        removed_networks, lease_network_ids,
-        "termination must remove exactly the lease-owned networks"
     );
 
     let _ = fs::remove_file(program);
