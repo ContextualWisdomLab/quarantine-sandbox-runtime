@@ -2,21 +2,13 @@ name: Bounded network termination source fix
 
 on:
   push:
-    branches:
-      - integration/application-service-network-owner-repair
-    paths:
-      - .github/workflows/owner-network-termination-source-fix.yml
+    branches: [integration/application-service-network-owner-repair]
 
 permissions:
   contents: write
 
-concurrency:
-  group: qsr-owner-network-termination-source-fix
-  cancel-in-progress: false
-
 jobs:
   repair:
-    if: github.event.head_commit.message == 'chore: stage bounded network termination source-fix'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -27,19 +19,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
-        with:
-          toolchain: 1.97.1
-          components: rustfmt
-
-      - name: Advance the executed foreign-member RED to exact-selector RED
+      - name: Execute bounded RED to GREEN owner repair
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt
+          rustup default 1.97.1
+
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('src/infrastructure/podman.rs')
           text = path.read_text()
           old = '''        let network_args = [
@@ -57,9 +47,10 @@ jobs:
           let network_ok = self.cleanup_admitted_network(authority.network_id()).is_ok();
           '''
           if text.count(old) != 1:
-              raise SystemExit('expected exactly one explicit-termination force-removal block')
+              raise SystemExit('expected one explicit-termination force-removal block')
           path.write_text(text.replace(old, new, 1))
           PY
+
           cargo fmt --all
           set +e
           cargo test --locked --test podman_application_service_network_termination_owner_red -- --nocapture > /tmp/force-only-red.log 2>&1
@@ -69,17 +60,12 @@ jobs:
           test "$status" -ne 0
           grep -F 'network cleanup must target exact acquired network authority without force' /tmp/force-only-red.log
           if grep -F 'an in-use owned network must fail closed instead of deleting a foreign member' /tmp/force-only-red.log; then
-            echo 'force-removal RED did not advance' >&2
+            echo 'network force-removal RED did not advance to exact-selector RED' >&2
             exit 1
           fi
 
-      - name: Preserve admitted network ID as private cleanup authority
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           service = Path('src/application_service/mod.rs')
           text = service.read_text()
           old = '''    pub(crate) fn new_with_cleanup_sandbox_id(
@@ -108,7 +94,7 @@ jobs:
               };
           '''
           if text.count(old) != 1:
-              raise SystemExit('expected exactly one cleanup-authority constructor block')
+              raise SystemExit('expected one cleanup-authority constructor block')
           text = text.replace(old, new, 1)
           text = text.replace(
               '/// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.',
@@ -119,10 +105,9 @@ jobs:
 
           podman = Path('src/infrastructure/podman.rs')
           text = podman.read_text()
-          old_call = '''        Ok(ApplicationServiceLease::new_with_cleanup_sandbox_id(
-          '''
+          old_call = '        Ok(ApplicationServiceLease::new_with_cleanup_sandbox_id(\n'
           if text.count(old_call) != 1:
-              raise SystemExit('expected exactly one application-service lease constructor call')
+              raise SystemExit('expected one lease constructor call')
           text = text.replace(
               old_call,
               '        Ok(ApplicationServiceLease::new_with_cleanup_resource_ids(\n',
@@ -140,9 +125,10 @@ jobs:
           ))
           '''
           if text.count(old_tail) != 1:
-              raise SystemExit('expected exactly one lease constructor tail')
+              raise SystemExit('expected one lease constructor tail')
           podman.write_text(text.replace(old_tail, new_tail, 1))
           PY
+
           cargo fmt --all
           cargo fmt --all -- --check
           cargo test --locked --test podman_application_service_network_termination_owner_red
@@ -150,30 +136,19 @@ jobs:
           cargo test --locked --test podman_application_service
           cargo check --locked --workspace --all-targets
 
-      - name: Record code-current traceability
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('docs/doctoring/APPLICATION_SERVICE_LIFECYCLE_OWNERSHIP_TRACEABILITY.md')
           text = path.read_text()
           marker = '## Remaining gates\n'
-          addition = '''## Network termination authority progression\n\nOn 2026-09-24, hosted coverage for descendant exact `2eea75b4f40faf3c95e7d3e8484525e51a845f25` executed `podman_application_service_network_termination_owner_red::explicit_termination_preserves_foreign_network_member`. Current production returned a successful cleanup receipt while the fake backend modeled an in-use owned network with a foreign member. That RED is causal for removing network-level `--force`: Podman documents that `podman network rm --force` removes every container using the named network, while ordinary removal returns exit status 2 when the network remains in use.\n\nThe minimum repair therefore keeps public `qsr-net-*` lease correlation unchanged, retains the admitted canonical backend network ID only in crate-private non-serializable cleanup authority, and uses non-force network removal during explicit termination. The same focused witness is deliberately run once after removing `--force` but before the private-ID split; it must advance from the foreign-member assertion to the exact-selector assertion. Only then is the constructor widened from one private container cleanup selector to explicit private container and network cleanup selectors. This preserves RED → causal fix → next RED → causal fix provenance instead of pre-applying an unexecuted identity change.\n\nThis repair does not introduce retry `--ignore` semantics. Partial-cleanup retry convergence remains a separate RED because `--ignore` may only satisfy already-absent owned resources and must never weaken in-use or ownership failures.\n\n### Additional reference\n\nPodman Authors. (2026). *podman-network-rm — Remove one or more networks*. https://docs.podman.io/en/latest/markdown/podman-network-rm.1.html\n\n'''
+          addition = '''## Network termination authority progression\n\nOn 2026-09-24, hosted coverage for descendant exact `2eea75b4f40faf3c95e7d3e8484525e51a845f25` executed `podman_application_service_network_termination_owner_red::explicit_termination_preserves_foreign_network_member`. Current production returned a successful cleanup receipt while the fake backend modeled an in-use owned network with a foreign member. That RED is causal for removing network-level `--force`: Podman documents that `podman network rm --force` removes every container using the named network, while ordinary removal returns exit status 2 when the network remains in use.\n\nThe repair keeps public `qsr-net-*` lease correlation unchanged, retains the admitted canonical backend network ID only in crate-private non-serializable cleanup authority, and uses non-force network removal during explicit termination. The focused witness is deliberately run once after removing `--force` but before the private-ID split; it must advance from the foreign-member assertion to the exact-selector assertion. Only then is the constructor widened from one private container cleanup selector to explicit private container and network cleanup selectors.\n\nThis repair does not introduce retry `--ignore` semantics. Partial-cleanup retry convergence remains a separate RED because `--ignore` may only satisfy already-absent owned resources and must never weaken in-use or ownership failures.\n\n### Additional reference\n\nPodman Authors. (2026). *podman-network-rm — Remove one or more networks*. https://docs.podman.io/en/latest/markdown/podman-network-rm.1.html\n\n'''
           if addition in text:
-              raise SystemExit('traceability addition already present unexpectedly')
+              raise SystemExit('traceability addition already present')
           if marker not in text:
               raise SystemExit('remaining-gates marker not found')
           path.write_text(text.replace(marker, addition + marker, 1))
           PY
 
-      - name: Remove completed source-fix workflow and commit the bounded repair
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
           rm .github/workflows/owner-network-termination-source-fix.yml
           git diff --check
           git status --short
