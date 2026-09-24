@@ -93,6 +93,27 @@ jobs:
           podman.write_text(text.replace(tail, new_tail, 1))
           PY
 
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/podman_application_service.rs')
+          text = path.read_text()
+          stale_list = '        "rm --force",\n        "network rm --force",\n    ] {'
+          repaired_list = '        "rm --force",\n    ] {'
+          if text.count(stale_list) != 1:
+              raise SystemExit('expected one broad success fixture network-force fragment')
+          text = text.replace(stale_list, repaired_list, 1)
+          loop_end = '    }\n\n    remove_fixture(program, log);\n    drop(listener);\n}'
+          loop_repair = '    }\n    assert!(calls.contains(&format!("network rm {OWNED_NETWORK_ID}")));\n    assert!(!calls.contains("network rm --force"));\n\n    remove_fixture(program, log);\n    drop(listener);\n}'
+          if text.count(loop_end) != 1:
+              raise SystemExit('expected one broad success fixture loop boundary')
+          text = text.replace(loop_end, loop_repair, 1)
+          stale_cleanup = '        assert!(calls.contains("rm --force"));\n        assert!(calls.contains("network rm --force"));'
+          repaired_cleanup = '        assert!(calls.contains("rm --force"));\n        assert!(calls.contains(&format!("network rm {OWNED_NETWORK_ID}")));\n        assert!(!calls.contains("network rm --force"));'
+          if text.count(stale_cleanup) != 1:
+              raise SystemExit('expected one termination cleanup network-force assertion')
+          path.write_text(text.replace(stale_cleanup, repaired_cleanup, 1))
+          PY
+
           cargo fmt --all
           cargo fmt --all -- --check
           cargo test --locked --test podman_application_service_network_termination_owner_red
