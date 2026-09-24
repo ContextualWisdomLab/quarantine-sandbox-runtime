@@ -504,7 +504,7 @@ impl RootlessPodmanAdapter {
             return Err(ApplicationServiceError::ReadinessTimeout);
         }
 
-        Ok(ApplicationServiceLease::new_with_cleanup_sandbox_id(
+        Ok(ApplicationServiceLease::new_with_cleanup_resource_ids(
             request,
             RuntimeLeaseMetadata {
                 backend_id: PODMAN_BACKEND_ID,
@@ -517,6 +517,7 @@ impl RootlessPodmanAdapter {
                 shutdown_grace_seconds: policy.shutdown_grace_seconds,
             },
             container_id,
+            network_id,
             ServiceEndpoint::loopback(host_port, request.protocol),
         ))
     }
@@ -554,7 +555,6 @@ impl RootlessPodmanAdapter {
         let network_args = [
             "network".to_owned(),
             "rm".to_owned(),
-            "--force".to_owned(),
             authority.network_id().to_owned(),
         ];
         let stop_ok = self.command_succeeded(&stop_args);
@@ -595,8 +595,7 @@ impl RootlessPodmanAdapter {
             "event=create".to_owned(),
         ];
         let event_output = self.checked_output("network_creation_receipt", &event_args)?;
-        let network_id =
-            parse_network_creation_receipt(&event_output.stdout, plan.network_name())?;
+        let network_id = parse_network_creation_receipt(&event_output.stdout, plan.network_name())?;
 
         let network_args = [
             "network".to_owned(),
@@ -612,16 +611,14 @@ impl RootlessPodmanAdapter {
                 return Err(error);
             }
         };
-        let network: NetworkIdentityInspection = match parse_single_inspection(
-            "network_identity_inspect",
-            &network_output.stdout,
-        ) {
-            Ok(network) => network,
-            Err(error) => {
-                self.cleanup_admitted_network(&network_id)?;
-                return Err(error);
-            }
-        };
+        let network: NetworkIdentityInspection =
+            match parse_single_inspection("network_identity_inspect", &network_output.stdout) {
+                Ok(network) => network,
+                Err(error) => {
+                    self.cleanup_admitted_network(&network_id)?;
+                    return Err(error);
+                }
+            };
         let inspected_id = match parse_backend_identifier(network.id.as_bytes()) {
             Some(identifier) => identifier,
             None => {

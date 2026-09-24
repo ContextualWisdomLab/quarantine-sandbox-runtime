@@ -22,8 +22,7 @@ use quarantine_sandbox_runtime::{
 };
 
 const STARTED_AT_EPOCH_SECONDS: u64 = 1_780_004_500;
-const CREATED_NETWORK_ID: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const CREATED_NETWORK_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const REPLACEMENT_NETWORK_ID: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 static NEXT_TEMP_PATH_ID: AtomicU64 = AtomicU64::new(0);
@@ -182,7 +181,10 @@ fn creation_bound_id_prevents_same_name_replacement_promotion() {
         !lines.iter().any(|line| *line == public_name_lookup),
         "the mutable public correlation must not be re-resolved into private authority; calls were:\n{calls}"
     );
-    assert!(result.is_err(), "the controlled container-create failure must surface");
+    assert!(
+        result.is_err(),
+        "the controlled container-create failure must surface"
+    );
     assert_eq!(
         selected_network.as_deref().map(str::trim),
         Some(CREATED_NETWORK_ID),

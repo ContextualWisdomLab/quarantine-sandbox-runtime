@@ -225,7 +225,9 @@ fn failed_container_create_cleans_network_by_acquired_id_without_force() {
         "partial-launch cleanup must never force-remove a generated network name; calls were:\n{calls}"
     );
     assert!(
-        !lines.iter().any(|line| **line == format!("network rm {created_name}")),
+        !lines
+            .iter()
+            .any(|line| **line == format!("network rm {created_name}")),
         "public correlation must never become destructive cleanup authority; calls were:\n{calls}"
     );
 }

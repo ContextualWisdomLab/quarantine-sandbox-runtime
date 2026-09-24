@@ -185,13 +185,14 @@ fn launch_requires_rootless_backend_and_returns_loopback_lease_then_cleans_up() 
         "port ",
         "stop --time 2",
         "rm --force",
-        "network rm --force",
     ] {
         assert!(
             calls.contains(expected),
             "missing Podman call fragment: {expected}\n{calls}"
         );
     }
+    assert!(calls.contains(&format!("network rm {OWNED_NETWORK_ID}")));
+    assert!(!calls.contains("network rm --force"));
 
     remove_fixture(program, log);
     drop(listener);
@@ -407,7 +408,8 @@ fn cleanup_failure_is_never_hidden_by_readiness_or_termination_results() {
         let calls = fs::read_to_string(&log).expect("all cleanup attempts should be recorded");
         assert!(calls.contains("stop --time 2"));
         assert!(calls.contains("rm --force"));
-        assert!(calls.contains("network rm --force"));
+        assert!(calls.contains(&format!("network rm {OWNED_NETWORK_ID}")));
+        assert!(!calls.contains("network rm --force"));
         remove_fixture(program, log);
         drop(listener);
     }

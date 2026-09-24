@@ -259,16 +259,17 @@ pub struct ApplicationServiceLease {
 }
 
 impl ApplicationServiceLease {
-    /// Construct runtime-issued lease evidence with an explicit runtime-owned cleanup selector.
-    pub(crate) fn new_with_cleanup_sandbox_id(
+    /// Construct runtime-issued lease evidence with explicit runtime-owned cleanup selectors.
+    pub(crate) fn new_with_cleanup_resource_ids(
         request: &ApplicationServiceRequest,
         metadata: RuntimeLeaseMetadata,
         cleanup_sandbox_id: String,
+        cleanup_network_id: String,
         endpoint: ServiceEndpoint,
     ) -> Self {
         let cleanup_authority = ApplicationServiceCleanupAuthority {
             sandbox_id: cleanup_sandbox_id,
-            network_id: metadata.network_id.clone(),
+            network_id: cleanup_network_id,
             shutdown_grace_seconds: metadata.shutdown_grace_seconds,
         };
         Self {

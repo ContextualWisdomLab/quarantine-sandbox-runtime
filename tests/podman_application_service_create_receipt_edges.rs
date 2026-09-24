@@ -259,7 +259,11 @@ fn matching_stdout_and_receipt_select_the_exact_id_before_start_cleanup() {
     );
     let calls = calls(&log);
     assert_network_prerequisite_current(&calls);
-    assert!(calls.lines().any(|line| line == format!("start {STDOUT_ID}")));
+    assert!(
+        calls
+            .lines()
+            .any(|line| line == format!("start {STDOUT_ID}"))
+    );
     assert!(
         calls
             .lines()
