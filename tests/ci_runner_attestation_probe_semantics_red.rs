@@ -149,7 +149,9 @@ fn parse_endpoint(target: &str) -> Option<Endpoint<'_>> {
     if let Some((host, port_text)) = target.rsplit_once(':') {
         if !host.is_empty()
             && !port_text.is_empty()
-            && port_text.chars().all(|character| character.is_ascii_digit())
+            && port_text
+                .chars()
+                .all(|character| character.is_ascii_digit())
         {
             return Some(Endpoint {
                 host,
@@ -218,7 +220,10 @@ fn closed_service_ports_guest_loopback_and_unresolved_aliases_cannot_masquerade_
         "5432",
         "127.0.0.1:5432"
     ));
-    assert!(!target_has_meaningful_probe_semantics("DNS", "127.0.0.1:53"));
+    assert!(!target_has_meaningful_probe_semantics(
+        "DNS",
+        "127.0.0.1:53"
+    ));
     assert!(!target_has_meaningful_probe_semantics(
         "6379",
         "host-gateway:6379"
@@ -227,7 +232,10 @@ fn closed_service_ports_guest_loopback_and_unresolved_aliases_cannot_masquerade_
         "5432",
         "host.containers.internal:5432"
     ));
-    assert!(!target_has_meaningful_probe_semantics("DNS", "localhost:53"));
+    assert!(!target_has_meaningful_probe_semantics(
+        "DNS",
+        "localhost:53"
+    ));
 }
 
 #[test]
@@ -254,7 +262,8 @@ fn positive_lsm_attestation_does_not_reduce_host_denial_to_guest_loopback_or_clo
     let job = job_section(&workflow, "podman-e2e-positive-lsm");
     let gate = named_step_section(job, "Attest self-hosted runner LAN and host-service denial");
     let script = inline_script(gate);
-    let direct_calls: Vec<(String, String)> = script.lines().filter_map(literal_probe_call).collect();
+    let direct_calls: Vec<(String, String)> =
+        script.lines().filter_map(literal_probe_call).collect();
 
     for required_scope in [
         "192.168.0.0/16",

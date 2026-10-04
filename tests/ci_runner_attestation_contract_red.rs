@@ -160,7 +160,9 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
         helper.lines().any(|line| {
             line.trim_start().starts_with("if ")
                 && is_executable_probe_line(line)
-                && caller_target_tokens.iter().any(|token| line.contains(token))
+                && caller_target_tokens
+                    .iter()
+                    .any(|token| line.contains(token))
         }),
         "the helper must branch directly on a concrete probe whose target operand is caller-supplied, not on an unrelated fixed target while merely logging caller arguments"
     );
@@ -203,7 +205,9 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
         "DNS",
     ] {
         assert!(
-            direct_calls.iter().any(|line| line.contains(required_scope)),
+            direct_calls
+                .iter()
+                .any(|line| line.contains(required_scope)),
             "{required_scope} must be passed as executable helper input before any inline comment, not merely mentioned in output/configuration/comment text"
         );
     }

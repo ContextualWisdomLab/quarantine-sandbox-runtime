@@ -102,7 +102,7 @@ fn literal_shell_words(input: &str) -> Option<Vec<String>> {
                 } else {
                     current.push(character);
                 }
-            },
+            }
             QuoteState::Double => match character {
                 '"' => quote = QuoteState::Unquoted,
                 '\\' => escaped = true,
@@ -148,7 +148,9 @@ fn parse_endpoint(target: &str) -> Option<Endpoint<'_>> {
     if let Some((host, port_text)) = target.rsplit_once(':') {
         if !host.is_empty()
             && !port_text.is_empty()
-            && port_text.chars().all(|character| character.is_ascii_digit())
+            && port_text
+                .chars()
+                .all(|character| character.is_ascii_digit())
         {
             let port = port_text.parse::<u16>().ok()?;
             return Some(Endpoint {
@@ -206,29 +208,23 @@ fn target_matches_scope(required_scope: &str, target: &str) -> bool {
 
 #[test]
 fn scope_labels_cannot_substitute_for_actual_probe_targets() {
-    let label_only = literal_probe_call(
-        r#"probe_forbidden_endpoint "10.0.0.0/8" "example.com:443""#,
-    )
-    .expect("literal helper call must parse");
+    let label_only =
+        literal_probe_call(r#"probe_forbidden_endpoint "10.0.0.0/8" "example.com:443""#)
+            .expect("literal helper call must parse");
     assert!(!target_matches_scope("10.0.0.0/8", &label_only.1));
 
-    let redis_wrong_port = literal_probe_call(
-        r#"probe_forbidden_endpoint "Redis 6379" "127.0.0.1:6380""#,
-    )
-    .expect("literal helper call must parse");
+    let redis_wrong_port =
+        literal_probe_call(r#"probe_forbidden_endpoint "Redis 6379" "127.0.0.1:6380""#)
+            .expect("literal helper call must parse");
     assert!(!target_matches_scope("6379", &redis_wrong_port.1));
 
-    let postgres_public = literal_probe_call(
-        r#"probe_forbidden_endpoint "PostgreSQL 5432" "example.com:5432""#,
-    )
-    .expect("literal helper call must parse");
+    let postgres_public =
+        literal_probe_call(r#"probe_forbidden_endpoint "PostgreSQL 5432" "example.com:5432""#)
+            .expect("literal helper call must parse");
     assert!(!target_matches_scope("5432", &postgres_public.1));
 
     assert!(!target_matches_scope("10.0.0.0/8", "10.23.4.5:443"));
-    assert!(!target_matches_scope(
-        "192.168.0.0/16",
-        "192.168.50.1:443"
-    ));
+    assert!(!target_matches_scope("192.168.0.0/16", "192.168.50.1:443"));
     assert!(!target_matches_scope("6379", "127.0.0.1:6379"));
     assert!(!target_matches_scope("5432", "127.0.0.1:5432"));
     assert!(!target_matches_scope("DNS", "127.0.0.1:53"));
@@ -261,7 +257,8 @@ fn positive_lsm_attestation_binds_each_required_scope_to_the_actual_literal_targ
     let job = job_section(&workflow, "podman-e2e-positive-lsm");
     let gate = named_step_section(job, "Attest self-hosted runner LAN and host-service denial");
     let script = inline_script(gate);
-    let direct_calls: Vec<(String, String)> = script.lines().filter_map(literal_probe_call).collect();
+    let direct_calls: Vec<(String, String)> =
+        script.lines().filter_map(literal_probe_call).collect();
 
     for required_scope in [
         "192.168.0.0/16",
