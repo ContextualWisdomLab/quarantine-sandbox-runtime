@@ -146,18 +146,17 @@ fn parse_endpoint(target: &str) -> Option<Endpoint<'_>> {
         return None;
     }
 
-    if let Some((host, port_text)) = target.rsplit_once(':') {
-        if !host.is_empty()
-            && !port_text.is_empty()
-            && port_text
-                .chars()
-                .all(|character| character.is_ascii_digit())
-        {
-            return Some(Endpoint {
-                host,
-                port: Some(port_text.parse::<u16>().ok()?),
-            });
-        }
+    if let Some((host, port_text)) = target.rsplit_once(':')
+        && !host.is_empty()
+        && !port_text.is_empty()
+        && port_text
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return Some(Endpoint {
+            host,
+            port: Some(port_text.parse::<u16>().ok()?),
+        });
     }
 
     Some(Endpoint {

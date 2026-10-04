@@ -226,7 +226,7 @@ fn positive_lsm_runner_attests_private_network_denial_before_checkout() {
         .collect();
 
     assert!(
-        active_lines.iter().any(|line| *line == "set -euo pipefail"),
+        active_lines.contains(&"set -euo pipefail"),
         "attestation script must fail closed on shell errors and unset inputs"
     );
     assert!(
