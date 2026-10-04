@@ -525,6 +525,322 @@ fn caller_target_aliases_require_exact_positional_assignment() {
     }
 }
 
+// Offline execution witness only. The gate is constrained before Bash starts;
+// nc is a synthetic boundary and PATH never exposes a real network program.
+fn script_has_observed_denial(script: &str) -> bool {
+    script_has_observed_denial_with(script, execute_fixture)
+}
+
+fn script_has_observed_denial_with(
+    script: &str,
+    execute: impl Fn(&str, Option<i32>) -> FixtureRun,
+) -> bool {
+    if !supported_execution_script(script) {
+        return false;
+    }
+    for code in [Some(1), Some(0), Some(2), Some(124), Some(127), None] {
+        let run = execute(script, code);
+        if run.exit.is_none() {
+            eprintln!("offline control TEST_NOT_COMPLETED for probe outcome {code:?}");
+            return false;
+        }
+        if code != Some(1) {
+            if run.exit == Some(0) || !run.evidence.trim().is_empty() {
+                return false;
+            }
+        } else if run.exit != Some(0) || run.probes.len() != 6 {
+            eprintln!(
+                "offline denial control exit={:?} probes={} evidence={}",
+                run.exit,
+                run.probes.len(),
+                run.evidence
+            );
+            return false;
+        } else {
+            let evidence: Result<Vec<serde_json::Value>, _> =
+                run.evidence.lines().map(serde_json::from_str).collect();
+            let Ok(evidence) = evidence else {
+                return false;
+            };
+            let scopes = [
+                "192.168.0.0/16",
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "6379",
+                "5432",
+                "DNS",
+            ];
+            if evidence.len() != scopes.len() {
+                return false;
+            }
+            for ((row, probe), scope) in evidence.iter().zip(&run.probes).zip(scopes) {
+                if row.as_object().is_none_or(|object| object.len() != 6)
+                    || row["scope"] != scope
+                    || row["command"] != "nc"
+                    || row["protocol"] != "tcp"
+                    || row["result"] != "denied"
+                    || row["probe_exit"] != 1
+                    || row["target"]
+                        .as_str()
+                        .is_none_or(|target| *probe != format!("-z {target}"))
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn supported_execution_script(script: &str) -> bool {
+    let Some(start) = script.find("probe_forbidden_endpoint() {\n") else {
+        return false;
+    };
+    let prefix = &script[..start];
+    if prefix != "set -euo pipefail\nevidence_file=\"$PWD/evidence.json\"\n" {
+        return false;
+    }
+    let helper_start = start + "probe_forbidden_endpoint() {\n".len();
+    let Some(end) = script[helper_start..].find("\n}\n") else {
+        return false;
+    };
+    let helper = &script[helper_start..helper_start + end];
+    // Only these two bounded helper forms are executable. This is an adapter
+    // contract, not a general shell parser; future probe adapters need review.
+    let original = shell_function_body(ERROR_AS_DENIAL_SCRIPT, "probe_forbidden_endpoint").trim();
+    let normalized = helper.replace(
+        "  if [ \"$status\" -ne 1 ]; then",
+        "  if nc -z \"$target\"; then",
+    );
+    if helper.trim() != original && !helper_has_supported_source(&normalized) {
+        return false;
+    }
+    let mut lines = helper.lines();
+    let expected = SAFE_HELPER.lines().collect::<Vec<_>>();
+    if helper.trim() != original {
+        for line in &expected[..expected.len() - 1] {
+            if lines.next() != Some(*line) {
+                return false;
+            }
+        }
+        if lines.next() != expected.last().copied() || lines.next().is_some() {
+            return false;
+        }
+    }
+    let suffix = &script[helper_start + end + 3..];
+    suffix.lines().all(|line| {
+        let line = line.trim();
+        if ["if false; then", "fi", ""].contains(&line) {
+            return true;
+        }
+        simple_probe_words(line).is_some_and(|words| {
+            words.len() == 3
+                && words[0] == "probe_forbidden_endpoint"
+                && words[1..].iter().all(|word| {
+                    word.starts_with('"')
+                        && word.ends_with('"')
+                        && word[1..word.len() - 1]
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"./:-".contains(&b))
+                })
+        })
+    })
+}
+
+struct FixtureRun {
+    exit: Option<i32>,
+    probes: Vec<String>,
+    evidence: String,
+}
+
+fn execute_fixture(script: &str, probe_exit: Option<i32>) -> FixtureRun {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "qsr-offline-attestation-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&root).expect("fresh fixture directory");
+    let bin = root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    if let Some(code) = probe_exit {
+        let stub = bin.join("nc");
+        fs::write(
+            &stub,
+            format!("#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$QSR_PROBE_LOG\"\nexit {code}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(stub, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::write(root.join("gate.sh"), script).unwrap();
+    let stderr_file = fs::File::create(root.join("stderr.log")).unwrap();
+    let mut child = Command::new("/bin/bash")
+        .arg("gate.sh")
+        .current_dir(&root)
+        .env_clear()
+        .env("PATH", &bin)
+        .env("HOME", &root)
+        .env("LC_ALL", "C")
+        .env("QSR_PROBE_LOG", root.join("probes.log"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let exit = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status.code();
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            eprintln!(
+                "offline fixture TEST_NOT_COMPLETED outcome={probe_exit:?}; stderr={}",
+                fs::read_to_string(root.join("stderr.log")).unwrap_or_default()
+            );
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let probes = fs::read_to_string(root.join("probes.log"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    let evidence = fs::read_to_string(root.join("evidence.json")).unwrap_or_default();
+    fs::remove_dir_all(root).unwrap();
+    FixtureRun {
+        exit,
+        probes,
+        evidence,
+    }
+}
+
+const ERROR_AS_DENIAL_SCRIPT: &str = r#"set -euo pipefail
+evidence_file="$PWD/evidence.json"
+probe_forbidden_endpoint() {
+  local scope="$1"
+  local target="$2"
+  if nc -z "$target"; then
+    exit 1
+  fi
+  printf '{"scope":"%s","target":"%s","result":"denied"}\n' "$scope" "$target" >> "$evidence_file"
+}
+probe_forbidden_endpoint "192.168.0.0/16" "192.168.50.1"
+probe_forbidden_endpoint "10.0.0.0/8" "10.23.4.5"
+probe_forbidden_endpoint "172.16.0.0/12" "172.31.255.2"
+probe_forbidden_endpoint "6379" "10.0.0.1:6379"
+probe_forbidden_endpoint "5432" "192.168.50.1:5432"
+probe_forbidden_endpoint "DNS" "169.254.1.53:53"
+"#;
+
+#[test]
+fn executable_contract_rejects_dormant_helper_calls() {
+    let dormant = ERROR_AS_DENIAL_SCRIPT.replacen(
+        "probe_forbidden_endpoint \"192.168.0.0/16\"",
+        "if false; then\nprobe_forbidden_endpoint \"192.168.0.0/16\"",
+        1,
+    ) + "fi\n";
+    assert!(
+        !script_has_observed_denial(&dormant),
+        "zero executed probes cannot attest denial"
+    );
+}
+
+const SAFE_HELPER: &str = r#"  local scope="$1"
+  local target="$2"
+  if nc -z "$target"; then
+    exit 1
+  else
+    local status=$?
+  fi
+  if [ "$status" -ne 1 ]; then
+    exit 2
+  fi
+  printf '{"scope":"%s","target":"%s","result":"denied","command":"nc","protocol":"tcp","probe_exit":1}\n' "$scope" "$target" >> "$evidence_file""#;
+
+fn safe_fixture() -> String {
+    let begin = ERROR_AS_DENIAL_SCRIPT.find("  local scope=").unwrap();
+    let end = ERROR_AS_DENIAL_SCRIPT[begin..].find("\n}\n").unwrap() + begin;
+    format!(
+        "{}{}{}",
+        &ERROR_AS_DENIAL_SCRIPT[..begin],
+        SAFE_HELPER,
+        &ERROR_AS_DENIAL_SCRIPT[end..]
+    )
+}
+
+#[test]
+fn executable_contract_rejects_unsupported_receipt_before_execution() {
+    let receipt = SAFE_HELPER.lines().last().unwrap();
+    for unsupported in [
+        "  printf '%s\\n' \"$scope\" >> \"$evidence_file\"",
+        "  printf -v receipt_buffer '%s' \"$scope\"",
+    ] {
+        let script = safe_fixture().replace(receipt, unsupported);
+        assert!(
+            !script_has_observed_denial_with(&script, |_, _| {
+                panic!("unsupported receipt must be rejected before execution")
+            }),
+            "only the reviewed output-only receipt command may execute"
+        );
+    }
+}
+
+#[test]
+fn executable_contract_accepts_observed_denial_control() {
+    assert!(
+        script_has_observed_denial(&safe_fixture()),
+        "instrumented denial with explicit tool-error separation must pass"
+    );
+}
+
+#[test]
+fn executable_contract_rejects_unbound_evidence() {
+    for (from, to) in [
+        ("\"command\":\"nc\"", "\"command\":\"echo\""),
+        ("\"protocol\":\"tcp\"", "\"protocol\":\"udp\""),
+        ("\"probe_exit\":1", "\"probe_exit\":127"),
+        ("\"result\":\"denied\"", "\"result\":\"connected\""),
+    ] {
+        assert!(
+            !script_has_observed_denial(&safe_fixture().replace(from, to)),
+            "{to}"
+        );
+    }
+}
+
+#[test]
+fn executable_contract_rejects_incomplete_tool_error_control() {
+    assert!(
+        !script_has_observed_denial_with(&safe_fixture(), |script, code| {
+            if code == Some(2) {
+                FixtureRun {
+                    exit: None,
+                    probes: Vec::new(),
+                    evidence: String::new(),
+                }
+            } else {
+                execute_fixture(script, code)
+            }
+        }),
+        "a timed-out error control is not completed rejection evidence"
+    );
+}
+
+#[test]
+fn executable_contract_rejects_tool_errors_as_denial() {
+    assert!(
+        !script_has_observed_denial(ERROR_AS_DENIAL_SCRIPT),
+        "probe errors must not become denial receipts"
+    );
+}
+
 #[test]
 fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
     let workflow = fs::read_to_string(".github/workflows/ci.yml")
@@ -593,4 +909,14 @@ fn positive_lsm_attestation_binds_each_scope_to_the_executed_probe_helper() {
             "{required_scope} must be passed as executable helper input before any inline comment, not merely mentioned in output/configuration/comment text"
         );
     }
+    let executable = script
+        .lines()
+        .map(|line| line.strip_prefix("          ").unwrap_or(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    assert!(
+        script_has_observed_denial(&executable),
+        "offline execution must bind six actual probes and JSON evidence, and reject reachable/tool-error/missing-tool outcomes"
+    );
 }
