@@ -1086,6 +1086,79 @@ fn executable_contract_requires_ordered_unique_source_scopes() {
 }
 
 #[test]
+fn executable_contract_rejects_completed_non_denial_success_or_evidence() {
+    let script = safe_fixture();
+    assert!(supported_execution_script(&script));
+    let calls = script
+        .lines()
+        .filter_map(simple_probe_words)
+        .filter(|words| words.first() == Some(&"probe_forbidden_endpoint"))
+        .collect::<Vec<_>>();
+    let rows = calls
+        .iter()
+        .map(|words| {
+            serde_json::json!({
+                "scope": words[1].trim_matches('"'),
+                "target": words[2].trim_matches('"'),
+                "command": "nc",
+                "protocol": "tcp",
+                "result": "denied",
+                "probe_exit": 1
+            })
+        })
+        .collect::<Vec<_>>();
+    let probes = rows
+        .iter()
+        .map(|row| format!("-z {}", row["target"].as_str().unwrap()))
+        .collect::<Vec<_>>();
+    let evidence = rows
+        .iter()
+        .map(serde_json::Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let outcomes = [Some(1), Some(0), Some(2), Some(124), Some(127), None];
+    // Inject observations only: no subprocess or network program runs here.
+    // The valid denial control must reach each completed non-denial control.
+    for rejected_outcome in outcomes[1..].iter().copied() {
+        for fault in [None, Some((0, "")), Some((2, "stray receipt"))] {
+            let observed = std::cell::RefCell::new(Vec::new());
+            let accepted = script_has_observed_denial_with(&script, |_, outcome| {
+                observed.borrow_mut().push(outcome);
+                if outcome == Some(1) {
+                    FixtureRun {
+                        exit: Some(0),
+                        probes: probes.clone(),
+                        evidence: evidence.clone(),
+                    }
+                } else {
+                    let (exit, evidence) = if outcome == rejected_outcome {
+                        fault.unwrap_or((2, " \t\n"))
+                    } else {
+                        (2, " \t\n")
+                    };
+                    FixtureRun {
+                        exit: Some(exit),
+                        probes: Vec::new(),
+                        evidence: evidence.to_owned(),
+                    }
+                }
+            });
+            assert_eq!(accepted, fault.is_none(), "{rejected_outcome:?}/{fault:?}");
+            let count = if fault.is_none() {
+                outcomes.len()
+            } else {
+                outcomes
+                    .iter()
+                    .position(|code| *code == rejected_outcome)
+                    .unwrap()
+                    + 1
+            };
+            assert_eq!(*observed.borrow(), outcomes[..count]);
+        }
+    }
+}
+
+#[test]
 fn executable_contract_rejects_tool_errors_as_denial() {
     assert!(
         !script_has_observed_denial(ERROR_AS_DENIAL_SCRIPT),
