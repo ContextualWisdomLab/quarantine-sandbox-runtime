@@ -994,6 +994,98 @@ fn executable_contract_preserves_admitted_call_whitespace() {
 }
 
 #[test]
+fn executable_contract_rejects_source_call_count_before_execution() {
+    let script = safe_fixture();
+    let first_call = "probe_forbidden_endpoint \"192.168.0.0/16\" \"192.168.50.1\"\n";
+    let no_calls = script
+        .lines()
+        .filter(|line| !line.starts_with("probe_forbidden_endpoint \""))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    for candidate in [
+        script.replacen(first_call, "", 1),
+        format!("{script}{first_call}"),
+        no_calls,
+    ] {
+        assert!(supported_execution_script(&candidate));
+        assert!(!script_has_observed_denial_with(&candidate, |_, _| {
+            panic!("zero, missing or extra calls must reject before execution")
+        }));
+    }
+}
+
+#[test]
+fn executable_contract_requires_ordered_unique_source_scopes() {
+    let script = safe_fixture();
+    let calls = script
+        .lines()
+        .filter(|line| line.starts_with("probe_forbidden_endpoint \""))
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 6);
+    let prefix = script.split_once(calls[0]).unwrap().0;
+    let mut candidates = vec![(calls.clone(), true)];
+    for index in 0..calls.len() - 1 {
+        let mut swapped = calls.clone();
+        swapped.swap(index, index + 1);
+        candidates.push((swapped, false));
+    }
+    for index in 1..calls.len() {
+        let mut duplicate = calls.clone();
+        duplicate[index] = calls[0];
+        candidates.push((duplicate, false));
+    }
+    for (source_calls, expected) in candidates {
+        let candidate = format!("{prefix}{}\n", source_calls.join("\n"));
+        assert!(supported_execution_script(&candidate));
+        // Matching synthetic source/probe/receipt records are insufficient when
+        // the required six scopes are reordered or duplicated. No Bash runs.
+        let rows = source_calls
+            .iter()
+            .map(|call| {
+                let words = simple_probe_words(call).unwrap();
+                serde_json::json!({
+                    "scope": words[1].trim_matches('"'),
+                    "target": words[2].trim_matches('"'),
+                    "command": "nc",
+                    "protocol": "tcp",
+                    "result": "denied",
+                    "probe_exit": 1
+                })
+            })
+            .collect::<Vec<_>>();
+        let probes = rows
+            .iter()
+            .map(|row| format!("-z {}", row["target"].as_str().unwrap()))
+            .collect::<Vec<_>>();
+        let evidence = rows
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let invocations = std::cell::Cell::new(0);
+        let accepted = script_has_observed_denial_with(&candidate, |_, outcome| {
+            invocations.set(invocations.get() + 1);
+            if outcome == Some(1) {
+                FixtureRun {
+                    exit: Some(0),
+                    probes: probes.clone(),
+                    evidence: evidence.clone(),
+                }
+            } else {
+                FixtureRun {
+                    exit: Some(2),
+                    probes: Vec::new(),
+                    evidence: String::new(),
+                }
+            }
+        });
+        assert_eq!(accepted, expected, "{source_calls:?}");
+        assert_eq!(invocations.get(), if expected { 6 } else { 1 });
+    }
+}
+
+#[test]
 fn executable_contract_rejects_tool_errors_as_denial() {
     assert!(
         !script_has_observed_denial(ERROR_AS_DENIAL_SCRIPT),
