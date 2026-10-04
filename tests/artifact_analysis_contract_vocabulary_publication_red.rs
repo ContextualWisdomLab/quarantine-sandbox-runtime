@@ -145,7 +145,7 @@ fn assert_jcs_serialization_vector(vectors: &Value) {
         .as_str()
         .expect("JCS vector must publish the exact canonical JSON representation");
     assert_eq!(canonical_json, JCS_ESCAPE_CANONICAL_JSON);
-    assert_eq!(canonical_json.as_bytes().len(), 136);
+    assert_eq!(canonical_json.len(), 136);
 
     let canonical_value: Value = serde_json::from_str(canonical_json)
         .expect("published JCS representation must remain valid JSON");
