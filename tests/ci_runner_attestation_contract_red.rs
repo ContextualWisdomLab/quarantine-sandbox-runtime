@@ -538,6 +538,22 @@ fn script_has_observed_denial_with(
     if !supported_execution_script(script) {
         return false;
     }
+    // Admission permits only quoted, whitespace-free call operands. Bind the
+    // observations to those reviewed inputs, not merely to each other.
+    let calls = script
+        .lines()
+        .filter_map(|line| simple_probe_words(line.trim()))
+        .filter(|words| words.first() == Some(&"probe_forbidden_endpoint"))
+        .map(|words| {
+            words[1..]
+                .iter()
+                .map(|word| word.trim_matches('"'))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if calls.len() != 6 {
+        return false;
+    }
     for code in [Some(1), Some(0), Some(2), Some(124), Some(127), None] {
         let run = execute(script, code);
         if run.exit.is_none() {
@@ -573,9 +589,13 @@ fn script_has_observed_denial_with(
             if evidence.len() != scopes.len() {
                 return false;
             }
-            for ((row, probe), scope) in evidence.iter().zip(&run.probes).zip(scopes) {
+            for (((row, probe), scope), call) in
+                evidence.iter().zip(&run.probes).zip(scopes).zip(&calls)
+            {
                 if row.as_object().is_none_or(|object| object.len() != 6)
                     || row["scope"] != scope
+                    || call[0] != scope
+                    || row["target"] != call[1]
                     || row["command"] != "nc"
                     || row["protocol"] != "tcp"
                     || row["result"] != "denied"
@@ -831,6 +851,146 @@ fn executable_contract_rejects_incomplete_tool_error_control() {
         }),
         "a timed-out error control is not completed rejection evidence"
     );
+}
+
+#[test]
+fn executable_contract_rejects_observations_for_another_source_target() {
+    let script = safe_fixture();
+    let observed = execute_fixture(&script, Some(1));
+    assert_eq!(observed.exit, Some(0));
+    assert_eq!(observed.probes.len(), 6);
+    let evidence = observed
+        .evidence
+        .lines()
+        .map(|line| {
+            let mut row: serde_json::Value = serde_json::from_str(line).unwrap();
+            row["target"] = "127.0.0.1:9".into();
+            row.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !script_has_observed_denial_with(&script, |_, code| {
+            if code == Some(1) {
+                FixtureRun {
+                    exit: Some(0),
+                    probes: vec!["-z 127.0.0.1:9".to_owned(); 6],
+                    evidence: evidence.clone(),
+                }
+            } else {
+                FixtureRun {
+                    exit: Some(2),
+                    probes: Vec::new(),
+                    evidence: String::new(),
+                }
+            }
+        }),
+        "matching receipt/probe observations must still match the reviewed source targets"
+    );
+}
+
+#[test]
+fn executable_contract_validates_injected_evidence_after_source_admission() {
+    let script = safe_fixture();
+    let observed = execute_fixture(&script, Some(1));
+    assert_eq!(observed.exit, Some(0));
+    let rows = observed
+        .evidence
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let render = |rows: &[serde_json::Value]| {
+        rows.iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let accepts = |evidence: &str, probes: &[String]| {
+        let calls = std::cell::Cell::new(0);
+        let accepted = script_has_observed_denial_with(&script, |_, code| {
+            calls.set(calls.get() + 1);
+            if code == Some(1) {
+                FixtureRun {
+                    exit: Some(0),
+                    probes: probes.to_owned(),
+                    evidence: evidence.to_owned(),
+                }
+            } else {
+                FixtureRun {
+                    exit: Some(2),
+                    probes: Vec::new(),
+                    evidence: String::new(),
+                }
+            }
+        });
+        assert!(
+            calls.get() > 0,
+            "source admission must reach the observations"
+        );
+        if accepted {
+            assert_eq!(calls.get(), 6, "all outcome controls must complete");
+        }
+        accepted
+    };
+    assert!(accepts(&render(&rows), &observed.probes));
+    for malformed in ["", "{", "[]", "null"] {
+        assert!(!accepts(malformed, &observed.probes), "{malformed}");
+    }
+    assert!(!accepts(&render(&rows[..5]), &observed.probes));
+    let mut extra = rows.clone();
+    extra.push(rows[0].clone());
+    assert!(!accepts(&render(&extra), &observed.probes));
+    for (field, value) in [
+        ("scope", serde_json::json!("DNS")),
+        ("command", serde_json::json!("echo")),
+        ("protocol", serde_json::json!("udp")),
+        ("target", serde_json::json!("127.0.0.1:9")),
+        ("target", serde_json::Value::Null),
+        ("result", serde_json::json!("connected")),
+        ("probe_exit", serde_json::json!(127)),
+        ("probe_exit", serde_json::json!("1")),
+        ("unknown", serde_json::json!(true)),
+    ] {
+        let mut mutated = rows.clone();
+        mutated[0][field] = value;
+        assert!(!accepts(&render(&mutated), &observed.probes), "{field}");
+    }
+    let mut missing = rows.clone();
+    missing[0].as_object_mut().unwrap().remove("command");
+    assert!(!accepts(&render(&missing), &observed.probes));
+    assert!(!accepts(&render(&rows), &observed.probes[..5]));
+    let mut mismatched = observed.probes.clone();
+    mismatched[0] = "-z 127.0.0.1:9".to_owned();
+    assert!(!accepts(&render(&rows), &mismatched));
+}
+
+#[test]
+fn executable_contract_preserves_admitted_call_whitespace() {
+    for (command_separator, operand_separator) in
+        [(" ", " "), ("\t", " "), (" \t ", "\t"), ("\t ", " \t ")]
+    {
+        let script = safe_fixture()
+            .lines()
+            .map(|line| {
+                if line.starts_with("probe_forbidden_endpoint ") {
+                    line.replace(
+                        "probe_forbidden_endpoint \"",
+                        &format!("probe_forbidden_endpoint{command_separator}\""),
+                    )
+                    .replace("\" \"", &format!("\"{operand_separator}\""))
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert!(supported_execution_script(&script));
+        assert!(
+            script_has_observed_denial(&script),
+            "admitted whitespace must keep the same observed-call contract: {command_separator:?}/{operand_separator:?}"
+        );
+    }
 }
 
 #[test]
