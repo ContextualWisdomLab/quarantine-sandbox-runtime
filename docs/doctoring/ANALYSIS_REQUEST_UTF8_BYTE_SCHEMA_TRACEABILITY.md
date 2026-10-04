@@ -58,6 +58,18 @@ The request wire shape and `schema_version: 1.0.0` are unchanged. No immutable p
 
 Consumers using only a stock validator must fail closed until they add support for the released CWL vocabulary or use the released runtime validator. They must not continue as though validation succeeded. Consumers that do implement the vocabulary must have enough normative information and conformance evidence to reproduce the same acceptance set as the runtime.
 
+## Current serialized-boundary RCA — 2026-10-05
+
+The current canonical #102 predecessor `a7fc09fc85018a58be581cc5a564f4b163870b35` does not contain the byte shapes claimed in its historical repair prose. Direct Rust 1.97.1 focused execution measured the positive source instance at 1,046 raw bytes, not 1,004. Independently decoded JSON shows 247 quotation marks plus a trailing `a` (248 filename bytes). Each quotation mark contributes two bytes after JSON escaping, so removing 21 excess quotation marks restores 226 quotation marks plus `a`: 1,004 raw / 1,024 after materializing `submitted_at: null`.
+
+The negative sibling is also malformed on that exact: 281 quotation marks, 1,113 raw / 1,133 normalized bytes, and a filename exceeding the 255-byte per-field ceiling. Repairing only the positive fixture caused the existing Rust witness to advance and fail at the negative filename-length assertion (actual 281, expected 227). Removing the 54 excess quotation marks restores the intended independent aggregate-overflow witness: 227 filename bytes, 1,005 raw / 1,025 normalized. The complete vocabulary-publication test then passed.
+
+This repair changes only the two decoded `original_file_name` strings. Keyword identities, ceilings, expected validity flags, other fields, schema, dialect, normative vocabulary prose, Rust production code, and all Gregorian vectors remain unchanged. These are keyword-level serialized-byte conformance instances, not complete valid requests: the inherited media-type string lacks the required type/subtype separator. They must not be represented as end-to-end runtime admission evidence.
+
+An independent read-only reviewer reproduced both byte calculations, checked the two-path decoded delta and individual field byte bounds, and reviewed the corrected fixture SHA-256 `63efc912d752133a88a7314fc328f9d9e2eadb4723fdf82492d6c0275fa033df`. Local focused publication, repository policy, rustfmt, and three coverage-parser unit tests passed. The original direct script invocation could not import the package; `python3 -m unittest scripts.test_check_coverage` is the verified entrypoint.
+
+The inherited Gregorian witness passes locally on #102, but its six-edge publication witness still fails for the missing 1900 non-400-century vector. That narrow command bypasses Linux/full-suite prerequisites. The `application_service_ownership` test is Linux-only and executes zero tests on macOS, which is NOT_RUN, not GREEN. The canonical application-service owner must repair/adopt its typed-error prerequisite on ordinary ancestry, and a fresh unchanged native exact must reach the artifact publication frontier before adding Gregorian semantic GREEN. Local fixture success is not complete coverage, positive effective-LSM evidence, protected integration, or immutable publication.
+
 ## Evidence and release conditions
 
 GREEN requires the unchanged exact candidate head to pass repository validation, formatting, tests, Clippy, rustdoc, complete owned-production coverage, qualifying review/security gates, and dependency-safe non-force ancestry over current #18. Positive effective-LSM remains an independent runtime gate and cannot be substituted by hosted negative confinement evidence.
