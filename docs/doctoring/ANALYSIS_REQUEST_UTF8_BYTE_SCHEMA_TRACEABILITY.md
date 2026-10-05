@@ -74,6 +74,24 @@ On repaired exact `7399aac4b4b13cd994ae90810910689676eb0504`, the macOS full sui
 
 New exact CI `37217000329` did not execute hosted source tests: verify, coverage, branch coverage, and negative isolation annotations state that the account is locked due to a billing issue. Positive LSM remains queued. This is an account-admission failure, not fixture or Gregorian semantic evidence. Billing settings require payer/operator authority; do not blindly rerun, bypass protection, weaken tests, or infer GREEN. Local success is not complete coverage, positive effective-LSM evidence, protected integration, or immutable publication. A fresh unchanged prerequisite-safe native exact must reach the artifact publication frontier before adding Gregorian semantic GREEN.
 
+## Offline candidate package binding — 2026-10-05
+
+A successful Cargo packaging operation is not an immutable publication or proof that its claimed Git revision contains the shipped contract bytes. The standalone `scripts/audit_artifact_contract_package.py` command checks six fixed contract artifacts against actual blobs at a caller-selected full Git revision: original Cargo manifest, request schema, dialect, normative vocabulary document, conformance vectors, and Rust domain contract. It reads archive members without extracting or executing them. It rejects non-regular/link/sparse entries, duplicate or noncanonical paths, missing or altered contract bytes, duplicate/invalid/dirty revision metadata, and configured compressed/expanded/member-count limits. The CLI uses exit 0 for matching candidate bytes and exit 2 with a fixed non-secret JSON error for audit failure. Every result retains `release_allowed: false`.
+
+Example, from any working directory:
+
+```sh
+python3 /path/to/repository/scripts/audit_artifact_contract_package.py \
+  --archive /path/to/candidate.crate \
+  --repository /path/to/repository \
+  --revision FULL_40_CHARACTER_COMMIT_SHA \
+  --prefix quarantine-sandbox-runtime-0.1.0
+```
+
+Run synthetic regression tests from the repository root with `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.test_audit_artifact_contract_package`. The actual candidate experiment on `c914f05fa1c76d23f086aef84548defc0cf62675` produced two identical source archives from one clean checkout: 155 regular members, 234,127 compressed bytes, SHA-256 `2388393355de9bbc2193baa6612e0496c4e6059ee6ffa6a3f1ea08d07d496225`. Both archives contain the expected normative artifacts; six audited contract files match the selected Git source bytes. Cargo regenerates `Cargo.lock` and normalized the root dependency reference `getrandom 0.3.4` to `getrandom`; separate inspection confirmed all 56 package identities/checksums and resolved dependency edges were unchanged. The CLI deliberately does not claim exact source equality for Cargo-generated manifest/lock transformations.
+
+This audit binds only the fixed contract bytes to caller-selected local source. It does not authenticate the publisher, check all archive content, validate contract semantics, verify archive signatures/SBOM/provenance, execute packaged tests, or grant consumer/release authority. Two invocations from one checkout do not satisfy the release runbook's two-clean-checkout reproducibility gate. Missing Gregorian vectors and native/security/protected/positive-isolation acceptance remain separate unresolved gates. A forged local Git source and matching package are not authentic distribution evidence.
+
 ## Evidence and release conditions
 
 GREEN requires the unchanged exact candidate head to pass repository validation, formatting, tests, Clippy, rustdoc, complete owned-production coverage, qualifying review/security gates, and dependency-safe non-force ancestry over current #18. Positive effective-LSM remains an independent runtime gate and cannot be substituted by hosted negative confinement evidence.
