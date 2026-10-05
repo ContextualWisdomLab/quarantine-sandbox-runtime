@@ -31,6 +31,22 @@ After the causal RED executes, the minimum GREEN is to adopt the released/versio
 
 The application-service schema remains domain truth for application-service fields. The vocabulary definition remains a separately versioned repository contract owned by #101/#102. Referring to its versioned dialect identity in this RED does not make mutable #102 source consumer authority; publication and semantics remain prerequisites. The local consumer RED may verify the adopted dialect surface, but the normative vocabulary specification and conformance vectors remain #101/#102 authority. Mutable-branch dependency and source copying are forbidden.
 
+## Executed consumer evidence — 2026-10-05
+
+Exact predecessor `ab42260cda53dc4ce02bae4fb56b492a81c99456` executed the intended dialect-identity RED in native CI `35461316380`: verify, coverage and branch-coverage reached the schema identity assertion after the multibyte runtime controls. A source-identical local Rust 1.97.1 focused run independently reached the same assertion. This is executed RED evidence, not a released vocabulary or consumer GREEN.
+
+The test-only follow-up adds two independent boundary controls without changing production Rust, public schemas, workflows, vocabulary files or the global Gap ledger:
+
+- For request identifiers, ASCII plus two-, three- and four-byte Unicode scalar fixtures cover 127, 128 and 129 UTF-8 bytes.
+- For command arguments, the same scalar widths cover 1,023, 1,024 and 1,025 bytes. Overflow rejection is also bound to argument indices 0, 1 and 63 within the existing 64-argument limit.
+- Exact and below-bound values must remain accepted. One-byte overflow must return the field-specific error; multibyte overflow still satisfies the current stock character-count controls.
+
+These controls pass against the existing byte-bounded runtime. They are regression coverage for implemented behavior, not a new production GREEN or execution of a standards-compliant JSON Schema validator. The stock string helper is a local character-length/control-character witness only. Actual validator interoperability and unsupported-vocabulary fail-closed execution remain part of the released consumer integration gate.
+
+Two independent scratch-only production mutations prove the added assertions discriminate: replacing byte counts with character counts fails both overflow controls, while changing the inclusive `>` ceiling to `>=` fails both exact-bound controls. Restoring the original runtime passes both. Mutants use a separate build target; no mutation is committed to the canonical owner branch.
+
+Historical shared-vocabulary predecessor `a7fc09fc... / 35991876348` must also be classified per job: verify observed an invocation error in the Linux ownership fixture, but stable coverage and nightly branch-coverage passed all seven ownership tests before failing the separate vocabulary publication fixture. A deterministic stale-error expectation is not established. The normal nonzero-exit expectation stays unchanged pending lower-level evidence. Current mutable #102 `c914f05fa1c76d23f086aef84548defc0cf62675` is not immutable released authority and is not copied into this consumer.
+
 ## Risks and follow-up
 
 A schema-only consumer can currently accept requests that the runtime later rejects, creating interoperability drift at an external contract boundary. A URI-only repair would create a second interoperability defect: the application-service schema could claim a dialect contract that is absent or not actually required. Conversely, weakening runtime byte bounds to match `maxLength` would change resource semantics and is not an acceptable compatibility repair.

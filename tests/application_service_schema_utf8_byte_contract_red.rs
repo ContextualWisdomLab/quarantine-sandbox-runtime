@@ -89,6 +89,102 @@ fn stock_string_assertions_accept(property: &Value, value: &str) -> bool {
             .any(|character| matches!(character as u32, 0x00..=0x1f | 0x7f..=0x9f))
 }
 
+fn utf8_boundary_cases(maximum_bytes: usize) -> Vec<(&'static str, String, String, String)> {
+    [
+        ("ASCII", "a", 1),
+        ("two-byte", "é", 2),
+        ("three-byte", "한", 3),
+        ("four-byte", "😀", 4),
+    ]
+    .into_iter()
+    .map(|(label, scalar, width)| {
+        let below_bytes = maximum_bytes - 1;
+        let below = format!(
+            "{}{}",
+            scalar.repeat(below_bytes / width),
+            "a".repeat(below_bytes % width)
+        );
+        let exact = format!(
+            "{}{}",
+            scalar.repeat(maximum_bytes / width),
+            "a".repeat(maximum_bytes % width)
+        );
+        let overflow = format!("{exact}a");
+        assert_eq!(below.len(), below_bytes, "{label} below-bound fixture");
+        assert_eq!(exact.len(), maximum_bytes, "{label} exact-bound fixture");
+        assert_eq!(
+            overflow.len(),
+            maximum_bytes + 1,
+            "{label} overflow fixture"
+        );
+        (label, below, exact, overflow)
+    })
+    .collect()
+}
+
+#[test]
+fn request_identifier_preserves_inclusive_utf8_byte_boundary() {
+    let schema = schema();
+    let property = &schema["properties"]["request_id"];
+    assert_eq!(property["x-cwl-maxUtf8Bytes"].as_u64(), Some(128));
+
+    for (label, below, exact, overflow) in utf8_boundary_cases(128) {
+        for accepted in [below, exact] {
+            assert!(stock_string_assertions_accept(property, &accepted));
+            let mut candidate = request();
+            candidate.request_id = accepted;
+            assert_eq!(
+                candidate.validate(&policy()),
+                Ok(()),
+                "{label} inclusive bound"
+            );
+        }
+        if label != "ASCII" {
+            assert!(stock_string_assertions_accept(property, &overflow));
+        }
+        let mut candidate = request();
+        candidate.request_id = overflow;
+        assert_eq!(
+            candidate.validate(&policy()),
+            Err(ApplicationServiceError::InvalidRequestId),
+            "{label} one-byte overflow"
+        );
+    }
+}
+
+#[test]
+fn command_arguments_preserve_inclusive_utf8_byte_boundary_and_error_index() {
+    let schema = schema();
+    let property = &schema["properties"]["command"]["items"];
+    assert_eq!(property["x-cwl-maxUtf8Bytes"].as_u64(), Some(1_024));
+
+    for (label, below, exact, overflow) in utf8_boundary_cases(1_024) {
+        for accepted in [below, exact] {
+            assert!(stock_string_assertions_accept(property, &accepted));
+            let mut candidate = request();
+            candidate.command = vec!["serve".to_owned(), accepted, "--ready".to_owned()];
+            assert_eq!(
+                candidate.validate(&policy()),
+                Ok(()),
+                "{label} inclusive bound"
+            );
+        }
+        if label != "ASCII" {
+            assert!(stock_string_assertions_accept(property, &overflow));
+        }
+        for argument_index in [0, 1, 63] {
+            let mut candidate = request();
+            candidate.command = vec!["serve".to_owned(); 64];
+            candidate.command[argument_index] = overflow.clone();
+            assert_eq!(
+                candidate.validate(&policy()),
+                Err(ApplicationServiceError::InvalidCommandArgument { argument_index }),
+                "{label} one-byte overflow at argument {argument_index}"
+            );
+        }
+    }
+}
+
 #[test]
 fn public_schema_must_enforce_runtime_utf8_byte_bounds_for_request_id_and_command() {
     let schema = schema();
