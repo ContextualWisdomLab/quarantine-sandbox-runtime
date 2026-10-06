@@ -15,7 +15,8 @@ mod sandbox_execution;
 
 pub use application_service::{
     ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
-    IsolationAttestation, ServiceEndpoint, ServiceProtocol,
+    IsolationAttestation, ServiceEndpoint, ServicePlanExit, ServiceProtocol,
+    run_application_service_plan_cli,
 };
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,

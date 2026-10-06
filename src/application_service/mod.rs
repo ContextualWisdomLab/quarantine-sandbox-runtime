@@ -1,7 +1,11 @@
 //! Supporting bounded context for launching an approved application as an isolated service.
 
+mod plan_cli;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use plan_cli::{ServicePlanExit, run_application_service_plan_cli};
 
 use crate::{
     CONTRACT_SCHEMA_VERSION, IsolationPolicy, ResourceRequest,
@@ -484,6 +488,38 @@ pub enum ApplicationServiceError {
     /// Cleanup could not prove removal of all runtime-owned resources.
     #[error("sandbox cleanup failed")]
     CleanupFailed,
+}
+
+impl ApplicationServiceError {
+    /// Return the stable machine-readable wire code for this error.
+    ///
+    /// Codes never include caller-supplied values, so they are safe to emit in
+    /// diagnostics. Every variant maps to exactly one code; a new variant must
+    /// choose its code here because the match has no wildcard arm.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
+            Self::InvalidRequestId => "invalid_request_id",
+            Self::ImageReferenceNotDigestPinned => "image_reference_not_digest_pinned",
+            Self::InvalidContainerPort => "invalid_container_port",
+            Self::TooManyCommandArguments { .. } => "too_many_command_arguments",
+            Self::InvalidCommandArgument { .. } => "invalid_command_argument",
+            Self::InvalidPolicy { .. } => "invalid_policy",
+            Self::ResourceLimitExceeded { .. } => "resource_limit_exceeded",
+            Self::LeaseExpiryOverflow => "lease_expiry_overflow",
+            Self::BackendInvocationFailed { .. } => "backend_invocation_failed",
+            Self::BackendCommandTimedOut { .. } => "backend_command_timed_out",
+            Self::BackendOutputLimitExceeded { .. } => "backend_output_limit_exceeded",
+            Self::BackendCommandFailed { .. } => "backend_command_failed",
+            Self::BackendNotRootless => "backend_not_rootless",
+            Self::IsolationVerificationFailed { .. } => "isolation_verification_failed",
+            Self::MalformedIsolationInspection { .. } => "malformed_isolation_inspection",
+            Self::InvalidPortMapping => "invalid_port_mapping",
+            Self::ReadinessTimeout => "readiness_timeout",
+            Self::CleanupFailed => "cleanup_failed",
+        }
+    }
 }
 
 fn is_digest_pinned_image_reference(value: &str) -> bool {

@@ -47,6 +47,7 @@ GitHub's immutable-action guidance requires full-length commit SHA pinning for e
 | Runtime/lifecycle ownership | Draft #21 retains independent invocation collision, exact acquired container ID, malformed create-ID, and destructive-authority REDs. | REDs staged | Preserve consumer `request_id` as correlation; use collision-resistant invocation identity and exact acquired backend IDs for lifecycle authority. |
 | Pre-attestation command execution | Command path can start hostile payload before positive effective isolation is established; issue #25 remains the hold/attest/release boundary owner. | Security gap; RED staged downstream | Require a trusted hold/attest/release primitive or equivalent. Cleanup after execution does not undo pre-attestation code execution. |
 | Crash/restart orphan recovery | Current leases/receipts are process-local and GA requires durable reclamation after runtime crash. | Missing GA capability | Add Recovery context/reaper only with explicit persistence/retention/idempotency/recovery ADR and tests. |
+| Offline launch-plan preflight | Issue #149 adds the `qsr-service-plan` inbound adapter (ADR-0011): bounded no-follow regular-file reads, policy-first validation with the runtime's UTF-8 byte bounds, fixed error codes, and a plan document marked `execution: not_performed` / `isolation_evidence: not_established`. | Draft stacked on root #1; local gates only | Obtain exact-head CI and review. A plan is never isolation evidence and is not schema GREEN for #138. |
 
 ## Artifact-analysis execution and evidence
 

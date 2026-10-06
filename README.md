@@ -37,7 +37,8 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 - no host devices, runtime sockets, broad host mounts, privileged mode, or ambient consumer credentials in the P0 contract;
 - direct process invocation without a shell;
 - bounded readiness gating and cleanup receipts;
-- versioned service leases with isolation attestation.
+- versioned service leases with isolation attestation;
+- offline `qsr-service-plan --request <request.json> --policy <policy.json> --started-at <epoch-seconds>` preflight that validates inputs with the runtime's UTF-8 byte bounds and prints the deterministic Podman plan without executing anything (ADR-0011). Its output is marked `execution: not_performed` and `isolation_evidence: not_established`. The tool is Unix-only; on other targets every input is reported as unavailable.
 
 **Important:** fake-Podman process-boundary tests verify command/lifecycle integration. They are not evidence that real Podman isolation has passed until the real-container E2E lane succeeds.
 

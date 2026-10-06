@@ -36,7 +36,9 @@
 - stable protocol/backend codes;
 - deterministic sandbox/network names;
 - required Podman isolation flags;
-- absence of privileged, host-network, runtime-socket, device, arbitrary mount, environment, and external-bind request paths.
+- absence of privileged, host-network, runtime-socket, device, arbitrary mount, environment, and external-bind request paths;
+- one stable wire code per `ApplicationServiceError` variant;
+- offline `qsr-service-plan` transport: exact library-plan output, closed published schema, constant non-evidence markers, argument order, every usage error including signed/whitespace/exponent/non-UTF-8/out-of-range timestamps, missing/symlink/directory/FIFO inputs without blocking, inclusive 64 KiB bound, malformed and unknown-field inputs, each validation code without echoed values or paths, lease-expiry overflow at `u64::MAX`, multibyte inclusive byte bounds, output write failure, and a real-binary subprocess path.
 
 ## Process-boundary tests
 

@@ -16,6 +16,7 @@ SCHEMA_FILES = (
     "schemas/application-service-lease.schema.json",
     "schemas/application-service-cleanup.schema.json",
     "schemas/isolation-policy.schema.json",
+    "schemas/application-service-launch-plan.schema.json",
 )
 REQUIRED_FILES = (
     "AGENTS.md",
@@ -47,6 +48,7 @@ REQUIRED_FILES = (
     "docs/adr/0004-truthful-capability-claims.md",
     "docs/adr/0005-sandbox-execution-context.md",
     "docs/adr/0006-isolated-application-service.md",
+    "docs/adr/0011-offline-application-service-launch-plan.md",
     "docs/doctoring/REFERENCES.md",
     "docs/doctoring/STANDARD_TRACEABILITY.md",
     *SCHEMA_FILES,

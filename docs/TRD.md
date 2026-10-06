@@ -18,7 +18,10 @@ src/
 │   ├── ingestion.rs
 │   └── runtime.rs
 ├── application_service/      Supporting bounded context
-│   └── mod.rs
+│   ├── mod.rs
+│   └── plan_cli.rs           Offline launch-plan inbound adapter (ADR-0011)
+├── bin/
+│   └── qsr_service_plan.rs   Branch-free `qsr-service-plan` shim
 ├── sandbox_execution/        Core bounded context
 │   └── mod.rs
 ├── infrastructure/           Runtime/process adapters
