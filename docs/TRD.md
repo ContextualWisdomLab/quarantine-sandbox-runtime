@@ -169,6 +169,7 @@ Existing artifact-analysis code remains source-compatible through root crate re-
 
 - Ingestion validates size/name before cloning bytes.
 - SHA-256 binds artifact identity.
+- `verify_artifact_binding` recomputes digest, byte length, and classification from consumer-held bytes and compares them with a validated bundle descriptor (ADR 0012). It reports per-field `matched`/`mismatched`; it is not a verdict, completeness signal, or producer authentication.
 - Format recognition is non-executing.
 - Static analyzers implement `StaticAnalyzer` and emit normalized findings/failures.
 - Evidence identifiers and ordering are deterministic for the same request/configuration/bytes.

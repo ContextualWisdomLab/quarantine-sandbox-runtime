@@ -12,6 +12,8 @@ A security or ingestion consumer submits:
 
 The runtime returns a versioned `EvidenceBundle`. `RuntimeDisposition` describes analysis completeness only. `consumer_verdict_required` remains true. The consumer decides maliciousness, incident state, quarantine/block/allow/review, notification, and retention.
 
+A consumer that still holds the artifact bytes can call `verify_artifact_binding(&bundle, &bytes)` to confirm that a stored or transported bundle describes those bytes. The function recomputes the SHA-256 digest, byte length, and non-executing classification and reports each field as `matched` or `mismatched`. A match is neither a verdict nor proof that this runtime produced the bundle.
+
 ## Isolated application service
 
 An Agent/Chat/tool consumer submits an `ApplicationServiceRequest` only after the consumer has already authorized the application for the relevant tenant/session/task.

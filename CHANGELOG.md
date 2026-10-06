@@ -12,6 +12,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
 - Pluggable static analyzer interface and attributable analyzer-failure evidence.
+- Offline artifact-binding verification (`verify_artifact_binding`, ADR 0012) that reports whether an `EvidenceBundle` descriptor matches consumer-held bytes by digest, length, and classification.
 - Explicit runtime boundary declaration for no credentials, no network access, and no artifact execution in the static foundation profile.
 - Draft 2020-12 JSON Schemas for artifact-analysis requests/evidence bundles and isolated application-service request/policy/lease/cleanup contracts.
 - Security, threat-model, operability, testing, architecture, ADR, product-gap, and research-traceability baselines.

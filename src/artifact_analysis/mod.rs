@@ -6,10 +6,15 @@
 //! `sandbox_execution` context through an explicit port rather than embedding
 //! container-backend details here.
 
+mod artifact_binding;
 mod contracts;
 mod ingestion;
 mod runtime;
 
+pub use artifact_binding::{
+    ArtifactBindingError, ArtifactBindingOutcome, ArtifactBindingReport, FieldBinding,
+    verify_artifact_binding,
+};
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
     CONTRACT_SCHEMA_VERSION, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,

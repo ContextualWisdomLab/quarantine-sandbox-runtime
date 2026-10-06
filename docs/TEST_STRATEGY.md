@@ -21,7 +21,8 @@
 - analyzer ordering/failure attribution;
 - deterministic evidence IDs/order;
 - dynamic-profile unavailable => `inconclusive`;
-- evidence bundle and runtime boundary validation.
+- evidence bundle and runtime boundary validation;
+- artifact binding: engine bundles match their own bytes (property test), and changed/truncated bytes or edited digest/size/kind are reported as field-level mismatches, while invalid bundles and empty bytes are rejected.
 
 ### Application service
 

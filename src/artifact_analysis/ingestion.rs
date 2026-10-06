@@ -172,7 +172,7 @@ fn validate_artifact_name(
     Ok(())
 }
 
-fn detect_artifact_kind(artifact_name: &str, bytes: &[u8]) -> ArtifactKind {
+pub(super) fn detect_artifact_kind(artifact_name: &str, bytes: &[u8]) -> ArtifactKind {
     if bytes.starts_with(b"MZ") {
         return ArtifactKind::PortableExecutable;
     }
