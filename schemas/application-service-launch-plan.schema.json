@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/application-service-launch-plan-1.0.0.schema.json",
+  "title": "Isolated Application Service Launch Plan",
+  "description": "Deterministic rootless-Podman argv derived from a validated request and policy. No backend process was executed; this document is never isolation evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "execution",
+    "isolation_evidence",
+    "sandbox_name",
+    "network_name",
+    "expires_at_epoch_seconds",
+    "rootless_probe_args",
+    "network_create_args",
+    "container_create_args"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "kind": { "const": "application_service_launch_plan" },
+    "execution": { "const": "not_performed" },
+    "isolation_evidence": { "const": "not_established" },
+    "sandbox_name": { "type": "string", "pattern": "^qsr-app-[0-9a-f]{16}$" },
+    "network_name": { "type": "string", "pattern": "^qsr-net-[0-9a-f]{16}$" },
+    "expires_at_epoch_seconds": {
+      "description": "Unsigned 64-bit Unix timestamp. Values above 2^53 lose precision in JSON parsers that use IEEE-754 doubles; read it as an unsigned 64-bit integer.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "rootless_probe_args": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "network_create_args": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "container_create_args": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    }
+  }
+}

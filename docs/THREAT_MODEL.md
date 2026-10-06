@@ -70,6 +70,7 @@ flowchart LR
 - **Runtime socket leaks host control:** no Docker/Podman/containerd socket request or mount.
 - **Backend diagnostics echo hostile data:** errors use stable codes; future captured output must remain bounded and sanitized.
 - **Service becomes externally reachable:** publication is only `127.0.0.1` and returned mapping is validated.
+- **Offline plan CLI leaks host data:** `qsr-service-plan` diagnostics are fixed codes that never contain request values, policy values or host paths. The plan echoes consumer argv and image reference verbatim, which is acceptable only because the P0 request carries no secrets.
 
 ### Denial of service
 
@@ -78,6 +79,7 @@ flowchart LR
 - **Long-running application:** lease/container timeout plus consumer termination; durable orphan reaper is a GA gap.
 - **Readiness hangs:** bounded timeout/poll interval.
 - **Excessive artifacts/metadata:** ingestion/context limits.
+- **Offline plan CLI input abuse:** `qsr-service-plan` opens inputs with `O_NOFOLLOW | O_NONBLOCK | O_NOCTTY`, accepts only regular files checked through the opened handle, and reads at most 64 KiB plus one byte per input, so symlinks, directories, FIFOs and oversized files fail closed without blocking.
 - **Container/backend process storm:** one sandbox per accepted request and PID/resource policy; concurrency/admission control is a future operability slice.
 
 ### Elevation of privilege

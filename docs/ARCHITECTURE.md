@@ -59,6 +59,8 @@ Responsibilities:
 
 It does not select or authorize the application for an Agent.
 
+Inbound adapter: the offline `qsr-service-plan` binary (ADR-0011) reads a request and a policy from local regular files, validates them through this context, and prints the deterministic Podman plan. It executes no backend process; its output is review material, not isolation evidence.
+
 ## Context Map
 
 ```mermaid

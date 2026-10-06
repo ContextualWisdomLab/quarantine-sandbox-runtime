@@ -4,6 +4,8 @@
 
 The current crate is an embeddable runtime library. It owns sandbox lifecycle and evidence semantics, not a public multi-tenant control-plane API. A future service wrapper must preserve the same domain boundary and add authentication, tenancy, queueing, durable lease state, and observability through explicit adapters.
 
+The crate also ships one offline operator tool, `qsr-service-plan` (ADR-0011). It prints the launch plan for a request and a policy without starting any process. Exit `0` means a plan was printed; `64` usage, `65` invalid input, `66` input unavailable, `67` input too large, `70` internal. Discard stdout whenever the exit status is not `0`.
+
 ## Host prerequisites for rootless Podman profile
 
 - Linux host with a supported rootless Podman configuration;

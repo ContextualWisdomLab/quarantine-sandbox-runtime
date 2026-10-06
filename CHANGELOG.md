@@ -8,6 +8,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Added
 
+- Offline `qsr-service-plan` application-service launch-plan transport (ADR-0011, #149): validates request and policy with runtime UTF-8 byte bounds, prints the deterministic rootless-Podman plan without executing it, and publishes `application-service-launch-plan.schema.json`. Output is never isolation evidence.
+- Stable `ApplicationServiceError::code()` wire codes.
 - Source-agnostic analysis request and evidence contracts.
 - Bounded immutable artifact ingestion and SHA-256 identity.
 - Deterministic executable, archive, document, script, text, and unknown-format classification.
