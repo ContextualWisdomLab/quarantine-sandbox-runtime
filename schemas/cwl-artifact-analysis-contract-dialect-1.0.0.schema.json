@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json",
+  "$dynamicAnchor": "meta",
+  "$vocabulary": {
+    "https://json-schema.org/draft/2020-12/vocab/core": true,
+    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+    "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
+    "https://json-schema.org/draft/2020-12/vocab/validation": true,
+    "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
+    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
+    "https://json-schema.org/draft/2020-12/vocab/content": true,
+    "https://contextualwisdomlab.org/vocab/quarantine-artifact-analysis-contract-1.0.0": true
+  },
+  "title": "CWL quarantine artifact-analysis contract dialect 1.0.0",
+  "description": "Draft 2020-12 dialect requiring CWL artifact-analysis byte-bound semantics. Implementations that do not recognize the required CWL vocabulary must refuse to process schemas declaring this dialect.",
+  "allOf": [
+    {
+      "$ref": "https://json-schema.org/draft/2020-12/schema"
+    }
+  ],
+  "properties": {
+    "x-cwl-maxUtf8Bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "x-cwl-maxSerializedUtf8Bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "x-cwl-rfc3339Profile": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

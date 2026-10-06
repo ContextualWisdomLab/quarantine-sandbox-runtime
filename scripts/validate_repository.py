@@ -9,6 +9,18 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+STOCK_DRAFT_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+CWL_ARTIFACT_ANALYSIS_DIALECT = (
+    "https://contextualwisdomlab.org/schemas/quarantine/"
+    "cwl-artifact-analysis-contract-dialect-1.0.0.schema.json"
+)
+CWL_ARTIFACT_ANALYSIS_VOCABULARY = (
+    "https://contextualwisdomlab.org/vocab/"
+    "quarantine-artifact-analysis-contract-1.0.0"
+)
+CWL_ARTIFACT_ANALYSIS_DIALECT_FILE = (
+    "schemas/cwl-artifact-analysis-contract-dialect-1.0.0.schema.json"
+)
 SCHEMA_FILES = (
     "schemas/analysis-request.schema.json",
     "schemas/evidence-bundle.schema.json",
@@ -59,6 +71,7 @@ REQUIRED_FILES = (
     "docs/adr/0008-podman-backed-command-execution-and-cli.md",
     "docs/doctoring/REFERENCES.md",
     "docs/doctoring/STANDARD_TRACEABILITY.md",
+    CWL_ARTIFACT_ANALYSIS_DIALECT_FILE,
     *SCHEMA_FILES,
 )
 FORBIDDEN_DDD_PATHS = (
@@ -152,10 +165,32 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as exc:
             errors.append(f"invalid JSON schema {schema_path.name}: {exc}")
             continue
-        if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-            errors.append(f"schema is not Draft 2020-12: {schema_path.name}")
+        expected_dialect = (
+            CWL_ARTIFACT_ANALYSIS_DIALECT
+            if relative_path == "schemas/analysis-request.schema.json"
+            else STOCK_DRAFT_2020_12_DIALECT
+        )
+        if schema.get("$schema") != expected_dialect:
+            errors.append(
+                f"schema declares unexpected dialect: {schema_path.name}: "
+                f"expected {expected_dialect}"
+            )
         if schema.get("additionalProperties") is not False:
             errors.append(f"top-level schema must fail closed: {schema_path.name}")
+
+    dialect_path = ROOT / CWL_ARTIFACT_ANALYSIS_DIALECT_FILE
+    try:
+        dialect = json.loads(dialect_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"invalid CWL artifact-analysis dialect: {exc}")
+    else:
+        if dialect.get("$schema") != STOCK_DRAFT_2020_12_DIALECT:
+            errors.append("CWL artifact-analysis dialect must be defined over Draft 2020-12")
+        if dialect.get("$id") != CWL_ARTIFACT_ANALYSIS_DIALECT:
+            errors.append("CWL artifact-analysis dialect identifier does not match repository policy")
+        vocabulary = dialect.get("$vocabulary")
+        if not isinstance(vocabulary, dict) or vocabulary.get(CWL_ARTIFACT_ANALYSIS_VOCABULARY) is not True:
+            errors.append("CWL artifact-analysis byte-bound vocabulary must be required")
 
     workflow_root = ROOT / ".github/workflows"
     workflow_paths = sorted(workflow_root.glob("*.yml")) + sorted(workflow_root.glob("*.yaml"))
