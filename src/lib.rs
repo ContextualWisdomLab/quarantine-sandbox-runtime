@@ -24,10 +24,11 @@ pub use application_service::{
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
     AnalyzerFinding, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION,
+    CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, CONTRACT_SCHEMA_VERSION, CWL_CONTRACT_VOCABULARY_ID,
     ClaudePluginPackageAnalysisRequest, ClaudePluginPackageContractError, ContractError,
-    EvidenceBundle, EvidenceKind, EvidenceRecord, FormatAnalyzer, IngestedArtifact, IngestionError,
-    IngestionPolicy, RuntimeDisposition, RuntimeManifest, StaticAnalyzer, ingest_bytes,
+    ContractVocabularyError, CwlContractKeyword, EvidenceBundle, EvidenceKind, EvidenceRecord,
+    FormatAnalyzer, IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition,
+    RuntimeManifest, StaticAnalyzer, canonical_bounded_source_context_json, ingest_bytes,
     to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};

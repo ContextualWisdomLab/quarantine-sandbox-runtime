@@ -8,6 +8,16 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Added
 
+- Executable CWL artifact-analysis contract vocabulary 1.0.0 (`CwlContractKeyword`,
+  `canonical_bounded_source_context_json`, `BoundedSourceContext::canonical_json`): every required
+  schema keyword can be evaluated, unknown keywords/profile values are refused, and every published
+  conformance vector is checked in tests (#134).
+- `quarantine-sandbox-runtime validate-analysis-request`: validates one stdin `AnalysisRequest`
+  against the Rust domain contract with bounded input, a one-line JSON verdict and exit codes 0/1/2.
+- Pre-publication completion of vocabulary 1.0.0 (append-only): conformance cases grow from 10 to 25
+  (Gregorian century/month, case, fractional-second including an unbounded-length fraction,
+  applicability and shape vectors, an integer-valued `30.0` ceiling) plus seven `schema_refusal_cases`; explicit uppercase-`T`,
+  fractional-second, applicability, refusal and I-JSON clauses.
 - Bounded command-execution contract (`CommandExecutionRequest`/`CommandExecutionResult`/
   `CommandExecutionBackend`, `execute_command`) alongside the existing service-lease contract, for a
   consumer that needs to run one command to completion and receive a structured exit status plus
@@ -51,6 +61,10 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Changed
 
+- `AnalysisRequest::validate()` counts the bounded-source-context byte limit with the same RFC 8785
+  canonical serializer the published `x-cwl-maxSerializedUtf8Bytes` keyword uses. The count is
+  unchanged for every context: the previous `serde_json` serialization already wrote absent members
+  as `null` and used the same string escaping; a regression test pins this.
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.
 - Artifact-analysis implementation moved from generic crate-root files into `src/artifact_analysis/` to match the accepted DDD bounded context while preserving the public crate facade.
 - Rootless Podman implementation moved from the Core `sandbox_execution` path into `src/infrastructure/`; the Core no longer depends on `application_service` error types.
@@ -69,6 +83,8 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Fixed
 
+- The binary no longer panics on a non-UTF-8 command-line argument (including on the existing `run`
+  path); it reports `arguments must be valid UTF-8` and exits 2.
 - `production_source_has_no_panic_shortcuts` (`tests/ddd_architecture.rs`) excludes each source file's own `#[cfg(test)] mod tests` block before scanning for `.unwrap(`/`.expect(`/`panic!(` so legitimate test-only assertions are not classified as production shortcuts.
 - Podman inspection/process parsing accepts explicit JSON `null` capability fields, accepts the `io.podman.annotations.userns` annotation as effective user-namespace evidence when `HostConfig.UsernsMode` is empty, and strips a trailing NUL from `/proc/<pid>/attr/current`-derived LSM labels. These compatibility repairs affect the shared application-service verification path as well as command execution.
 

@@ -46,9 +46,23 @@ MUST treat a year divisible by 4 as a leap year except a century year not divisi
 
 MUST reject leap-second notation and require the uppercase UTC designator Z. Seconds equal to `60`, including otherwise valid RFC 3339 leap-second forms, are outside this narrower CWL profile.
 
+MUST require the uppercase date/time separator T. RFC 3339 §5.6 permits a lower-case `t` in the base syntax, but this profile narrows it exactly as it narrows `z`; a lower-case `t` is invalid.
+
+MUST accept RFC 3339 fractional seconds of one or more decimal digits (`time-secfrac = "." 1*DIGIT`) of any length. The profile itself has no length bound; a length limit applies only through a sibling `x-cwl-maxUtf8Bytes` keyword, as on the request's `submitted_at` field. A decimal point without at least one following digit is invalid.
+
 An implementation MUST accept the string if and only if all of the profile constraints above hold. These semantics intentionally match the current Rust artifact-analysis request validator rather than weakening it to the stock Draft 2020-12 `format` annotation or to the structural day-of-month regular expression in the request schema.
 
-The Gregorian profile semantics were integrated into vocabulary 1.0.0 before its first immutable publication. They therefore share the same vocabulary identity and conformance publication as the byte-bound keywords; consumers must not obtain this version from mutable branch source.
+The Gregorian profile semantics, the uppercase-`T` and fractional-second clauses above, and the applicability, schema-refusal and I-JSON rules below were all integrated into vocabulary 1.0.0 before its first immutable publication. They therefore share the same vocabulary identity and conformance publication as the byte-bound keywords; consumers must not obtain this version from mutable branch source.
+
+## Applicability and schema refusal
+
+Each keyword is an assertion, never an annotation-only fallback in the way stock `format` may be. Like Draft 2020-12 type-specific validation keywords, a keyword evaluates as valid for an instance type it does not apply to: `x-cwl-maxUtf8Bytes` and `x-cwl-rfc3339Profile` apply only to strings, and `x-cwl-maxSerializedUtf8Bytes` applies only to objects. The sibling `type` keyword owns type rejection; a nullable `submitted_at` set to `null` therefore satisfies `x-cwl-rfc3339Profile`.
+
+For an object instance, `x-cwl-maxSerializedUtf8Bytes` MUST evaluate as invalid when the object has a member outside the closed five-member `BoundedSourceContext` set above or a member whose value is neither a string nor `null`. Such an instance has no defined CWL materialization; the keyword must not count an implementation-specific serialization of it.
+
+A consumer MUST refuse the schema, rather than evaluate an instance, when an `x-cwl-` keyword is not defined by this version, when `x-cwl-rfc3339Profile` names a profile value other than the exact case-sensitive token defined above, or when a byte-ceiling keyword value is not a non-negative integer. Following Draft 2020-12, an integer-valued number such as `30.0` is an integer. A byte ceiling greater than 9007199254740991 (2^53 − 1) is refused because not every JSON consumer can represent it exactly.
+
+An instance that is not I-JSON (RFC 7493) — for example one with duplicate member names or a string containing an unpaired surrogate escape such as `\ud800` — has no single CWL interpretation. A consumer MUST treat such an instance as invalid rather than choose one parse of it; the reference request validator rejects both forms before any keyword is evaluated. The conformance vectors cannot express these forms because their parsed JSON representation is already I-JSON.
 
 ## Conformance publication
 
@@ -60,7 +74,13 @@ The companion machine-readable vectors are published at `tests/fixtures/cwl_arti
 - an escaping/non-ASCII JCS boundary that pins the exact canonical JSON representation instead of trusting fixture metadata;
 - a valid Gregorian leap-day control for `x-cwl-rfc3339Profile`;
 - invalid non-leap February 29 and impossible month/day controls;
-- invalid leap-second notation and numeric-offset substitution controls for the uppercase-`Z` profile.
+- invalid leap-second notation and numeric-offset substitution controls for the uppercase-`Z` profile;
+- century controls distinguishing the 4/100/400 rule (`1900-02-29` invalid, `2000-02-29` valid) and a 30-day-month control (`2026-04-31` invalid);
+- case-sensitivity controls rejecting lower-case `z` and lower-case `t`;
+- an accepting integer-valued number ceiling (`30.0`) that a consumer must treat as the integer `30`;
+- an accepting fractional-second control, an accepting 41-byte fractional-second control showing the profile has no length bound of its own, a rejected empty fraction, and a rejected `2100-02-29`;
+- not-applicable controls (`null`/non-object instances evaluate as valid) and invalid unknown-member and non-string-member controls for `x-cwl-maxSerializedUtf8Bytes`;
+- a separate `schema_refusal_cases` array of keyword occurrences that a consumer must refuse instead of evaluating.
 
 Implementations claiming this vocabulary version must produce the same validity result for those vectors. The vectors are conformance evidence for the exact versioned vocabulary identity; later keywords or semantic changes require a new released contract version rather than mutation of this publication.
 

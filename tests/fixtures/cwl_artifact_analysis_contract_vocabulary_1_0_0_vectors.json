@@ -83,6 +83,152 @@
       "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
       "instance": "2024-02-29T23:59:59+00:00",
       "valid": false
+    },
+    {
+      "id": "rfc3339_profile_century_non_400_february_29_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "1900-02-29T00:00:00Z",
+      "valid": false
+    },
+    {
+      "id": "rfc3339_profile_century_400_february_29_valid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2000-02-29T00:00:00Z",
+      "valid": true
+    },
+    {
+      "id": "rfc3339_profile_thirty_day_month_31_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2026-04-31T00:00:00Z",
+      "valid": false
+    },
+    {
+      "id": "rfc3339_profile_lowercase_z_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2024-02-29T23:59:59z",
+      "valid": false
+    },
+    {
+      "id": "rfc3339_profile_fractional_second_valid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2024-02-29T23:59:59.123456789Z",
+      "valid": true
+    },
+    {
+      "id": "rfc3339_profile_lowercase_t_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2024-02-29t23:59:59Z",
+      "valid": false
+    },
+    {
+      "id": "max_utf8_bytes_non_string_not_applicable",
+      "keyword": "x-cwl-maxUtf8Bytes",
+      "keyword_value": 30,
+      "instance": null,
+      "valid": true
+    },
+    {
+      "id": "max_serialized_utf8_bytes_unknown_member_invalid",
+      "keyword": "x-cwl-maxSerializedUtf8Bytes",
+      "keyword_value": 1024,
+      "instance": {
+        "unexpected_field": "x"
+      },
+      "valid": false
+    },
+    {
+      "id": "max_serialized_utf8_bytes_non_string_member_invalid",
+      "keyword": "x-cwl-maxSerializedUtf8Bytes",
+      "keyword_value": 1024,
+      "instance": {
+        "original_file_name": 7
+      },
+      "valid": false
+    },
+    {
+      "id": "max_serialized_utf8_bytes_non_object_not_applicable",
+      "keyword": "x-cwl-maxSerializedUtf8Bytes",
+      "keyword_value": 1024,
+      "instance": null,
+      "valid": true
+    },
+    {
+      "id": "rfc3339_profile_null_not_applicable",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": null,
+      "valid": true
+    },
+    {
+      "id": "rfc3339_profile_century_2100_february_29_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2100-02-29T00:00:00Z",
+      "valid": false
+    },
+    {
+      "id": "rfc3339_profile_empty_fraction_invalid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2024-02-29T23:59:59.Z",
+      "valid": false
+    },
+    {
+      "id": "rfc3339_profile_fraction_has_no_length_bound_valid",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "utc_z_only_with_gregorian_day_validation_no_leap_second_notation",
+      "instance": "2024-02-29T23:59:59.12345678901234567890Z",
+      "valid": true
+    },
+    {
+      "id": "max_utf8_bytes_integer_valued_number_ceiling_valid",
+      "keyword": "x-cwl-maxUtf8Bytes",
+      "keyword_value": 30.0,
+      "instance": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    }
+  ],
+  "schema_refusal_cases": [
+    {
+      "id": "unknown_cwl_keyword_refused",
+      "keyword": "x-cwl-unknownKeyword",
+      "keyword_value": 1
+    },
+    {
+      "id": "unknown_rfc3339_profile_refused",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "lenient_rfc3339"
+    },
+    {
+      "id": "rfc3339_profile_value_case_sensitive_refused",
+      "keyword": "x-cwl-rfc3339Profile",
+      "keyword_value": "UTC_Z_ONLY_WITH_GREGORIAN_DAY_VALIDATION_NO_LEAP_SECOND_NOTATION"
+    },
+    {
+      "id": "max_utf8_bytes_negative_refused",
+      "keyword": "x-cwl-maxUtf8Bytes",
+      "keyword_value": -1
+    },
+    {
+      "id": "max_utf8_bytes_fractional_refused",
+      "keyword": "x-cwl-maxUtf8Bytes",
+      "keyword_value": 1.5
+    },
+    {
+      "id": "max_serialized_utf8_bytes_string_refused",
+      "keyword": "x-cwl-maxSerializedUtf8Bytes",
+      "keyword_value": "1024"
+    },
+    {
+      "id": "max_utf8_bytes_beyond_exact_json_integer_refused",
+      "keyword": "x-cwl-maxUtf8Bytes",
+      "keyword_value": 9007199254740992
     }
   ]
 }

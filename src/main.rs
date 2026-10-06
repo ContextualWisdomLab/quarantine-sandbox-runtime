@@ -13,16 +13,24 @@
 
 use std::{
     env,
+    ffi::{OsStr, OsString},
+    io::{self, Read, Write},
     process::ExitCode,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use quarantine_sandbox_runtime::{
-    CommandExecutionRequest, IsolationPolicy, PrSourceArtifactInput, ResourceRequest,
-    RootlessPodmanAdapter, execute_command,
+    AnalysisRequest, CommandExecutionRequest, ContractError, IsolationPolicy,
+    PrSourceArtifactInput, ResourceRequest, RootlessPodmanAdapter, execute_command,
 };
 
 const SCHEMA_VERSION: &str = "1.0.0";
+
+/// Subcommand that validates one artifact-analysis request without executing anything.
+const VALIDATE_ANALYSIS_REQUEST: &str = "validate-analysis-request";
+
+/// Upper bound on bytes read from stdin; a valid request is far smaller.
+const MAX_ANALYSIS_REQUEST_INPUT_BYTES: u64 = 64 * 1024;
 
 /// Operator ceiling every CLI invocation validates against.
 ///
@@ -71,7 +79,11 @@ fn print_usage() {
          Runs one bounded command to completion inside a rootless-Podman sandbox with no network\n\
          namespace attachment (all egress denied) and prints its exit status plus bounded\n\
          stdout/stderr as JSON on stdout. This process's own exit code mirrors the sandboxed\n\
-         command's exit code (137 if it was killed for exceeding --timeout-seconds)."
+         command's exit code (137 if it was killed for exceeding --timeout-seconds).\n\n\
+         usage: quarantine-sandbox-runtime validate-analysis-request < request.json\n\
+         Validates one artifact-analysis request on stdin against the Rust domain contract and\n\
+         prints one JSON verdict line. Exit 0 valid; 1 not a valid contract instance,\n\
+         including malformed JSON; 2 unusable invocation, input or output."
     );
 }
 
@@ -227,16 +239,312 @@ fn run(args: impl Iterator<Item = String>) -> u8 {
     }
 }
 
+/// One single-line JSON verdict plus the process exit code for a validation run.
+fn validation_report(exit_code: u8, error: Option<&str>) -> (u8, String) {
+    let line = serde_json::json!({ "valid": error.is_none(), "error": error }).to_string();
+    (exit_code, line)
+}
+
+/// Fixed domain error text that never echoes caller-supplied content.
+///
+/// The match is exhaustive on purpose: a new [`ContractError`] variant must
+/// choose its own fixed text instead of inheriting a `Display` message that
+/// may interpolate request data.
+const fn describe_contract_error(error: &ContractError) -> &'static str {
+    match error {
+        ContractError::EmptyField { .. } => "required field is empty",
+        ContractError::ControlCharacter { .. } => "field contains a control character",
+        ContractError::FieldTooLong { .. } => "field exceeds its byte limit",
+        ContractError::UnsupportedSchemaVersion { .. } => "unsupported schema version",
+        ContractError::EmptyBoundedSourceContext => "bounded source context has no field",
+        ContractError::InvalidSourceChannelCode => "invalid source channel code",
+        ContractError::InvalidOriginalFileName => "invalid original file name",
+        ContractError::InvalidDeclaredMediaType => "invalid declared media type",
+        ContractError::InvalidHostArtifactReference => "invalid host artifact reference",
+        ContractError::InvalidSubmittedAt => "invalid submitted_at timestamp",
+        ContractError::BoundedSourceContextTooLarge { .. } => {
+            "bounded source context exceeds its serialized byte limit"
+        }
+        ContractError::TooManyAttributes { .. }
+        | ContractError::EmptyAttributeKey
+        | ContractError::EmptyAttributeValue { .. }
+        | ContractError::ZeroArtifactSize
+        | ContractError::InvalidSha256
+        | ContractError::EmptyEvidence
+        | ContractError::InvalidEvidenceSequence { .. }
+        | ContractError::RuntimeBoundaryViolated { .. }
+        | ContractError::ConsumerVerdictMustBeRequired
+        | ContractError::DuplicateLimitation { .. } => "evidence contract violation",
+    }
+}
+
+/// Validate one JSON `AnalysisRequest` read from `input` against the Rust domain contract.
+///
+/// This is domain validation, not a JSON Schema engine: it applies serde's
+/// closed field set and [`AnalysisRequest::validate`], whose byte and
+/// timestamp rules are the same executable CWL vocabulary semantics the
+/// published schema requires. Exit codes: `0` valid, `1` input that is not a
+/// valid contract instance (including malformed JSON, unknown or duplicate
+/// fields), `2` unusable invocation or input (extra arguments, read failure,
+/// oversize input, invalid UTF-8). It performs no execution, filesystem, or
+/// network side effect.
+fn validate_analysis_request(extra_args: &[String], input: impl Read) -> (u8, String) {
+    if !extra_args.is_empty() {
+        return validation_report(2, Some("unexpected argument"));
+    }
+    let mut buffer = Vec::new();
+    if input
+        .take(MAX_ANALYSIS_REQUEST_INPUT_BYTES + 1)
+        .read_to_end(&mut buffer)
+        .is_err()
+    {
+        return validation_report(2, Some("unreadable input"));
+    }
+    if u64::try_from(buffer.len()).map_or(true, |length| length > MAX_ANALYSIS_REQUEST_INPUT_BYTES)
+    {
+        return validation_report(2, Some("input too large"));
+    }
+    if std::str::from_utf8(&buffer).is_err() {
+        return validation_report(2, Some("input is not UTF-8"));
+    }
+    let Ok(request) = serde_json::from_slice::<AnalysisRequest>(&buffer) else {
+        return validation_report(
+            1,
+            Some("malformed JSON or unknown, duplicate, or mistyped field"),
+        );
+    };
+    match request.validate() {
+        Ok(()) => validation_report(0, None),
+        Err(error) => validation_report(1, Some(describe_contract_error(&error))),
+    }
+}
+
+/// Write the one-line verdict; a closed or failing stdout is an unusable channel (exit 2).
+fn emit_validation_report((exit_code, line): (u8, String), mut output: impl Write) -> u8 {
+    if writeln!(output, "{line}")
+        .and_then(|()| output.flush())
+        .is_err()
+    {
+        return 2;
+    }
+    exit_code
+}
+
 fn main() -> ExitCode {
-    ExitCode::from(run(env::args().skip(1)))
+    let mut args = env::args_os().skip(1);
+    let first = args.next();
+    if first.as_deref() == Some(OsStr::new(VALIDATE_ANALYSIS_REQUEST)) {
+        let report = match args
+            .map(OsString::into_string)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(extra_args) => validate_analysis_request(&extra_args, io::stdin().lock()),
+            Err(_) => validation_report(2, Some("unexpected argument")),
+        };
+        return ExitCode::from(emit_validation_report(report, io::stdout().lock()));
+    }
+    let utf8_args = first.into_iter().chain(args).map(OsString::into_string);
+    match utf8_args.collect::<Result<Vec<_>, _>>() {
+        Ok(utf8_args) => ExitCode::from(run(utf8_args.into_iter())),
+        Err(_) => {
+            eprintln!("error: arguments must be valid UTF-8");
+            print_usage();
+            ExitCode::from(2)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        default_policy, default_request_id, epoch_seconds, parse_args, parse_number, print_usage,
-        run,
+        MAX_ANALYSIS_REQUEST_INPUT_BYTES, default_policy, default_request_id, epoch_seconds,
+        parse_args, parse_number, print_usage, run, validate_analysis_request,
     };
+
+    struct FailingReader;
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("injected read failure"))
+        }
+    }
+
+    fn validate(input: &[u8]) -> (u8, serde_json::Value) {
+        let (exit_code, line) = validate_analysis_request(&[], input);
+        assert!(!line.contains('\n'), "verdict must be one line");
+        (
+            exit_code,
+            serde_json::from_str(&line).expect("verdict must be JSON"),
+        )
+    }
+
+    /// Output channel whose flush always fails and whose write fails when closed.
+    struct FailingWriter {
+        closed: bool,
+    }
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            if self.closed {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            } else {
+                Ok(buffer.len())
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        }
+    }
+
+    #[test]
+    fn emit_validation_report_maps_a_closed_output_to_exit_two() {
+        assert_eq!(
+            super::emit_validation_report((0, "{}".to_owned()), FailingWriter { closed: true }),
+            2
+        );
+        assert_eq!(
+            super::emit_validation_report((0, "{}".to_owned()), FailingWriter { closed: false }),
+            2,
+            "a verdict that cannot be flushed was not delivered"
+        );
+        let mut buffer = Vec::new();
+        assert_eq!(
+            super::emit_validation_report((1, "{}".to_owned()), &mut buffer),
+            1
+        );
+        assert_eq!(buffer, b"{}\n");
+    }
+
+    #[test]
+    fn contract_error_text_never_carries_caller_supplied_content() {
+        use quarantine_sandbox_runtime::ContractError;
+        for error in [
+            ContractError::UnsupportedSchemaVersion {
+                actual_version: "SECRET".to_owned(),
+            },
+            ContractError::EmptyAttributeValue {
+                attribute_key: "SECRET".to_owned(),
+            },
+        ] {
+            assert!(!super::describe_contract_error(&error).contains("SECRET"));
+        }
+        assert_eq!(
+            super::describe_contract_error(&ContractError::InvalidSubmittedAt),
+            "invalid submitted_at timestamp"
+        );
+        for (error, text) in [
+            (
+                ContractError::EmptyField {
+                    field_name: "request_id",
+                },
+                "required field is empty",
+            ),
+            (
+                ContractError::ControlCharacter {
+                    field_name: "request_id",
+                },
+                "field contains a control character",
+            ),
+            (
+                ContractError::FieldTooLong {
+                    field_name: "request_id",
+                    maximum_bytes: 128,
+                },
+                "field exceeds its byte limit",
+            ),
+            (
+                ContractError::EmptyBoundedSourceContext,
+                "bounded source context has no field",
+            ),
+            (
+                ContractError::InvalidSourceChannelCode,
+                "invalid source channel code",
+            ),
+            (
+                ContractError::InvalidOriginalFileName,
+                "invalid original file name",
+            ),
+            (
+                ContractError::InvalidDeclaredMediaType,
+                "invalid declared media type",
+            ),
+            (
+                ContractError::InvalidHostArtifactReference,
+                "invalid host artifact reference",
+            ),
+            (
+                ContractError::BoundedSourceContextTooLarge {
+                    maximum_bytes: 1024,
+                },
+                "bounded source context exceeds its serialized byte limit",
+            ),
+            (ContractError::EmptyEvidence, "evidence contract violation"),
+        ] {
+            assert_eq!(super::describe_contract_error(&error), text);
+        }
+    }
+
+    #[test]
+    fn validate_analysis_request_accepts_a_valid_request() {
+        let (exit_code, verdict) = validate(
+            br#"{"schema_version":"1.0.0","request_id":"r1","profile":"static_only","bounded_source_context":{"submitted_at":"2000-02-29T00:00:00Z"}}"#,
+        );
+        assert_eq!(exit_code, 0);
+        assert_eq!(verdict, serde_json::json!({"valid": true, "error": null}));
+    }
+
+    #[test]
+    fn validate_analysis_request_rejects_contract_violations_with_exit_one() {
+        for (input, expected_error) in [
+            (
+                r#"{"schema_version":"1.0.0","request_id":"r1","profile":"static_only","bounded_source_context":{"submitted_at":"1900-02-29T00:00:00Z"}}"#,
+                "invalid submitted_at timestamp",
+            ),
+            (
+                r#"{"schema_version":"SECRET-9.9","request_id":"r1","profile":"static_only"}"#,
+                "unsupported schema version",
+            ),
+            (
+                r#"{"schema_version":"1.0.0","request_id":"r1","profile":"static_only","ghp_SECRET":1}"#,
+                "malformed JSON or unknown, duplicate, or mistyped field",
+            ),
+            (
+                r#"{"schema_version":"1.0.0","request_id":"r1","request_id":"r2","profile":"static_only"}"#,
+                "malformed JSON or unknown, duplicate, or mistyped field",
+            ),
+            (
+                r#"{"schema_version":"1.0.0","request_id":"r1","profile":"static_only"} trailing"#,
+                "malformed JSON or unknown, duplicate, or mistyped field",
+            ),
+        ] {
+            let (exit_code, verdict) = validate(input.as_bytes());
+            assert_eq!(exit_code, 1, "{input}");
+            assert_eq!(verdict["valid"], false);
+            assert_eq!(verdict["error"], expected_error);
+            assert!(
+                !verdict.to_string().contains("SECRET"),
+                "input must not be echoed"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_analysis_request_rejects_unusable_input_with_exit_two() {
+        let oversize = vec![b' '; usize::try_from(MAX_ANALYSIS_REQUEST_INPUT_BYTES).unwrap() + 1];
+        for (exit_code, line) in [
+            validate_analysis_request(&["--extra".to_owned()], &b"{}"[..]),
+            validate_analysis_request(&[], FailingReader),
+            validate_analysis_request(&[], oversize.as_slice()),
+            validate_analysis_request(&[], &b"\xff\xfe"[..]),
+        ] {
+            assert_eq!(exit_code, 2, "{line}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&line).unwrap()["valid"],
+                false
+            );
+        }
+    }
 
     fn args(values: &[&str]) -> impl Iterator<Item = String> {
         values
