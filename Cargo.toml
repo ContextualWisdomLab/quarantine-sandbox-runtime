@@ -14,11 +14,18 @@ categories = ["development-tools", "virtualization"]
 name = "quarantine_sandbox_runtime"
 path = "src/lib.rs"
 
+[[bin]]
+name = "qsr-analyze"
+path = "src/bin/qsr_analyze.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 proptest = "1.6"

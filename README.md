@@ -21,7 +21,8 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 - versioned request/evidence contracts;
 - pluggable static analyzers and attributable failures;
 - fail-closed `inconclusive` behavior when unavailable dynamic analysis is requested;
-- explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests.
+- explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests;
+- offline `qsr-analyze --request <analysis-request.json> --artifact <path>` transport (ADR-0010) that prints the validated `EvidenceBundle` JSON. Exit `0` means a bundle was emitted, not that the artifact is benign; consumers still read `disposition`.
 
 ### Isolated application service
 
