@@ -59,7 +59,7 @@ Responsibilities:
 
 It does not select or authorize the application for an Agent.
 
-Inbound adapter: the offline `qsr-service-plan` binary (ADR-0011) reads a request and a policy from local regular files, validates them through this context, and prints the deterministic Podman plan. It executes no backend process; its output is review material, not isolation evidence.
+Inbound adapter: the offline `qsr-service-plan` binary (ADR-0011) reads a request and a policy from local regular files, validates them through this context, and prints the deterministic Podman plan. It executes no backend process; its output is review material, not isolation evidence. The adapter calls the pure infrastructure planner `RootlessPodmanAdapter::plan_at` directly, so `application_service` and `infrastructure` reference each other at module level. ADR-0011 accepts this for one adapter; an application-layer use case replaces the direct call when a second inbound adapter needs the same flow.
 
 ## Context Map
 
