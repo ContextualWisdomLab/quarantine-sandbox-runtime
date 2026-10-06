@@ -20,6 +20,7 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 - deterministic PE, ELF, Mach-O, ZIP, PDF, OLE, script, text, and unknown-format classification;
 - versioned request/evidence contracts;
 - pluggable static analyzers and attributable failures;
+- offline artifact-binding verification: `verify_artifact_binding` recomputes the SHA-256 digest, byte length, and non-executing classification of bytes the consumer holds and reports whether an `EvidenceBundle` describes them (ADR 0012; a match is not a verdict or authenticity);
 - fail-closed `inconclusive` behavior when unavailable dynamic analysis is requested;
 - explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests.
 
