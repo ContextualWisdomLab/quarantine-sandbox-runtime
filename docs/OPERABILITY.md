@@ -13,8 +13,8 @@ The current crate is an embeddable runtime library. It owns sandbox lifecycle an
 | 0 | — | Read `disposition`; `inconclusive` is not a pass. |
 | 64 | `usage` | Fix the command line. |
 | 65 | `invalid_request` | Fix the request document (closed schema, at most 64 KiB, regular file, no symlink). |
-| 66 | `artifact_unavailable` | Provide a readable regular file; symlinks, directories and FIFOs are refused. |
-| 67 | `artifact_rejected` | The artifact is empty or exceeds the ingestion bound. |
+| 66 | `artifact_unavailable` | Provide a readable regular file; symlinks, directories, FIFOs and devices are refused. |
+| 67 | `artifact_rejected` | The artifact exceeds the byte bound or ingestion rejected it (for example, an empty file). |
 | 70 | `internal` | Engine or output failure. Retry once only for a closed pipe or full disk; otherwise report a defect. |
 
 Diagnostics never contain paths, request bodies or artifact bytes. On any nonzero exit, discard stdout; a write failure can leave truncated JSON. Only the final path component is protected against symlinks, and hard links are accepted, so pass paths from a trusted operator, not from attacker-controlled directories. The CLI is supported on Unix only.

@@ -2,6 +2,9 @@
 //!
 //! Each test launches the compiled `qsr-analyze` executable. Fixtures are
 //! synthetic bytes; no artifact is executed and no network is used.
+//!
+//! ADR-0010 supports and tests the transport on Unix only.
+#![cfg(unix)]
 
 use std::{
     fs,
