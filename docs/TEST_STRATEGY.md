@@ -21,7 +21,8 @@
 - analyzer ordering/failure attribution;
 - deterministic evidence IDs/order;
 - dynamic-profile unavailable => `inconclusive`;
-- evidence bundle and runtime boundary validation.
+- evidence bundle and runtime boundary validation;
+- `qsr-analyze` real-binary tests for success, flag order, dynamic `inconclusive`, usage errors, invalid/oversized/symlinked requests, missing/directory/symlink/FIFO/character-device/empty/oversized artifacts and fixed path-free diagnostics; in-process tests for stdout write failure; unit tests for every `AnalysisError` exit mapping.
 
 ### Application service
 

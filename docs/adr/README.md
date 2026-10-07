@@ -8,6 +8,7 @@
 | [0004](0004-truthful-capability-claims.md) | Accepted | Planned analyzers/backends/integrations are not represented as implemented or release-ready. |
 | [0005](0005-sandbox-execution-context.md) | Accepted | `sandbox_execution` is the Core bounded context; `artifact_analysis` and `application_service` are Supporting contexts. |
 | [0006](0006-isolated-application-service.md) | Proposed | Rootless Podman is the proposed first isolated application-service adapter with immutable images, bounded resources, internal network, loopback ingress, readiness and cleanup; acceptance requires protected integration plus current-head real-runtime evidence. |
+| [0010](0010-offline-static-analysis-cli.md) | Proposed | Offline `qsr-analyze` CLI (std plus `libc` open flags) is a thin inbound adapter for the static foundation with bounded no-follow regular-file reads and fixed exit codes; 0007–0009 are reserved by other unmerged lineages. |
 
 An ADR whose acceptance depends on implementation or runtime evidence stays Proposed while that evidence exists only on an unmerged/Draft candidate. Promote it to Accepted only after the decision is integrated into the protected branch and the required current-head evidence is revalidated under live governance.
 

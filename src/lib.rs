@@ -20,9 +20,9 @@ pub use application_service::{
 pub use artifact_analysis::{
     AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
     AnalyzerFinding, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,
-    CONTRACT_SCHEMA_VERSION, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
+    CONTRACT_SCHEMA_VERSION, CliExit, ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord,
     FormatAnalyzer, IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition,
-    RuntimeManifest, StaticAnalyzer, ingest_bytes, to_pretty_json,
+    RuntimeManifest, StaticAnalyzer, ingest_bytes, run_static_analysis_cli, to_pretty_json,
 };
 pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
 pub use sandbox_execution::{IsolationPolicy, ResourceRequest, SandboxExecutionError};
