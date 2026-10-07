@@ -1,7 +1,8 @@
-//! Real-binary acceptance tests for the offline static analysis transport (#148).
+//! Mixed acceptance and API tests for the offline static analysis transport (#148).
 //!
-//! Each test launches the compiled `qsr-analyze` executable. Fixtures are
-//! synthetic bytes; no artifact is executed and no network is used.
+//! Twelve tests launch the compiled `qsr-analyze` executable. The write-failure
+//! test calls the adapter in-process; the exit-code test checks the public API.
+//! Fixtures are synthetic bytes; no artifact is executed and no network is used.
 //!
 //! ADR-0010 supports and tests the transport on Unix only.
 #![cfg(unix)]
