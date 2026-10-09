@@ -39,55 +39,56 @@ fn event_section<'a>(workflow: &'a str, event_name: &str) -> &'a str {
     &workflow[start..end]
 }
 
-fn leading_spaces(line: &str) -> usize {
-    line.len() - line.trim_start_matches(' ').len()
-}
-
 #[test]
-fn ordinary_hosted_ci_uses_explicit_supported_runner_image() {
+fn ci_delegates_to_the_immutable_central_self_hosted_workflow() {
     let workflow = fs::read_to_string(".github/workflows/ci.yml")
         .expect("CI workflow must be readable from the repository root");
-
-    for job_name in ["verify", "coverage", "branch-coverage"] {
-        let job = job_section(&workflow, job_name);
-        assert!(
-            job.contains("runs-on: ubuntu-24.04"),
-            "{job_name} must use the explicit supported hosted runner image"
-        );
-        assert!(
-            !job.contains("runs-on: ubuntu-latest"),
-            "{job_name} must not depend on the floating hosted runner selector"
-        );
-    }
-}
-
-#[test]
-fn every_checkout_discards_persisted_credentials() {
-    let workflow = fs::read_to_string(".github/workflows/ci.yml")
-        .expect("CI workflow must be readable from the repository root");
-    let lines: Vec<&str> = workflow.lines().collect();
-    let mut checkout_count = 0;
-
-    for (index, line) in lines.iter().enumerate() {
-        if !line.trim_start().starts_with("- uses: actions/checkout@") {
-            continue;
-        }
-        checkout_count += 1;
-        let step_indent = leading_spaces(line);
-        let step_body = lines[index + 1..].iter().take_while(|candidate| {
-            candidate.trim().is_empty() || leading_spaces(candidate) > step_indent
-        });
-        assert!(
-            step_body
-                .clone()
-                .any(|candidate| candidate.trim() == "persist-credentials: false"),
-            "every checkout step must disable persisted Git credentials"
-        );
-    }
-
+    let job = job_section(&workflow, "ci");
+    let prefix =
+        "uses: ContextualWisdomLab/.github/.github/workflows/quarantine-sandbox-runtime-ci.yml@";
+    let call = job
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(prefix))
+        .expect("CI must call the central QSR workflow");
+    assert_eq!(call.len(), 40, "central revision must be a full commit SHA");
     assert!(
-        checkout_count > 0,
-        "CI must contain at least one checkout step"
+        call.bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    assert_ne!(call, "0000000000000000000000000000000000000000");
+    assert!(
+        !workflow.contains("runs-on:"),
+        "caller cannot choose a runner"
+    );
+    assert!(
+        !workflow.contains("steps:"),
+        "execution belongs to the pinned producer"
+    );
+}
+
+#[test]
+fn central_caller_does_not_inherit_credentials_or_override_execution() {
+    let workflow = fs::read_to_string(".github/workflows/ci.yml")
+        .expect("CI workflow must be readable from the repository root");
+    let job = job_section(&workflow, "ci");
+    assert!(workflow.contains("contents: read"));
+    for forbidden in [
+        "secrets:",
+        "with:",
+        "env:",
+        "steps:",
+        "if:",
+        "continue-on-error:",
+    ] {
+        assert!(
+            !job.contains(forbidden),
+            "central caller must not contain {forbidden}"
+        );
+    }
+    assert!(
+        !workflow.contains("actions/checkout@"),
+        "credential-free exact checkout is implemented and verified in the pinned producer"
     );
 }
 
