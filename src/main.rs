@@ -313,6 +313,22 @@ fn validate_analysis_request(extra_args: &[String], input: impl Read) -> (u8, St
             Some("malformed JSON or unknown, duplicate, or mistyped field"),
         );
     };
+    // Derived Serde structs also accept positional sequences. Admit JSON
+    // object shapes separately, but only after the typed parse has rejected
+    // duplicate members, unknown fields and unpaired surrogates.
+    let object_shaped = serde_json::from_slice::<serde_json::Value>(&buffer).is_ok_and(|value| {
+        value.as_object().is_some_and(|object| {
+            object
+                .get("bounded_source_context")
+                .is_none_or(|context| context.is_null() || context.is_object())
+        })
+    });
+    if !object_shaped {
+        return validation_report(
+            1,
+            Some("malformed JSON or unknown, duplicate, or mistyped field"),
+        );
+    }
     match request.validate() {
         Ok(()) => validation_report(0, None),
         Err(error) => validation_report(1, Some(describe_contract_error(&error))),

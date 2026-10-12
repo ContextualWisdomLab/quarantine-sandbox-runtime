@@ -7,9 +7,10 @@
 //! conformance vectors. [`super::AnalysisRequest::validate`] shares exactly two
 //! parts with it: the Gregorian timestamp predicate and the canonical
 //! serializer counted by `x-cwl-maxSerializedUtf8Bytes`. The numeric per-field
-//! ceilings remain separate runtime constants; tests compare the context and
-//! `submitted_at` ceilings with the schema. Structural schema keywords such as
-//! `minProperties` are outside this module.
+//! ceilings remain separate runtime constants. Tests bind the context ceiling
+//! to the schema; the timestamp parity witness currently uses a fixed 30-byte
+//! ceiling. Structural schema keywords such as `minProperties` are outside this
+//! module.
 //!
 //! Precondition: instances must come from a parser that rejects non-I-JSON
 //! (duplicate member names, unpaired surrogates). A [`serde_json::Value`]

@@ -51,6 +51,31 @@ fn binary_accepts_a_gregorian_century_leap_day() {
 }
 
 #[test]
+fn binary_rejects_a_positional_request_array_with_exit_one() {
+    let (code, verdict, _) = validate(br#"["1.0.0","r1","static_only",null]"#, &[]);
+    assert_eq!(code, 1, "a request must be a JSON object, not a sequence");
+    assert_eq!(verdict["valid"], false);
+    assert_eq!(
+        verdict["error"],
+        "malformed JSON or unknown, duplicate, or mistyped field"
+    );
+}
+
+#[test]
+fn binary_rejects_a_positional_context_array_with_exit_one() {
+    let (code, verdict, _) = validate(
+        br#"{"schema_version":"1.0.0","request_id":"r1","profile":"static_only","bounded_source_context":["direct_api",null,null,null,null]}"#,
+        &[],
+    );
+    assert_eq!(code, 1, "source context must be an object or null");
+    assert_eq!(verdict["valid"], false);
+    assert_eq!(
+        verdict["error"],
+        "malformed JSON or unknown, duplicate, or mistyped field"
+    );
+}
+
+#[test]
 fn binary_rejects_a_non_400_century_leap_day_with_exit_one() {
     let (code, verdict, _) = validate(
         br#"{"schema_version":"1.0.0","request_id":"cli-2","profile":"static_only","bounded_source_context":{"submitted_at":"1900-02-29T00:00:00Z"}}"#,
