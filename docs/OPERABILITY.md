@@ -72,6 +72,51 @@ Durable persistence requires its own ADR and migration/recovery plan.
 
 Do not return ready merely because the HTTP/process shell is alive.
 
+## Retained limited-VM observation audit
+
+`scripts/audit_runner_boundary_receipt.py` is an offline operator-support
+adapter for the retained `sdp-vm-boundary-20261003` receipt profile. It is not
+an application-service admission API or a replacement runner provisioner.
+The historical profile fixes its two systemd unit names and QEMU executable;
+new producer profiles require a separately reviewed contract.
+
+Run from the repository root with independently retained input files:
+
+```sh
+python3 scripts/audit_runner_boundary_receipt.py \
+  --summary /approved/local/summary.json \
+  --control-serial /approved/local/control.log \
+  --denied-serial /approved/local/denied.log \
+  --expected-summary-sha256 "$PINNED_SUMMARY_SHA256"
+python3 -m unittest scripts.test_audit_runner_boundary_receipt
+```
+
+The caller must pin the expected summary digest through a separate custody
+path. Computing it from the supplied summary establishes only content
+identity, not operator authentication. The tool joins that digest, both
+serial digests, one complete guest result per serial, the shared transaction,
+separate process identities, cgroups, observed attachment IDs, point results,
+fixture hits, and producer-declared cleanup. It neither executes artifact
+bytes nor contacts a host, starts a VM, registers a runner, or changes policy.
+
+Inputs must be regular files with no final-component symlink. Reads are
+bounded to 256 KiB for the summary and 1 MiB for each serial. Duplicate JSON
+keys, nonfinite/floating numbers, invalid UTF-8, excessive decoded nesting,
+missing fields, type confusion, inconsistent observations, failed cleanup,
+and promoted full-boundary/clean-job/registered-CI flags are rejected. Exit
+`1` emits a fixed `receipt_rejected` diagnostic without raw input or paths.
+Exit `0` means only that this retained, limited observation is internally
+consistent. Both exits preserve `lease_allowed=false` and
+`operator_authenticated=false`.
+
+An attachment ID is not verified BPF program semantics. A timeout at two
+private TCP endpoints is not whole-CIDR denial. Producer-declared fsync,
+pristine paths, or unit cleanup is not a newly observed runtime operation.
+The audit does not establish current enforcement, service endpoint identity,
+source/image provenance, operator approval, actual clean-per-job execution,
+or exact-head native CI acceptance. Keep untrusted/public CI leasing disabled
+until the original pre-lease and in-job isolation gates are independently met.
+
 ## Observability
 
 Low-cardinality metrics should include:
