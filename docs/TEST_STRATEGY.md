@@ -21,7 +21,8 @@
 - analyzer ordering/failure attribution;
 - deterministic evidence IDs/order;
 - dynamic-profile unavailable => `inconclusive`;
-- evidence bundle and runtime boundary validation.
+- evidence bundle and runtime boundary validation;
+- artifact binding: engine bundles match their own bytes (property test), and changed/truncated bytes or edited digest/size/kind are reported as field-level mismatches, while invalid bundles and empty bytes are rejected.
 
 ### Application service
 
@@ -123,6 +124,20 @@ Branch coverage may require a pinned nightly Rust toolchain; the workflow must i
 - SBOM/provenance/reproducibility;
 - immutable application test image digest;
 - exact-current-head checks only.
+
+## Packaged public-API acceptance
+
+`examples/artifact_binding_quickstart.rs` exercises the public analysis and
+artifact-binding APIs with synthetic bytes. The acceptance test checks the
+complete evidence envelope, matching and modified bytes, invalid/empty-input
+rejection, and the unchanged `inconclusive` dynamic-profile disposition.
+
+Before accepting packaging, run `cargo package --locked --offline`, extract the
+resulting `.crate` under a private scratch directory, then run the same example
+from that extracted package with a separate Cargo target directory. Compare
+packaged source bytes with the reviewed source and retain the package SHA-256.
+Package compatibility does not establish registry publication, source provenance,
+protected-branch integration, or release readiness.
 
 ## Consumer contract tests
 

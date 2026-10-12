@@ -20,6 +20,7 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 - deterministic PE, ELF, Mach-O, ZIP, PDF, OLE, script, text, and unknown-format classification;
 - versioned request/evidence contracts;
 - pluggable static analyzers and attributable failures;
+- offline artifact-binding verification: `verify_artifact_binding` recomputes the SHA-256 digest, byte length, and non-executing classification of bytes the consumer holds and reports whether an `EvidenceBundle` describes them (ADR 0012; a match is not a verdict or authenticity);
 - fail-closed `inconclusive` behavior when unavailable dynamic analysis is requested;
 - explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests.
 
@@ -86,6 +87,26 @@ The P0 application-service profile is deliberately restrictive:
 - no shell interpretation of application argv.
 
 A later controlled-egress or secret-broker profile must be a separate accepted contract; it may not weaken these defaults implicitly.
+
+## Synthetic artifact-binding quickstart
+
+```sh
+cargo run --locked --offline --example artifact_binding_quickstart
+```
+
+The example uses only harmless synthetic bytes and the public Rust API. It emits
+one complete `EvidenceBundle`, a matching report, a report for modified bytes,
+and rejection checks for empty bytes and an invalid bundle. Its JSON explicitly
+marks the fixture as synthetic and sets `release_ready=false` and
+`operator_authenticated=false`. A requested dynamic profile remains
+`inconclusive`; artifact matching does not upgrade analysis completeness.
+No file containing artifact bytes is executed and no backend or network is used.
+Its serialized seven-field report has a closed Draft 2020-12 contract in
+`schemas/artifact-binding-report.schema.json`. Schema acceptance checks the
+report shape and agreement of comparison states, not bytes or authenticity.
+
+This example is local compatibility evidence, not immutable publication or
+real-container isolation evidence.
 
 ## Development
 
