@@ -14,6 +14,7 @@
 ```text
 src/
 ├── artifact_analysis/         Supporting bounded context
+│   ├── artifact_binding.rs
 │   ├── contracts.rs
 │   ├── ingestion.rs
 │   └── runtime.rs

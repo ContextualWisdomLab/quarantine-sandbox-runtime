@@ -27,7 +27,8 @@ pub fn verify_artifact_binding(
 - Otherwise it recomputes three values from the supplied bytes with the same derivation as ingestion: the lower-case SHA-256 hexadecimal digest, the byte length, and the non-executing `ArtifactKind` classification using the bundle's `original_file_name` (or no name) exactly as ingestion does.
 - It returns an `ArtifactBindingReport` with one `FieldBinding` (`matched` or `mismatched`) for each of `artifact_sha256`, `artifact_size_bytes` and `artifact_kind`, the three recomputed values, and an overall `ArtifactBindingOutcome` that is `matched` only when all three fields match.
 - A mismatch is a report, not an error. The caller decides what to do with it.
-- `ArtifactBindingReport` has private fields, read-only accessors and `Serialize` only. It has no `Deserialize`, so a caller cannot construct a report that claims a match.
+- `ArtifactBindingReport` has private fields, read-only accessors and `Serialize` only. It has no `Deserialize`, so consumers cannot directly construct this Rust type with forged comparison fields. An arbitrary sender can still author matching-looking JSON; consumers must recompute locally, not authenticate transported labels.
+- Its existing seven-field serialized shape is described by `schemas/artifact-binding-report.schema.json`, Draft 2020-12, with versioned schema identity `artifact-binding-report-1.0.0.schema.json`. All fields are required, extra fields are rejected, and `outcome` is `matched` if and only if all three comparison states are `matched`. This schema validates shape and comparison-state consistency, not the underlying bytes or producer authenticity. No new report field is added.
 - The function reads no files, executes no artifact bytes, uses no network and does not allocate a copy of the artifact.
 
 Public names, re-exported at the crate root:

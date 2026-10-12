@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/artifact-binding-report-1.0.0.schema.json",
+  "title": "Quarantine Artifact Binding Report",
+  "description": "Serialized output of offline artifact-binding verification: three descriptor comparisons and recomputed artifact values. This schema describes report shape and outcome consistency only; it does not verify provenance, authenticity, or full EvidenceBundle binding, authorize a verdict, or provide Rust report deserialization. Static artifact classification is not observed runtime behavior.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "outcome",
+    "artifact_sha256",
+    "artifact_size_bytes",
+    "artifact_kind",
+    "computed_artifact_sha256",
+    "computed_artifact_size_bytes",
+    "computed_artifact_kind"
+  ],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["matched", "mismatched"]
+    },
+    "artifact_sha256": {
+      "type": "string",
+      "enum": ["matched", "mismatched"]
+    },
+    "artifact_size_bytes": {
+      "type": "string",
+      "enum": ["matched", "mismatched"]
+    },
+    "artifact_kind": {
+      "type": "string",
+      "enum": ["matched", "mismatched"]
+    },
+    "computed_artifact_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "computed_artifact_size_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "computed_artifact_kind": {
+      "type": "string",
+      "enum": [
+        "portable_executable",
+        "elf_executable",
+        "mach_o_executable",
+        "zip_archive",
+        "pdf_document",
+        "ole_compound_document",
+        "script",
+        "text",
+        "unknown"
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "artifact_sha256": {"const": "matched"},
+      "artifact_size_bytes": {"const": "matched"},
+      "artifact_kind": {"const": "matched"}
+    },
+    "required": ["artifact_sha256", "artifact_size_bytes", "artifact_kind"]
+  },
+  "then": {
+    "properties": {
+      "outcome": {"const": "matched"}
+    }
+  },
+  "else": {
+    "properties": {
+      "outcome": {"const": "mismatched"}
+    }
+  }
+}

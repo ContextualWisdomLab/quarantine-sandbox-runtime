@@ -88,6 +88,26 @@ The P0 application-service profile is deliberately restrictive:
 
 A later controlled-egress or secret-broker profile must be a separate accepted contract; it may not weaken these defaults implicitly.
 
+## Synthetic artifact-binding quickstart
+
+```sh
+cargo run --locked --offline --example artifact_binding_quickstart
+```
+
+The example uses only harmless synthetic bytes and the public Rust API. It emits
+one complete `EvidenceBundle`, a matching report, a report for modified bytes,
+and rejection checks for empty bytes and an invalid bundle. Its JSON explicitly
+marks the fixture as synthetic and sets `release_ready=false` and
+`operator_authenticated=false`. A requested dynamic profile remains
+`inconclusive`; artifact matching does not upgrade analysis completeness.
+No file containing artifact bytes is executed and no backend or network is used.
+Its serialized seven-field report has a closed Draft 2020-12 contract in
+`schemas/artifact-binding-report.schema.json`. Schema acceptance checks the
+report shape and agreement of comparison states, not bytes or authenticity.
+
+This example is local compatibility evidence, not immutable publication or
+real-container isolation evidence.
+
 ## Development
 
 ```bash

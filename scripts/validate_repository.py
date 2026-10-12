@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMA_FILES = (
     "schemas/analysis-request.schema.json",
     "schemas/evidence-bundle.schema.json",
+    "schemas/artifact-binding-report.schema.json",
     "schemas/application-service-request.schema.json",
     "schemas/application-service-lease.schema.json",
     "schemas/application-service-cleanup.schema.json",
