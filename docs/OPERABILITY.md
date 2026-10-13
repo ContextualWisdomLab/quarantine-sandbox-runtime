@@ -4,6 +4,8 @@
 
 The current crate is an embeddable runtime library. It owns sandbox lifecycle and evidence semantics, not a public multi-tenant control-plane API. A future service wrapper must preserve the same domain boundary and add authentication, tenancy, queueing, durable lease state, and observability through explicit adapters.
 
+The binary also provides `validate-analysis-request`, a side-effect-free check of one artifact-analysis request read from stdin (at most 64 KiB). It prints exactly one JSON line `{"valid": bool, "error": string|null}` whose error text never echoes input, and exits `0` valid; `1` not a valid contract instance, including malformed JSON, trailing data and duplicate members; `2` unusable invocation, input (not UTF-8 or over 64 KiB) or closed output. It starts no sandbox and needs no Podman.
+
 ## Host prerequisites for rootless Podman profile
 
 - Linux host with a supported rootless Podman configuration;

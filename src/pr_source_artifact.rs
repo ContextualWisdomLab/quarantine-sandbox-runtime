@@ -3,7 +3,10 @@
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{MetadataExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
 };
 
@@ -102,14 +105,36 @@ impl PrSourceArtifactInput {
 #[derive(Debug)]
 pub struct StagedPrSourceArtifact {
     directory: TempDir,
+    mount_directory: PathBuf,
     receipt: PrSourceArtifactReceipt,
 }
 
 impl StagedPrSourceArtifact {
+    /// Return the private host root containing the mountable payload.
+    ///
+    /// This path owns the staging lifetime and confidentiality boundary. It must
+    /// not be used as the container bind source; use [`Self::mount_path`] (or
+    /// the compatibility alias [`Self::path`]) for that purpose.
+    #[must_use]
+    pub fn private_path(&self) -> &Path {
+        self.directory.path()
+    }
+    /// Return the payload path admitted for a container bind mount.
+    ///
+    /// The payload is intentionally a child of [`Self::private_path`] so the
+    /// private ancestor remains the host-side lifetime and confidentiality
+    /// boundary.
+    #[must_use]
+    pub fn mount_path(&self) -> &Path {
+        &self.mount_directory
+    }
     /// Return the host path safe to bind-mount into the sandbox.
+    ///
+    /// This compatibility alias returns the same payload as [`Self::mount_path`];
+    /// callers needing the owning private root must use [`Self::private_path`].
     #[must_use]
     pub fn path(&self) -> &Path {
-        self.directory.path()
+        self.mount_path()
     }
     /// Return exact-revision and sanitization evidence for this staged tree.
     #[must_use]
@@ -130,7 +155,7 @@ pub enum PrSourceArtifactError {
     /// The source tree contains a symlink, device, socket, or other unsupported entry.
     #[error("unsupported source entry: {relative_path}")]
     UnsupportedEntry {
-        /// UTF-8 relative path of the rejected entry.
+        /// Human-readable relative path of the rejected entry; not an identity encoding.
         relative_path: String,
     },
     /// The source tree exceeded a fixed staging budget.
@@ -157,37 +182,31 @@ fn valid_lower_hex(value: &str, lengths: &[usize]) -> bool {
 fn collect_regular_files(
     root: &Path,
     directory: &Path,
-    files: &mut Vec<(String, PathBuf, bool, u64)>,
+    files: &mut Vec<(PathBuf, PathBuf, bool, u64)>,
 ) -> Result<(), PrSourceArtifactError> {
     let entries = fs::read_dir(directory).map_err(PrSourceArtifactError::Io)?;
     for entry in entries {
         let entry = entry.map_err(PrSourceArtifactError::Io)?;
         let path = entry.path();
-        let relative =
-            path.strip_prefix(root)
-                .map_err(|_| PrSourceArtifactError::InvalidInput {
-                    field_name: "host_path",
-                })?;
-        let relative_text = relative
-            .to_str()
-            .filter(|value| !value.is_empty())
-            .ok_or(PrSourceArtifactError::InvalidInput {
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| PrSourceArtifactError::InvalidInput {
                 field_name: "host_path",
             })?
-            .replace('\\', "/");
+            .to_path_buf();
+        if relative.as_os_str().as_bytes().is_empty() {
+            return Err(PrSourceArtifactError::InvalidInput {
+                field_name: "host_path",
+            });
+        }
         let metadata = fs::symlink_metadata(&path).map_err(PrSourceArtifactError::Io)?;
         if metadata.is_dir() {
             collect_regular_files(root, &path, files)?;
         } else if metadata.is_file() {
-            files.push((
-                relative_text,
-                path,
-                metadata.mode() & 0o111 != 0,
-                metadata.len(),
-            ));
+            files.push((relative, path, metadata.mode() & 0o111 != 0, metadata.len()));
         } else {
             return Err(PrSourceArtifactError::UnsupportedEntry {
-                relative_path: relative_text,
+                relative_path: relative.to_string_lossy().into_owned(),
             });
         }
     }
@@ -195,6 +214,10 @@ fn collect_regular_files(
 }
 
 /// Copy, bound, hash, and de-executable an exact-revision source tree.
+///
+/// Manifest identity is computed from the exact Unix pathname bytes returned by
+/// the filesystem. Literal backslashes remain ordinary filename bytes and valid
+/// non-UTF-8 Git pathnames do not cross a lossy text conversion boundary.
 ///
 /// # Errors
 ///
@@ -215,7 +238,12 @@ pub fn stage_pr_source_artifact(
     }
     let mut files = Vec::new();
     collect_regular_files(&source, &source, &mut files)?;
-    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files.sort_by(|left, right| {
+        left.0
+            .as_os_str()
+            .as_bytes()
+            .cmp(right.0.as_os_str().as_bytes())
+    });
     if files.len() as u64 > MAX_SOURCE_FILES {
         return Err(PrSourceArtifactError::LimitExceeded {
             limit_name: "regular_file_count",
@@ -237,10 +265,12 @@ pub fn stage_pr_source_artifact(
         .prefix("qsr-pr-source-")
         .tempdir()
         .map_err(PrSourceArtifactError::Io)?;
+    let mount_directory = directory.path().join("payload");
+    fs::create_dir(&mount_directory).map_err(PrSourceArtifactError::Io)?;
     let mut hasher = Sha256::new();
     let mut stripped = 0_u64;
     for (relative, source_path, was_executable, declared_len) in &files {
-        let destination = directory.path().join(relative);
+        let destination = mount_directory.join(relative);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(PrSourceArtifactError::Io)?;
         }
@@ -253,8 +283,9 @@ pub fn stage_pr_source_artifact(
         if bytes.len() as u64 != *declared_len {
             return Err(PrSourceArtifactError::DigestMismatch);
         }
-        hasher.update((relative.len() as u64).to_be_bytes());
-        hasher.update(relative.as_bytes());
+        let relative_bytes = relative.as_os_str().as_bytes();
+        hasher.update((relative_bytes.len() as u64).to_be_bytes());
+        hasher.update(relative_bytes);
         hasher.update((bytes.len() as u64).to_be_bytes());
         hasher.update(&bytes);
         let mut output = File::create(&destination).map_err(PrSourceArtifactError::Io)?;
@@ -266,13 +297,12 @@ pub fn stage_pr_source_artifact(
         stripped += u64::from(*was_executable);
     }
     for entry in files.iter().rev() {
-        let mut parent = directory
-            .path()
+        let mut parent = mount_directory
             .join(&entry.0)
             .parent()
             .map(Path::to_path_buf);
         while let Some(path) = parent {
-            if path == directory.path() {
+            if path == mount_directory {
                 break;
             }
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
@@ -280,7 +310,9 @@ pub fn stage_pr_source_artifact(
             parent = path.parent().map(Path::to_path_buf);
         }
     }
-    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755))
+    fs::set_permissions(&mount_directory, fs::Permissions::from_mode(0o755))
+        .map_err(PrSourceArtifactError::Io)?;
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))
         .map_err(PrSourceArtifactError::Io)?;
     let actual = format!("{:x}", hasher.finalize());
     if actual != input.expected_tree_sha256 {
@@ -288,6 +320,7 @@ pub fn stage_pr_source_artifact(
     }
     Ok(StagedPrSourceArtifact {
         directory,
+        mount_directory,
         receipt: PrSourceArtifactReceipt {
             revision_sha: input.revision_sha.clone(),
             tree_sha256: actual,

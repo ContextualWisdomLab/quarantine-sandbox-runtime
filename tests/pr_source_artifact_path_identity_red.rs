@@ -4,7 +4,9 @@
 //! an ordinary filename byte and must remain part of the exact source identity;
 //! rewriting it to `/` changes both the manifest digest and staged tree shape.
 
-#![cfg(target_os = "linux")]
+// Unix filesystems also permit literal backslashes, so these identity and
+// collision regressions can execute on macOS without non-UTF-8 fixtures.
+#![cfg(unix)]
 
 use std::{
     fs,

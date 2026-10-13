@@ -7,6 +7,7 @@
 //! container-backend details here.
 
 mod claude_plugin_package;
+mod contract_vocabulary;
 mod contracts;
 mod ingestion;
 mod runtime;
@@ -14,6 +15,10 @@ mod runtime;
 pub use claude_plugin_package::{
     CLAUDE_PLUGIN_PACKAGE_ANALYSIS_PROFILE, ClaudePluginPackageAnalysisRequest,
     ClaudePluginPackageContractError,
+};
+pub use contract_vocabulary::{
+    CWL_CONTRACT_VOCABULARY_ID, ContractVocabularyError, CwlContractKeyword,
+    canonical_bounded_source_context_json,
 };
 pub use contracts::{
     AnalysisProfile, AnalysisRequest, ArtifactDescriptor, ArtifactKind, BoundedSourceContext,

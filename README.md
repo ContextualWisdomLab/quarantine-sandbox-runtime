@@ -21,7 +21,8 @@ The Core bounded context is `sandbox_execution`. `artifact_analysis` and `applic
 - versioned request/evidence contracts;
 - pluggable static analyzers and attributable failures;
 - fail-closed `inconclusive` behavior when unavailable dynamic analysis is requested;
-- explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests.
+- explicit proof that the static foundation did not execute artifact content, use credentials, or make external network requests;
+- an executable form of the required CWL contract vocabulary 1.0.0, checked against every published conformance vector, and `quarantine-sandbox-runtime validate-analysis-request < request.json`, which validates one request against the domain contract and prints a one-line JSON verdict (exit 0 valid; 1 not a valid contract instance, including malformed JSON; 2 unusable invocation, input or output).
 
 ### Isolated application service
 

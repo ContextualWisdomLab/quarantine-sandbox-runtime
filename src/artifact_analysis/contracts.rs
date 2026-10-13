@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::contract_vocabulary::{canonical_context_from_members, is_utc_gregorian_timestamp};
+
 /// Current wire-contract version.
 pub const CONTRACT_SCHEMA_VERSION: &str = "1.0.0";
 
@@ -170,6 +172,22 @@ pub struct BoundedSourceContext {
 }
 
 impl BoundedSourceContext {
+    /// RFC 8785 canonical JSON after CWL nullable-member materialization.
+    ///
+    /// This is the exact representation counted by the published
+    /// `x-cwl-maxSerializedUtf8Bytes` keyword, so the runtime and schema
+    /// consumers count the same bytes for the context ceiling.
+    #[must_use]
+    pub fn canonical_json(&self) -> String {
+        canonical_context_from_members([
+            self.declared_media_type.as_deref(),
+            self.host_artifact_reference.as_deref(),
+            self.original_file_name.as_deref(),
+            self.source_channel_code.as_deref(),
+            self.submitted_at.as_deref(),
+        ])
+    }
+
     fn validate(&self) -> Result<(), ContractError> {
         if self.source_channel_code.is_none()
             && self.original_file_name.is_none()
@@ -216,8 +234,7 @@ impl BoundedSourceContext {
             return Err(ContractError::InvalidSubmittedAt);
         }
 
-        let serialized_bytes = serde_json::to_vec(self).map_or(usize::MAX, |value| value.len());
-        if serialized_bytes > MAX_BOUNDED_SOURCE_CONTEXT_BYTES {
+        if self.canonical_json().len() > MAX_BOUNDED_SOURCE_CONTEXT_BYTES {
             return Err(ContractError::BoundedSourceContextTooLarge {
                 maximum_bytes: MAX_BOUNDED_SOURCE_CONTEXT_BYTES,
             });
@@ -679,76 +696,5 @@ fn is_valid_host_artifact_reference(value: &str) -> bool {
 }
 
 fn is_valid_submitted_at(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() < 20 || bytes.len() > MAX_SUBMITTED_AT_BYTES || bytes.last() != Some(&b'Z') {
-        return false;
-    }
-    if bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || bytes.get(10) != Some(&b'T')
-        || bytes.get(13) != Some(&b':')
-        || bytes.get(16) != Some(&b':')
-    {
-        return false;
-    }
-
-    let Some(year) = parse_ascii_u32(&bytes[0..4]) else {
-        return false;
-    };
-    let Some(month) = parse_ascii_u32(&bytes[5..7]) else {
-        return false;
-    };
-    let Some(day) = parse_ascii_u32(&bytes[8..10]) else {
-        return false;
-    };
-    let Some(hour) = parse_ascii_u32(&bytes[11..13]) else {
-        return false;
-    };
-    let Some(minute) = parse_ascii_u32(&bytes[14..16]) else {
-        return false;
-    };
-    let Some(second) = parse_ascii_u32(&bytes[17..19]) else {
-        return false;
-    };
-
-    if !(1..=12).contains(&month)
-        || hour > 23
-        || minute > 59
-        || second > 59
-        || day == 0
-        || day > days_in_month(year, month)
-    {
-        return false;
-    }
-
-    if bytes.len() == 20 {
-        return true;
-    }
-    bytes.get(19) == Some(&b'.')
-        && bytes.len() > 21
-        && bytes[20..bytes.len() - 1].iter().all(u8::is_ascii_digit)
-}
-
-fn parse_ascii_u32(bytes: &[u8]) -> Option<u32> {
-    let mut value = 0_u32;
-    for byte in bytes {
-        if !byte.is_ascii_digit() {
-            return None;
-        }
-        value = value * 10 + u32::from(*byte - b'0');
-    }
-    Some(value)
-}
-
-const fn days_in_month(year: u32, month: u32) -> u32 {
-    match month {
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-const fn is_leap_year(year: u32) -> bool {
-    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
+    value.len() <= MAX_SUBMITTED_AT_BYTES && is_utc_gregorian_timestamp(value)
 }
