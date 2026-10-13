@@ -30,7 +30,12 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Process-boundary fake-Podman integration tests covering launch/readiness/termination and fail-closed readiness cleanup.
 - Real rootless-Podman acceptance covering the pinned backend, immutable fixture pre-pull, effective isolation, bounded HTTP readiness, explicit cleanup, and final container/network leak rejection on the reviewed source head.
 - Consumer owner-path integration issue for `contextual-orchestrator` so Chat/Agent domain code consumes the published lease contract rather than directly invoking Podman/containerd.
+- Offline `qsr-analyze` static analysis CLI transport (ADR-0010) with bounded no-follow request/artifact reads, fixed path-free diagnostics, and stable exit codes; public library API `run_static_analysis_cli` and `CliExit`.
 - Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
+
+### Fixed
+
+- `qsr-analyze` rejects `--`-prefixed flag operands as usage errors before opening files. Explicit relative or absolute paths still admit such filenames, and non-UTF-8 Unix paths remain supported.
 
 ### Changed
 

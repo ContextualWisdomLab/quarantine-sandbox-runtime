@@ -22,6 +22,7 @@
 - deterministic evidence IDs/order;
 - dynamic-profile unavailable => `inconclusive`;
 - evidence bundle and runtime boundary validation;
+- `qsr-analyze` real-binary tests for success, flag order, dynamic `inconclusive`, usage errors (including `--`-prefixed flag operands rejected before file access, explicit `./--name` and absolute paths accepted, and Linux-only non-UTF-8 paths), invalid/oversized/symlinked requests, missing/directory/symlink/FIFO/character-device/empty/oversized artifacts and fixed path-free diagnostics; in-process tests for stdout write failure; unit tests for every `AnalysisError` exit mapping.
 - artifact binding: engine bundles match their own bytes (property test), and changed/truncated bytes or edited digest/size/kind are reported as field-level mismatches, while invalid bundles and empty bytes are rejected.
 
 ### Application service
