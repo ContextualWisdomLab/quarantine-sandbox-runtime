@@ -134,7 +134,11 @@ fn parse_arguments(arguments: Vec<OsString>) -> Option<CliArguments> {
         if slot.is_some() {
             return None;
         }
-        *slot = Some(PathBuf::from(arguments.next()?));
+        let value = arguments.next()?;
+        if value.as_encoded_bytes().starts_with(b"--") {
+            return None;
+        }
+        *slot = Some(PathBuf::from(value));
     }
     Some(CliArguments {
         request_path: request_path?,

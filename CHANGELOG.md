@@ -30,6 +30,10 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 - Offline `qsr-analyze` static analysis CLI transport (ADR-0010) with bounded no-follow request/artifact reads, fixed path-free diagnostics, and stable exit codes; public library API `run_static_analysis_cli` and `CliExit`.
 - Architectural fitness validation for unique ADR identifiers, bounded-context dependency direction, and infrastructure-adapter placement.
 
+### Fixed
+
+- `qsr-analyze` rejects `--`-prefixed flag operands as usage errors before opening files. Explicit relative or absolute paths still admit such filenames, and non-UTF-8 Unix paths remain supported.
+
 ### Changed
 
 - Product responsibility is broadened from artifact-analysis-only to reusable hostile-workload isolation plus artifact-analysis evidence while preserving consumer business authority.

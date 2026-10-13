@@ -1,6 +1,8 @@
 //! Mixed acceptance and API tests for the offline static analysis transport (#148).
 //!
-//! Twelve tests launch the compiled `qsr-analyze` executable. The write-failure
+//! Sixteen tests launch the compiled `qsr-analyze` executable; one of them, the
+//! non-UTF-8 path test, runs only on Linux because APFS rejects such names.
+//! The write-failure
 //! test calls the adapter in-process; the exit-code test checks the public API.
 //! Fixtures are synthetic bytes; no artifact is executed and no network is used.
 //!
@@ -131,6 +133,126 @@ fn malformed_argument_shapes_are_usage_errors() {
         vec![unknown, request_flag, &request, artifact_flag, &artifact],
     ] {
         assert_failure(&run(&args), 64, "usage", &fixture);
+    }
+}
+
+#[test]
+fn option_shaped_artifact_values_are_usage_errors_before_file_access() {
+    let fixture = Fixture::new("artifact-option-value");
+    let request = fixture.write("request.json", request_json("static_only").as_bytes());
+    fixture.write("--verbose", b"MZ");
+
+    let outputs: Vec<Output> = ["--absent", "--verbose", "--request", "--artifact", "--"]
+        .into_iter()
+        .map(|value| {
+            Command::new(env!("CARGO_BIN_EXE_qsr-analyze"))
+                .current_dir(&fixture.root)
+                .arg("--request")
+                .arg(&request)
+                .arg("--artifact")
+                .arg(value)
+                .output()
+                .expect("qsr-analyze binary must launch")
+        })
+        .collect();
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|output| output.status.code())
+            .collect::<Vec<_>>(),
+        vec![Some(64); outputs.len()],
+    );
+    for output in outputs {
+        assert_failure(&output, 64, "usage", &fixture);
+    }
+}
+
+#[test]
+fn option_shaped_request_values_are_usage_errors_before_file_access() {
+    let fixture = Fixture::new("request-option-value");
+    let artifact = fixture.write("sample.bin", b"MZ");
+    fixture.write("--verbose", request_json("static_only").as_bytes());
+
+    for value in ["--absent", "--verbose", "--request", "--artifact", "--"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_qsr-analyze"))
+            .current_dir(&fixture.root)
+            .arg("--artifact")
+            .arg(&artifact)
+            .arg("--request")
+            .arg(value)
+            .output()
+            .expect("qsr-analyze binary must launch");
+        assert_failure(&output, 64, "usage", &fixture);
+    }
+}
+
+#[test]
+fn explicit_relative_and_absolute_paths_preserve_option_like_filenames() {
+    let fixture = Fixture::new("explicit-option-path");
+    let request = fixture.write("--request", request_json("static_only").as_bytes());
+    let artifact = fixture.write("--artifact", b"MZ");
+
+    for (request, artifact) in [
+        (Path::new("./--request"), Path::new("./--artifact")),
+        (request.as_path(), artifact.as_path()),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_qsr-analyze"))
+            .current_dir(&fixture.root)
+            .arg("--request")
+            .arg(request)
+            .arg("--artifact")
+            .arg(artifact)
+            .output()
+            .expect("qsr-analyze binary must launch");
+        assert_eq!(output.status.code(), Some(0), "stderr: {:?}", output.stderr);
+        assert!(output.stderr.is_empty());
+        let bundle: EvidenceBundle =
+            serde_json::from_slice(&output.stdout).expect("stdout must be an EvidenceBundle");
+        assert_eq!(bundle.validate(), Ok(()));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn non_utf8_paths_remain_supported_without_option_prefix_bypass() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let fixture = Fixture::new("non-utf8-path");
+    let request_name = OsString::from_vec(b"request-\xff.json".to_vec());
+    let artifact_name = OsString::from_vec(b"artifact-\xff.bin".to_vec());
+    fs::write(
+        fixture.root.join(&request_name),
+        request_json("static_only").as_bytes(),
+    )
+    .expect("request must be written");
+    fs::write(fixture.root.join(&artifact_name), b"MZ").expect("artifact must be written");
+    let output = Command::new(env!("CARGO_BIN_EXE_qsr-analyze"))
+        .current_dir(&fixture.root)
+        .arg("--request")
+        .arg(&request_name)
+        .arg("--artifact")
+        .arg(&artifact_name)
+        .output()
+        .expect("qsr-analyze binary must launch");
+    assert_eq!(output.status.code(), Some(0), "stderr: {:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+    let bundle: EvidenceBundle =
+        serde_json::from_slice(&output.stdout).expect("stdout must be an EvidenceBundle");
+    assert_eq!(bundle.validate(), Ok(()));
+
+    for (request, artifact) in [
+        (OsString::from_vec(b"--\xff".to_vec()), artifact_name),
+        (request_name, OsString::from_vec(b"--\xff".to_vec())),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_qsr-analyze"))
+            .current_dir(&fixture.root)
+            .arg("--request")
+            .arg(request)
+            .arg("--artifact")
+            .arg(artifact)
+            .output()
+            .expect("qsr-analyze binary must launch");
+        assert_failure(&output, 64, "usage", &fixture);
     }
 }
 

@@ -20,6 +20,7 @@ qsr-analyze --request <analysis-request.json> --artifact <path>
 ```
 
 - The binary is a thin shim. Testable logic lives in `src/artifact_analysis/cli.rs`, an inbound adapter of the `artifact_analysis` Supporting context. It owns no new domain vocabulary.
+- Each flag requires a path operand that does not start with `--`; option-shaped operands return 64 `usage` before file access. For a filename such as `--sample`, use `./--sample` or an absolute path. Non-UTF-8 Unix paths remain supported; no `--` terminator syntax is added.
 - It reads a closed `AnalysisRequest` 1.0.0 document of at most 64 KiB and validates it through the existing contract (`deny_unknown_fields` plus `validate`).
 - It reads artifact bytes from one regular file, bounded by `IngestionPolicy::default().maximum_artifact_bytes` plus one byte. Symbolic links (final component), directories, FIFOs and devices are rejected before analysis. The open uses `O_NONBLOCK` so a FIFO cannot block the process.
 - It runs only `AnalysisEngine::default()`, which uses the non-executing `FormatAnalyzer`. Artifact bytes are never executed. Dynamic profiles remain `inconclusive` with `dynamic_analysis_not_configured`.
