@@ -39,6 +39,37 @@ class CallerMutationTests(unittest.TestCase):
         result = self.run_candidate(CANDIDATE)
         self.assertTrue(result.wasSuccessful(), result.failures)
 
+    def test_nul_in_ignored_comment_is_assertion_failure(self):
+        result = self.run_candidate(CANDIDATE + "\n# ignored comment \x00\n")
+        self.assertEqual(len(result.failures), 1, result.failures)
+
+    def test_noncanonical_characters_and_separators_are_assertion_failures(self):
+        controls = [*range(1, 9), 11, 12, *range(14, 32), *range(127, 133), *range(134, 160), 0xFFFE, 0xFFFF]
+        for codepoint in controls:
+            with self.subTest(codepoint=codepoint):
+                result = self.run_candidate(CANDIDATE + f"\n# comment {chr(codepoint)}\n")
+                self.assertEqual(len(result.failures), 1, result.failures)
+        for separator in ["\x85", "\u2028", "\u2029"]:
+            with self.subTest(separator=repr(separator)):
+                mutated = CANDIDATE.replace("name: CI\n", "name: CI" + separator, 1)
+                self.assertNotEqual(mutated, CANDIDATE)
+                result = self.run_candidate(mutated)
+                self.assertEqual(len(result.failures), 1, result.failures)
+
+    def test_non_ascii_indentation_is_not_ignored_as_a_comment_or_blank(self):
+        for prefix in ["\u00a0", "\u2003", "\u3000"]:
+            for suffix in ["", "# not an ASCII-indented YAML comment"]:
+                with self.subTest(prefix=repr(prefix), suffix=suffix):
+                    result = self.run_candidate(CANDIDATE + "\n" + prefix + suffix + "\n")
+                    self.assertEqual(len(result.failures), 1, result.failures)
+
+    def test_explicit_line_endings_and_printable_unicode_comments_are_accepted(self):
+        for separator in ["\n", "\r", "\r\n"]:
+            with self.subTest(separator=repr(separator)):
+                workflow = (CANDIDATE + "\n\t# 한글 😀 printable comment\n").replace("\n", separator)
+                result = self.run_candidate(workflow)
+                self.assertTrue(result.wasSuccessful(), result.failures)
+
     def test_actions_write_is_assertion_failure(self):
         mutated = CANDIDATE.replace("  contents: read", "  contents: read\n  actions: write")
         result = self.run_candidate(mutated)

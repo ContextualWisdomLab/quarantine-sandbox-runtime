@@ -4,7 +4,10 @@ This stdlib-only oracle recognizes the published canonical YAML form, not genera
 YAML: blank and whole-line comments outside folded scalars are ignored, but
 aliases, anchors, flow mappings, alternate indentation, inline comments,
 duplicate keys, non-scalar mapping values, and reordered/additional fields are
-rejected. Unsupported syntax must be reviewed before changing the caller form.
+rejected. Only printable Unicode with TAB/LF/CR controls is admitted; this
+restricted profile also refuses NEL and Unicode line/paragraph separators.
+Line breaks are LF, CR or CRLF only. Unsupported syntax must be reviewed before
+changing the caller form.
 """
 
 import pathlib
@@ -41,7 +44,21 @@ class CentralCiCallerTests(unittest.TestCase):
     def test_ci_is_one_immutable_central_call_without_native_execution(self):
         """The sole job is the published producer, with no override surface."""
         text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        raw_lines = text.splitlines()
+        self.assertTrue(
+            all(
+                character in "\t\n\r"
+                or (
+                    0x20 <= ord(character) <= 0x7E
+                    or 0xA0 <= ord(character) <= 0xD7FF
+                    or 0xE000 <= ord(character) <= 0xFFFD
+                    or 0x10000 <= ord(character) <= 0x10FFFF
+                )
+                and character not in "\u2028\u2029"
+                for character in text
+            ),
+            "unsupported character in canonical YAML profile",
+        )
+        raw_lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
         self.assertIn("  group: >-", raw_lines, "unsupported concurrency scalar form")
         start = raw_lines.index("  group: >-")
         self.assertEqual(
@@ -54,7 +71,7 @@ class CentralCiCallerTests(unittest.TestCase):
         )
         lines = tuple(
             line for line in raw_lines
-            if line.strip() and not line.lstrip().startswith("#")
+            if line.strip(" \t") and not line.lstrip(" \t").startswith("#")
         )
         self.assertEqual(lines, CANONICAL_LINES, "CI caller differs from canonical published profile")
         self.assertIn("DISABLED/NOT_RUN", text)
