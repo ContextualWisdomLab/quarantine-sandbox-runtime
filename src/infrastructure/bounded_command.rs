@@ -17,15 +17,15 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Internal failure classes preserved by the Podman adapter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BoundedCommandError {
-    /// The executable could not be spawned or its pipes could not be captured.
-    Spawn,
+    /// The executable could not be spawned; preserve the OS failure class.
+    Spawn(io::ErrorKind),
     /// The child could not be observed or reaped reliably.
     Wait,
     /// The child exceeded its wall-clock budget and was killed and reaped.
     Timeout,
     /// Stdout or stderr exceeded the configured retained-output budget.
     OutputLimit,
-    /// A pipe-draining worker failed or panicked.
+    /// A required output pipe was missing or a pipe-draining worker failed.
     Capture,
 }
 
@@ -82,7 +82,7 @@ fn spawn_piped_child(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| BoundedCommandError::Spawn)?;
+        .map_err(|error| BoundedCommandError::Spawn(error.kind()))?;
     captured_pipes(child.stdout.take(), child.stderr.take())
         .map(|(stdout, stderr)| (child, stdout, stderr))
 }
@@ -93,7 +93,7 @@ fn captured_pipes<T, U>(
 ) -> Result<(T, U), BoundedCommandError> {
     match (stdout, stderr) {
         (Some(stdout), Some(stderr)) => Ok((stdout, stderr)),
-        _ => Err(BoundedCommandError::Spawn),
+        _ => Err(BoundedCommandError::Capture),
     }
 }
 
@@ -299,15 +299,15 @@ mod tests {
         assert_eq!(captured_pipes(Some(7_u8), Some(8_u8)), Ok((7, 8)));
         assert_eq!(
             captured_pipes(None::<u8>, Some(8_u8)),
-            Err(BoundedCommandError::Spawn)
+            Err(BoundedCommandError::Capture)
         );
         assert_eq!(
             captured_pipes(Some(7_u8), None::<u8>),
-            Err(BoundedCommandError::Spawn)
+            Err(BoundedCommandError::Capture)
         );
         assert_eq!(
             captured_pipes(None::<u8>, None::<u8>),
-            Err(BoundedCommandError::Spawn)
+            Err(BoundedCommandError::Capture)
         );
     }
 
