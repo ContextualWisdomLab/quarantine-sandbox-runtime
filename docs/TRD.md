@@ -145,7 +145,7 @@ The immutable image reference is appended before application argv, so applicatio
 2. Create the container.
 3. Start the container.
 4. Inspect the runtime-owned network and exact container identity/configuration.
-5. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified.
+5. Inspect process seccomp/capability/LSM evidence and fail closed unless every implemented P0 isolation control is positively verified. `EffectiveCaps`, `BoundingCaps`, and network `dns_enabled` must be present with the expected types; absence or null is malformed inspection, not secure evidence. Explicit empty arrays and `false` remain valid observed values.
 6. Query the requested port mapping only after isolation verification succeeds.
 7. Accept only a single IPv4 loopback `127.0.0.1:<nonzero-port>` mapping.
 8. Poll bounded TCP readiness using operator timeout/poll policy.

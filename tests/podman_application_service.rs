@@ -5,8 +5,8 @@
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -68,6 +68,14 @@ fn temporary_path(name: &str) -> PathBuf {
     ))
 }
 
+fn immutable_fixture_executable() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_podman.sh")
+}
+
+fn fixture_sidecar(program: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}.{suffix}", program.display()))
+}
+
 fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
     let program = temporary_path("fake-podman");
     let log = temporary_path("fake-podman-log");
@@ -81,12 +89,18 @@ fn write_fake_podman(mode: &str, ready_port: u16) -> (PathBuf, PathBuf) {
         network,
         container,
     );
-    fs::write(&program, script).expect("fake Podman should be writable");
-    let mut permissions = fs::metadata(&program)
-        .expect("fake Podman metadata should exist")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&program, permissions).expect("fake Podman should be executable");
+    symlink(immutable_fixture_executable(), &program)
+        .expect("fake Podman immutable symlink should be creatable");
+    let script_path = fixture_sidecar(&program, "script");
+    fs::write(&script_path, script).expect("fake Podman scenario data should be writable");
+    fs::write(
+        fixture_sidecar(&program, "config"),
+        format!(
+            "MODE='source_script'\nLOG='/dev/null'\nSCRIPT='{}'\n",
+            script_path.display()
+        ),
+    )
+    .expect("fake Podman dispatcher config should be writable");
     (program, log)
 }
 
@@ -99,6 +113,8 @@ fn closed_loopback_port() -> u16 {
 }
 
 fn remove_fixture(program: PathBuf, log: PathBuf) {
+    let _ = fs::remove_file(fixture_sidecar(&program, "config"));
+    let _ = fs::remove_file(fixture_sidecar(&program, "script"));
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
 }
@@ -382,4 +398,105 @@ fn cleanup_failure_is_never_hidden_by_readiness_or_termination_results() {
         remove_fixture(program, log);
         drop(listener);
     }
+}
+
+#[test]
+fn writable_scenario_fd_preserves_normal_ready_adapter_transport() {
+    use std::os::unix::fs::MetadataExt;
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener should bind");
+    let ready_port = listener.local_addr().expect("listener address").port();
+    let (program, log) = write_fake_podman("success", ready_port);
+    let script_path = PathBuf::from(format!("{}.script", program.display()));
+    let config_path = PathBuf::from(format!("{}.config", program.display()));
+    let writer_path = if script_path.exists() {
+        script_path.clone()
+    } else {
+        program.clone()
+    };
+    let writable_source_fd = fs::OpenOptions::new()
+        .write(true)
+        .open(&writer_path)
+        .expect("scenario source must retain an open writable FD");
+    let source_inode = writable_source_fd.metadata().expect("writer metadata");
+    let executable_inode = fs::metadata(&program).expect("executable metadata");
+    eprintln!(
+        "TRANSPORT_WRITER source_dev={} source_ino={} exec_dev={} exec_ino={} sidecar={}",
+        source_inode.dev(),
+        source_inode.ino(),
+        executable_inode.dev(),
+        executable_inode.ino(),
+        script_path.exists()
+    );
+    if script_path.exists() {
+        assert_ne!(
+            (source_inode.dev(), source_inode.ino()),
+            (executable_inode.dev(), executable_inode.ino()),
+            "scenario writer must not touch the immutable executable inode"
+        );
+    }
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let result = adapter.launch_at(&request(), &policy(500), 1_780_000_000);
+    if result.is_err()
+        && let Err(error) = std::process::Command::new(&program)
+            .args(["info", "--format", "{{.Host.Security.Rootless}}"])
+            .output()
+    {
+        eprintln!(
+            "TRANSPORT_SPAWN_WITNESS kind={:?} errno={:?}",
+            error.kind(),
+            error.raw_os_error()
+        );
+    }
+    let cleanup = result
+        .as_ref()
+        .ok()
+        .map(|lease| adapter.terminate_at(lease, 1_780_000_001));
+    assert_eq!(
+        writable_source_fd
+            .metadata()
+            .expect("writer remains open")
+            .ino(),
+        source_inode.ino()
+    );
+    let calls = fs::read_to_string(&log).unwrap_or_default();
+    // Hold the writable source FD through launch and termination, without retry.
+    drop(writable_source_fd);
+    remove_fixture(program.clone(), log.clone());
+    for path in [&program, &log, &script_path, &config_path] {
+        assert!(
+            fs::symlink_metadata(path).is_err(),
+            "fixture artifact must be removed: {}",
+            path.display()
+        );
+    }
+    eprintln!("TRANSPORT_FIXTURE_CLEANUP absent=4");
+    let lease = result
+        .expect("open writable scenario source FD must preserve a normal ready adapter launch");
+    assert_eq!(lease.endpoint().host(), "127.0.0.1");
+    assert_eq!(lease.endpoint().port(), ready_port);
+    assert!(
+        cleanup
+            .expect("ready lease must be terminated")
+            .expect("termination must succeed")
+            .container_removed()
+    );
+    for expected in [
+        "info --format {{.Host.Security.Rootless}}",
+        "info --format json",
+        "port ",
+        "stop --time 2",
+        "rm --force",
+        "network rm --force",
+    ] {
+        assert_eq!(
+            calls
+                .lines()
+                .filter(|line| line.starts_with(expected))
+                .count(),
+            1,
+            "each invocation must be logged once: {expected}\n{calls}"
+        );
+    }
+    eprintln!("TRANSPORT_NORMAL_READY lease=true log_cardinality=1 writer_held=true");
 }
