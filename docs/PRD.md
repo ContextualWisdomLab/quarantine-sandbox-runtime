@@ -51,9 +51,9 @@ The runtime is deliberately not the authority for the consumer's business decisi
 - Enforce CPU, RAM, PID, tmpfs, lease, readiness, and shutdown bounds.
 - Create a per-sandbox internal DNS-disabled network and publish exactly one service to host IPv4 loopback on a random port.
 - Invoke the application without a shell.
-- Return an endpoint only after bounded readiness.
+- Return an endpoint only after protocol-aware bounded readiness: TCP services require loopback transport reachability; declared HTTP services require a successful bounded HTTP response from the runtime-derived loopback endpoint.
 - Return a versioned lease and cleanup receipt.
-- Provide no request fields for credentials, arbitrary environment variables, broad host mounts, devices, privileged mode, host namespaces, runtime sockets, or arbitrary Internet egress.
+- Provide no request fields for credentials, arbitrary environment variables, broad host mounts, devices, privileged mode, host namespaces, runtime sockets, arbitrary health URLs, or arbitrary Internet egress.
 
 ### Artifact-analysis foundation
 
@@ -110,7 +110,7 @@ The runtime is deliberately not the authority for the consumer's business decisi
 - Existing artifact-analysis public Rust API remains available after DDD directory migration.
 - Tag-only images and over-budget resource requests fail closed.
 - Launch plan has no privileged/host-network/runtime-socket path and explicitly enforces P0 isolation flags.
-- Process-boundary tests prove direct argv invocation, readiness gating, error cleanup, and explicit termination behavior.
+- Process-boundary tests prove direct argv invocation, protocol-aware readiness gating, error cleanup, and explicit termination behavior; an HTTP declaration cannot become ready from TCP acceptance alone, and a non-2xx HTTP response is not readiness.
 - Real rootless Podman E2E proves the effective security boundary before the capability is called release-ready.
 - `contextual-orchestrator` integration occurs through its owner issue/ACL and a published runtime artifact; no direct consumer Podman calls.
 - Wardnet verdict policy remains outside this repository.
