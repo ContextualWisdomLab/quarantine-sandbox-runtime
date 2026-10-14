@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextualwisdomlab.org/schemas/quarantine/application-service-cleanup-1.0.0.schema.json",
+  "title": "Isolated Application Service Cleanup Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sandbox_id",
+    "network_id",
+    "container_removed",
+    "network_removed",
+    "terminated_at_epoch_seconds"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "sandbox_id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+    "network_id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+    "container_removed": { "const": true },
+    "network_removed": { "const": true },
+    "terminated_at_epoch_seconds": { "type": "integer", "minimum": 0 }
+  }
+}

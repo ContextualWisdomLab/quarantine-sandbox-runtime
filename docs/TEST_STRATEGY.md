@@ -1,0 +1,167 @@
+# Test Strategy
+
+## Test principles
+
+- Behavior changes are test-first.
+- Tests must cross the real production boundary appropriate to the claim.
+- Command-plan tests prove deterministic command construction, not container isolation.
+- Fake-backend tests prove process orchestration/cleanup semantics, not the effective kernel/network boundary.
+- Real Podman/gVisor/VM E2E is required before claiming that backend's isolation behavior.
+- Pending/skipped/absent/failed/stale evidence is non-passing.
+
+## Unit and contract tests
+
+### Artifact analysis
+
+- request/schema validation;
+- bounded source context;
+- artifact name/size limits;
+- SHA-256 identity;
+- PE/ELF/Mach-O/ZIP/PDF/OLE/script/text/unknown classification;
+- analyzer ordering/failure attribution;
+- deterministic evidence IDs/order;
+- dynamic-profile unavailable => `inconclusive`;
+- evidence bundle and runtime boundary validation;
+- `qsr-analyze` real-binary tests for success, flag order, dynamic `inconclusive`, usage errors (including `--`-prefixed flag operands rejected before file access, explicit `./--name` and absolute paths accepted, and Linux-only non-UTF-8 paths), invalid/oversized/symlinked requests, missing/directory/symlink/FIFO/character-device/empty/oversized artifacts and fixed path-free diagnostics; in-process tests for stdout write failure; unit tests for every `AnalysisError` exit mapping.
+- artifact binding: engine bundles match their own bytes (property test), and changed/truncated bytes or edited digest/size/kind are reported as field-level mismatches, while invalid bundles and empty bytes are rejected.
+
+### Application service
+
+- schema version rejection;
+- empty/oversized/control-character request ID rejection;
+- mutable/tag-only/whitespace/control/uppercase/malformed digest rejection;
+- port zero rejection;
+- command count/size/control-character rejection;
+- every operator-policy zero/inconsistent field rejection;
+- every resource zero and every resource-over-policy rejection;
+- lease expiry overflow rejection;
+- stable protocol/backend codes;
+- deterministic sandbox/network names;
+- required Podman isolation flags;
+- absence of privileged, host-network, runtime-socket, device, arbitrary mount, environment, and external-bind request paths.
+
+## Process-boundary tests
+
+On Linux, a controlled fake Podman executable must exercise the actual `std::process::Command` path without a shell.
+
+Required cases:
+
+- executable missing => `BackendInvocationFailed`;
+- rootless probe nonzero => `BackendCommandFailed`;
+- rootless probe returns false => `BackendNotRootless`;
+- network create failure;
+- container create failure with network cleanup;
+- container start failure with container/network cleanup;
+- port query failure with stop/remove/network cleanup;
+- malformed/non-loopback/zero port mapping => fail closed and cleanup;
+- successful launch reaches a real local `TcpListener`, returns versioned lease/attestation, and explicit terminate returns cleanup receipt;
+- missing or null `EffectiveCaps`, `BoundingCaps`, and `dns_enabled` returns `MalformedIsolationInspection` at the relevant inspect operation, stops/removes the started container, removes its network, and never reaches port/readiness publication; explicit empty capability arrays and `dns_enabled=false` retain a real loopback-listener lease positive control;
+- fake Podman processes execute the immutable checked-in `tests/fixtures/fake_podman.sh` launcher. Tests write mutable scenario data only to separate `.script` and `.config` sidecars, and a supplemental writable-sidecar test proves that dynamic data does not share the executed inode;
+- readiness timeout removes resources;
+- cleanup command failure => `CleanupFailed` after all cleanup attempts.
+
+Fake backend logs are test fixtures only and must not become production diagnostics.
+
+## Real rootless Podman E2E
+
+Required before release-ready application isolation claim:
+
+1. Prove Podman is rootless on the runner/host.
+2. Load or build a tiny pinned test image locally; launch with `--pull=never`.
+3. Verify service is reachable only through returned `127.0.0.1` port.
+4. Verify root filesystem write fails.
+5. Verify `/tmp` write succeeds within limit and execute from `/tmp` is denied.
+6. Verify effective capabilities are empty and no-new-privileges is set.
+7. Verify workload UID/GID is non-root as configured.
+8. Verify PID/IPC/UTS/cgroup namespace posture expected by the profile.
+9. Verify external route/DNS are absent from the application network.
+10. Verify CPU/RAM/PID controls are visible/enforced on the host profile used.
+11. Verify application cannot see runtime sockets, host devices, arbitrary host files, or consumer secrets.
+12. Verify timeout/explicit cancellation removes or stops the workload and cleanup removes network/container.
+13. Verify no orphan remains after normal/error test paths.
+
+If a host cannot support required rootless resource enforcement, mark the backend/profile unsupported on that host rather than skipping the required release claim.
+
+## Future stronger-backend tests
+
+### gVisor/containerd
+
+- OCI config compatibility;
+- lease/cleanup semantic parity;
+- runtime identity attestation (`runsc`/configured RuntimeClass);
+- workload functional compatibility;
+- network/filesystem/namespace/isolation evidence;
+- startup/throughput overhead relative to Podman baseline;
+- documented unsupported syscalls/application classes.
+
+### Windows VM detonation
+
+- VM snapshot identity;
+- no host credentials/devices/shares;
+- bounded network and time;
+- process/registry/file/network telemetry;
+- teardown verification.
+
+## Property and fuzz testing
+
+- arbitrary byte artifacts never panic and never execute;
+- bounded identifier/command/image parsing;
+- resource-policy comparisons;
+- port-output parsing;
+- JSON deserialization with unknown fields rejected;
+- deterministic sandbox identity for same inputs and no unsafe name characters.
+
+## Coverage
+
+Repository policy requires exact 100% owned production statement/function/region/branch coverage where tooling exposes it. Coverage must include error paths, not only happy-path public APIs. No source-exclusion workaround is accepted merely to satisfy the number.
+
+Branch coverage may require a pinned nightly Rust toolchain; the workflow must invoke the intended nightly explicitly and prove that exact toolchain produced the report.
+
+## Security and supply-chain gates
+
+- Clippy `-D warnings`;
+- rustdoc `-D warnings`;
+- SAST/security/dependency/advisory gates;
+- lockfile freshness;
+- pinned actions;
+- SBOM/provenance/reproducibility;
+- immutable application test image digest;
+- exact-current-head checks only.
+
+## Packaged public-API acceptance
+
+`examples/artifact_binding_quickstart.rs` exercises the public analysis and
+artifact-binding APIs with synthetic bytes. The acceptance test checks the
+complete evidence envelope, matching and modified bytes, invalid/empty-input
+rejection, and the unchanged `inconclusive` dynamic-profile disposition.
+
+Before accepting packaging, run `cargo package --locked --offline`, extract the
+resulting `.crate` under a private scratch directory, then run the same example
+from that extracted package with a separate Cargo target directory. Compare
+packaged source bytes with the reviewed source and retain the package SHA-256.
+Package compatibility does not establish registry publication, source provenance,
+protected-branch integration, or release readiness.
+
+## Consumer contract tests
+
+### Wardnet
+
+- same evidence contract can be consumed without runtime deciding verdict;
+- incomplete dynamic analysis cannot become an allow verdict by runtime default;
+- runtime evidence provenance remains intact.
+
+### contextual-orchestrator
+
+Owner issue #991 requires consumer-side tests for:
+
+- unauthorized application rejected before launch;
+- only allowlisted immutable digest accepted;
+- no prompt/body/credential passthrough;
+- returned endpoint must be loopback-attested and lease unexpired;
+- task success/cancel/timeout/error all terminate lease;
+- cleanup failure is surfaced;
+- no direct Podman/containerd invocation in Agent domain code.
+
+## Release acceptance
+
+A release candidate uses one exact protected source head for all applicable tests, security scans, coverage, rustdoc, package/build, real container E2E, SBOM/provenance, independent review, rollback/recovery and operational evidence. Evidence from an earlier head is not transferable.

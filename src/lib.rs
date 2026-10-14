@@ -1,0 +1,42 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+//! Source-agnostic hostile-workload isolation and artifact-analysis runtime.
+//!
+//! The runtime owns reusable sandbox execution, isolation policy enforcement,
+//! bounded service leases, artifact identity, and analysis evidence. Consumers
+//! such as Wardnet and Chat/Agent control planes retain verdict, authorization,
+//! conversation, task, tool-selection, secret, and user-action authority.
+
+mod application_service;
+mod artifact_analysis;
+mod infrastructure;
+mod sandbox_execution;
+
+pub use application_service::{
+    ApplicationServiceError, ApplicationServiceLease, ApplicationServiceRequest, CleanupReceipt,
+    IsolationAttestation, ServiceEndpoint, ServiceProtocol,
+};
+pub use artifact_analysis::{
+    AnalysisEngine, AnalysisError, AnalysisProfile, AnalysisRequest, AnalyzerFailure,
+    AnalyzerFinding, ArtifactBindingError, ArtifactBindingOutcome, ArtifactBindingReport,
+    ArtifactDescriptor, ArtifactKind, BoundedSourceContext, CONTRACT_SCHEMA_VERSION, CliExit,
+    ContractError, EvidenceBundle, EvidenceKind, EvidenceRecord, FieldBinding, FormatAnalyzer,
+    IngestedArtifact, IngestionError, IngestionPolicy, RuntimeDisposition, RuntimeManifest,
+    StaticAnalyzer, ingest_bytes, run_static_analysis_cli, to_pretty_json, verify_artifact_binding,
+};
+pub use infrastructure::{PodmanLaunchPlan, RootlessPodmanAdapter};
+pub use sandbox_execution::{IsolationPolicy, ResourceRequest, SandboxExecutionError};
+
+impl From<SandboxExecutionError> for ApplicationServiceError {
+    fn from(error: SandboxExecutionError) -> Self {
+        match error {
+            SandboxExecutionError::InvalidPolicy { field_name } => {
+                Self::InvalidPolicy { field_name }
+            }
+            SandboxExecutionError::ResourceLimitExceeded { resource_name } => {
+                Self::ResourceLimitExceeded { resource_name }
+            }
+        }
+    }
+}

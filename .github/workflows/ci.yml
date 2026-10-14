@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    qsr-caller-${{ github.workflow }}-${{ github.repository }}-${{
+      github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id
+    }}
+  cancel-in-progress: true
+
+# Hosted-only podman-e2e-negative-rootless-apparmor: DISABLED/NOT_RUN.
+# Its missing negative evidence is not replaced by static tests or positive LSM.
+# This immutable producer was merged from central PR #2601 into main.
+# Runner custody and required nested-check mapping remain activation gates.
+jobs:
+  ci:
+    uses: ContextualWisdomLab/.github/.github/workflows/quarantine-sandbox-runtime-ci.yml@2757ca42867b0f4fc719f8d0c3c755f5507c4e18
