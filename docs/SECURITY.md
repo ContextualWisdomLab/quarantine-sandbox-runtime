@@ -40,6 +40,7 @@ These inputs are trusted for policy but still validated for structural correctne
 
 - rootless Podman required;
 - `--cap-drop=all`;
+- required `EffectiveCaps` and `BoundingCaps` inspection fields; absence or null is malformed evidence, not an empty capability set;
 - `--security-opt=no-new-privileges`;
 - automatic user namespace;
 - numeric non-root UID/GID;
@@ -59,6 +60,7 @@ These inputs are trusted for policy but still validated for structural correctne
 ### Network
 
 - one per-sandbox Podman bridge with `--internal --disable-dns`;
+- required Boolean `dns_enabled` inspection evidence; absence or null cannot prove DNS is disabled;
 - no second/external network in P0;
 - publish exactly one requested TCP service on host `127.0.0.1` with random host port;
 - reject malformed/non-loopback port mapping;

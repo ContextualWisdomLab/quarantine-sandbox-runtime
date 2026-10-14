@@ -8,6 +8,7 @@
 
 use std::{
     fs,
+    net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::{
@@ -87,6 +88,7 @@ struct Fixture {
     info_output_override: Option<String>,
     container_output_override: Option<String>,
     network_output_override: Option<String>,
+    host_port: u16,
 }
 
 impl Default for Fixture {
@@ -128,6 +130,7 @@ impl Default for Fixture {
             info_output_override: None,
             container_output_override: None,
             network_output_override: None,
+            host_port: 9,
         }
     }
 }
@@ -148,13 +151,14 @@ fn write_fake_podman(fixture: &Fixture) -> (PathBuf, PathBuf) {
         .clone()
         .unwrap_or_else(|| fixture.network.to_string());
     let script = format!(
-        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf '%s' '{}' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:9\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"${{1:-}}\" = info ]; then\n  if [ \"${{3:-}}\" = json ]; then printf '%s\\n' '{}'; else printf 'true\\n'; fi\n  exit 0\nfi\ncase \"${{1:-}}:${{2:-}}\" in\n  network:create) : ;;\n  network:inspect) printf '%s\\n' '{}' ;;\n  network:rm) : ;;\n  container:inspect) printf '%s\\n' '{}' ;;\n  create:--name) printf '%s' '{}' ;;\n  start:*) : ;;\n  top:*) printf '%s' '{}' ;;\n  port:*) printf '127.0.0.1:{host_port}\\n' ;;\n  stop:*) : ;;\n  rm:*) : ;;\n  *) exit 91 ;;\nesac\n",
         log.display(),
         info,
         network,
         container,
         fixture.create_identifier,
         fixture.process_top,
+        host_port = fixture.host_port,
     );
     fs::write(&program, script).expect("fake Podman should be writable");
     let mut permissions = fs::metadata(&program)
@@ -177,6 +181,113 @@ fn assert_fixture(fixture: Fixture, expected: ApplicationServiceError) {
     );
     let _ = fs::remove_file(program);
     let _ = fs::remove_file(log);
+}
+
+fn assert_missing_inspection(fixture: Fixture, operation: &'static str) {
+    let _process_fixture_guard = PROCESS_FIXTURE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (program, log) = write_fake_podman(&fixture);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let result = adapter.launch_at(&request(), &policy(), 1_780_000_000);
+    let calls = fs::read_to_string(&log).expect("fixture calls must be recorded");
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    assert_eq!(
+        result,
+        Err(ApplicationServiceError::MalformedIsolationInspection { operation }),
+        "missing or null evidence must be malformed, not inferred secure"
+    );
+    let stop = calls
+        .find("stop --time 2 ")
+        .expect("started container must stop");
+    let remove = calls
+        .find("rm --force ")
+        .expect("container must be removed");
+    let network = calls
+        .find("network rm --force ")
+        .expect("network must be removed");
+    assert!(stop < remove && remove < network, "cleanup order: {calls}");
+    assert!(
+        !calls.contains("port "),
+        "no readiness publication: {calls}"
+    );
+}
+
+fn assert_absent_container_field(field: &str) {
+    let mut fixture = Fixture::default();
+    fixture.container[0]
+        .as_object_mut()
+        .expect("fixture is object")
+        .remove(field);
+    assert_missing_inspection(fixture, "container_inspect");
+}
+
+#[test]
+fn absent_effective_capabilities_are_malformed_evidence() {
+    assert_absent_container_field("EffectiveCaps");
+}
+
+#[test]
+fn absent_bounding_capabilities_are_malformed_evidence() {
+    assert_absent_container_field("BoundingCaps");
+}
+
+#[test]
+fn null_container_capability_fields_are_malformed_evidence() {
+    for field in ["EffectiveCaps", "BoundingCaps"] {
+        let mut fixture = Fixture::default();
+        fixture.container[0][field] = Value::Null;
+        assert_missing_inspection(fixture, "container_inspect");
+    }
+}
+
+#[test]
+fn absent_network_dns_field_is_malformed_evidence() {
+    let mut fixture = Fixture::default();
+    fixture.network[0]
+        .as_object_mut()
+        .expect("fixture is object")
+        .remove("dns_enabled");
+    assert_missing_inspection(fixture, "network_inspect");
+}
+
+#[test]
+fn null_network_dns_field_is_malformed_evidence() {
+    let mut fixture = Fixture::default();
+    fixture.network[0]["dns_enabled"] = Value::Null;
+    assert_missing_inspection(fixture, "network_inspect");
+}
+
+#[test]
+fn explicit_empty_capabilities_and_disabled_dns_allow_ready_lease() {
+    let _process_fixture_guard = PROCESS_FIXTURE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener must bind");
+    let fixture = Fixture {
+        host_port: listener.local_addr().expect("listener address").port(),
+        ..Fixture::default()
+    };
+    let (program, log) = write_fake_podman(&fixture);
+    let adapter = RootlessPodmanAdapter::new(program.clone());
+    let lease = adapter
+        .launch_at(&request(), &policy(), 1_780_000_000)
+        .expect("explicit secure evidence must retain readiness acceptance");
+    adapter
+        .terminate_at(&lease, 1_780_000_001)
+        .expect("owned lease cleanup must succeed");
+    let calls = fs::read_to_string(&log).expect("fixture calls must be recorded");
+    let _ = fs::remove_file(program);
+    let _ = fs::remove_file(log);
+    assert!(
+        calls.contains("port "),
+        "ready lease must query publication: {calls}"
+    );
+    assert!(
+        calls.contains("network rm --force "),
+        "lease must clean up: {calls}"
+    );
 }
 
 #[test]

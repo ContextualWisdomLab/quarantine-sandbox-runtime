@@ -35,6 +35,7 @@ The format follows Keep a Changelog, and this project uses Semantic Versioning.
 
 ### Fixed
 
+- Podman inspection now rejects missing `EffectiveCaps`, `BoundingCaps`, or `dns_enabled` rather than silently treating absence as empty capabilities or disabled DNS. Linux process-boundary tests prove the fail-closed result and cleanup; this is not real isolation E2E evidence.
 - `qsr-analyze` rejects `--`-prefixed flag operands as usage errors before opening files. Explicit relative or absolute paths still admit such filenames, and non-UTF-8 Unix paths remain supported.
 
 ### Changed
