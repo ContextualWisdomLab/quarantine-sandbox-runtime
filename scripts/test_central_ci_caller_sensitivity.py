@@ -79,7 +79,7 @@ class CallerMutationTests(unittest.TestCase):
         self.assertEqual(len(result.failures), 1, result.failures)
 
     def test_other_full_sha_is_assertion_failure(self):
-        mutated = CANDIDATE.replace("91f0ccc23fa19b82ce797573155bb6f6a0f64b5f", "1" * 40)
+        mutated = CANDIDATE.replace("6597e37ff677d12960fa0210c9fbf604728ffa92", "1" * 40)
         result = self.run_candidate(mutated)
         self.assertEqual(len(result.failures), 1, result.failures)
 
@@ -141,7 +141,7 @@ class CallerMutationTests(unittest.TestCase):
             "secret_inherit": CANDIDATE + "\n    secrets: inherit\n",
             "native_steps": CANDIDATE + "\n    steps: []\n",
             "native_runner": CANDIDATE + "\n    runs-on: ubuntu-latest\n",
-            "short_sha": CANDIDATE.replace("91f0ccc23fa19b82ce797573155bb6f6a0f64b5f", "91f0ccc"),
+            "short_sha": CANDIDATE.replace("6597e37ff677d12960fa0210c9fbf604728ffa92", "6597e37"),
             "anchor": CANDIDATE.replace("permissions:", "permissions: &permissions"),
             "alias": CANDIDATE.replace("  contents: read", "  contents: *permission"),
             "flow_jobs": CANDIDATE.replace("jobs:\n  ci:", "jobs: {ci: {}}\n  ci:"),

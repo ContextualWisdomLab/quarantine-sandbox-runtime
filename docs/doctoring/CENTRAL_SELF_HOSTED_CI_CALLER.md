@@ -12,12 +12,15 @@ prefix `qsr-caller-` differs from the producer's `qsr-central-` to avoid cancell
 its own reusable execution. It declares one job, `ci`, with no runner, step, input,
 environment, secret inheritance or optional skip override.
 
-It pins the actually published central commit
-`91f0ccc23fa19b82ce797573155bb6f6a0f64b5f`, central Draft PR #2601.
-Remote immutable workflow bytes were independently retrieved through GitHub's
-Blob API and matched SHA-256
-`5a9e1006cfc55b0f7c873caa40fdf2defe764eb9370593ccd742a2e7b5b60884`.
-Publication is not protected-main integration or real runner acceptance.
+It pins the central integration commit
+`6597e37ff677d12960fa0210c9fbf604728ffa92`. Central PR #2601 merged into
+`main` on October 14, 2026 at 01:54:40 KST under the user's infrastructure
+exception. Immutable workflow bytes match SHA-256
+`db689bbaba070c4ba92bf3963cdb985afab74e65bee753481b10270b83cd30f0`.
+This is producer source integration, not caller merge or real runner acceptance.
+The producer unconditionally runs both Python caller oracle modules and rejects
+a positive-LSM test filter that executes zero tests. SRC01 character rejection
+remains intact. SRC03 job-private source/tool/evidence custody is still unfinished.
 
 The pinned producer owns exact candidate checkout with persist-credentials false,
 admission rejection, verify, coverage, branch-coverage, positive-LSM acceptance
@@ -27,7 +30,8 @@ selector. Existing control/MCP runners are not a substitute. Product source runs
 only after producer admission, but these source checks are not an operator-bound
 host isolation or prelease attestation.
 
-Prospective check names, not observed remote check-run contexts:
+Observed caller check names on predecessor head `173e1f255...`; new-head
+execution is not established:
 - `ci / admission`
 - `ci / verify`
 - `ci / coverage`
@@ -54,10 +58,12 @@ by the pinned central workflow contracts; caller structure tests alone cannot
 establish those implementation properties.
 
 AI review is a separate central responsibility under existing .github#2560.
-Current source observations still show the legacy free-sidecar model route;
-`LLM_GATEWAY_MODEL=auto` metadata alone is not effective deployment. The direct user
-requires actual self-hosted Noema/OpenCode model `auto` through personal LiteLLM,
-with author-distinct App review publication after substantive independent review.
-Draft bypass/SUCCESS is not APPROVED. No author self-approval, fabricated verdict,
-runner ACL expansion, CI retry, merge or provider credential transfer occurred
-in this caller implementation.
+A Noema source-only review on predecessor central head `273931765...` recorded
+`served_model=auto` and an author-distinct App approval. That review was dismissed
+after head movement; it does not approve this caller or the merged producer head.
+The direct user requires actual self-hosted Noema/OpenCode model `auto` through
+personal LiteLLM, with author-distinct App review publication after substantive
+independent review. `LLM_GATEWAY_MODEL=auto` metadata alone is not inference.
+Draft bypass/SUCCESS is not APPROVED. This caller change neither expands runner
+ACLs nor transfers provider credentials. Actual caller Actions, formal App review,
+QSR runtime isolation and release acceptance remain incomplete.

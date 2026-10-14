@@ -57,6 +57,10 @@ fn ci_delegates_to_the_immutable_central_self_hosted_workflow() {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     );
     assert_ne!(call, "0000000000000000000000000000000000000000");
+    assert_eq!(
+        call, "6597e37ff677d12960fa0210c9fbf604728ffa92",
+        "caller must bind the reviewed central integration commit"
+    );
     assert!(
         !workflow.contains("runs-on:"),
         "caller cannot choose a runner"
