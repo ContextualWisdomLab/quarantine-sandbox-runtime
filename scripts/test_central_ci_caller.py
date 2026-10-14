@@ -34,7 +34,7 @@ CANONICAL_LINES = (
     "jobs:",
     "  ci:",
     "    uses: ContextualWisdomLab/.github/.github/workflows/"
-    "quarantine-sandbox-runtime-ci.yml@41c7ab5a3c19065143752d9d42f93ec72a41fcf4",
+    "quarantine-sandbox-runtime-ci.yml@2757ca42867b0f4fc719f8d0c3c755f5507c4e18",
 )
 
 

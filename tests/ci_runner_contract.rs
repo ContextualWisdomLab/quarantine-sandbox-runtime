@@ -58,7 +58,7 @@ fn ci_delegates_to_the_immutable_central_self_hosted_workflow() {
     );
     assert_ne!(call, "0000000000000000000000000000000000000000");
     assert_eq!(
-        call, "41c7ab5a3c19065143752d9d42f93ec72a41fcf4",
+        call, "2757ca42867b0f4fc719f8d0c3c755f5507c4e18",
         "central caller must retain the verified candidate producer revision"
     );
     assert!(

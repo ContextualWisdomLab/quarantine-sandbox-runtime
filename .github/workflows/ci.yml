@@ -17,8 +17,8 @@ concurrency:
 
 # Hosted-only podman-e2e-negative-rootless-apparmor: DISABLED/NOT_RUN.
 # Its missing negative evidence is not replaced by static tests or positive LSM.
-# This immutable producer is published in central Draft PR #2601, not merged.
+# This immutable producer was merged from central PR #2601 into main.
 # Runner custody and required nested-check mapping remain activation gates.
 jobs:
   ci:
-    uses: ContextualWisdomLab/.github/.github/workflows/quarantine-sandbox-runtime-ci.yml@41c7ab5a3c19065143752d9d42f93ec72a41fcf4
+    uses: ContextualWisdomLab/.github/.github/workflows/quarantine-sandbox-runtime-ci.yml@2757ca42867b0f4fc719f8d0c3c755f5507c4e18
