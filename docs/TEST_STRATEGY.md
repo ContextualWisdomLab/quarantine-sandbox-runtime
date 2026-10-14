@@ -56,6 +56,7 @@ Required cases:
 - malformed/non-loopback/zero port mapping => fail closed and cleanup;
 - successful launch reaches a real local `TcpListener`, returns versioned lease/attestation, and explicit terminate returns cleanup receipt;
 - missing or null `EffectiveCaps`, `BoundingCaps`, and `dns_enabled` returns `MalformedIsolationInspection` at the relevant inspect operation, stops/removes the started container, removes its network, and never reaches port/readiness publication; explicit empty capability arrays and `dns_enabled=false` retain a real loopback-listener lease positive control;
+- fake Podman processes execute the immutable checked-in `tests/fixtures/fake_podman.sh` launcher. Tests write mutable scenario data only to separate `.script` and `.config` sidecars, and a supplemental writable-sidecar test proves that dynamic data does not share the executed inode;
 - readiness timeout removes resources;
 - cleanup command failure => `CleanupFailed` after all cleanup attempts.
 
